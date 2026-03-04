@@ -148,6 +148,22 @@ export default function VendorDashboard() {
   const [editingCustomer, setEditingCustomer] = useState<any>(null)
   const [editCustomerLoading, setEditCustomerLoading] = useState(false)
 
+  // Feature 1,2: Bulk upload duplicate detection + progress
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, phase: '', detail: '' })
+  const [bulkDuplicates, setBulkDuplicates] = useState<any[]>([])
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false)
+  const [duplicateAction, setDuplicateAction] = useState<'skip' | 'update'>('skip')
+
+  // Feature 3: Multi-select delete
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set())
+
+  // Feature 5: Image delete in edit modal
+  const [editProductImages, setEditProductImages] = useState<any[]>([])
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null)
+
+  // Feature 8: Vendor change request
+  const [pendingChangeRequest, setPendingChangeRequest] = useState<any>(null)
+
   useEffect(() => { fetchData(); fetchSettings() }, [])
   useEffect(() => { if (tab === 'sales') fetchSales() }, [tab, salesPeriod])
   useEffect(() => { if (tab === 'credit') fetchCreditCustomers() }, [tab])
@@ -160,6 +176,15 @@ export default function VendorDashboard() {
     if (tab === 'settings') {
       fetchSettings()
       fetchStaff()
+      // Feature 8: Check for pending change requests
+      fetch('/api/vendor/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_change_request' })
+      }).then(r => r.json()).then(j => {
+        if (j.request) setPendingChangeRequest(j.request)
+        else setPendingChangeRequest(null)
+      }).catch(() => {})
     }
   }, [tab])
 
@@ -209,8 +234,29 @@ export default function VendorDashboard() {
 
   async function updateShopInfo(fields: any) {
     try {
-      const res = await fetch('/api/vendor/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update_vendor', ...fields }) })
-      if (res.ok) { showToast('Shop info updated!'); fetchData() }
+      const res = await fetch('/api/vendor/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_vendor', ...fields })
+      })
+      const j = await res.json()
+      if (j.success) {
+        if (j.pendingApproval) {
+          showToast(j.message)
+          fetch('/api/vendor/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'get_change_request' })
+          }).then(r => r.json()).then(jr => {
+            if (jr.request) setPendingChangeRequest(jr.request)
+          }).catch(() => {})
+        } else {
+          showToast('Shop info updated!')
+        }
+        fetchData()
+      } else {
+        showToast('Error: ' + (j.error || 'Failed'))
+      }
     } catch { showToast('Error updating shop info') }
   }
 
@@ -252,6 +298,44 @@ export default function VendorDashboard() {
   }
   async function uploadImagesForProduct(productId: string, images: File[]) { for (let i = 0; i < images.length; i++) { const c = await compressImage(images[i]); const fd = new FormData(); fd.append('image', c); fd.append('productId', productId); fd.append('isPrimary', i === 0 ? 'true' : 'false'); await fetch('/api/vendor/upload', { method: 'POST', body: fd }) } }
 
+  // Feature 3: Multi-select delete
+  function toggleProductSelect(productId: string) {
+    setSelectedProducts(prev => {
+      const next = new Set(prev)
+      next.has(productId) ? next.delete(productId) : next.add(productId)
+      return next
+    })
+  }
+  function toggleSelectAll(productList: any[]) {
+    setSelectedProducts(prev => {
+      if (prev.size === productList.length) return new Set()
+      return new Set(productList.map((p: any) => p.id))
+    })
+  }
+  async function deleteSelectedProducts() {
+    if (!selectedProducts.size) return
+    if (!confirm(`Delete ${selectedProducts.size} product${selectedProducts.size > 1 ? 's' : ''}? This cannot be undone.`)) return
+    try {
+      const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulk_delete', productIds: [...selectedProducts] }) })
+      const j = await r.json()
+      if (j.success) { showToast(j.message); setSelectedProducts(new Set()); await fetchData() }
+      else showToast('Error: ' + j.error)
+    } catch { showToast('Network error') }
+  }
+
+  // Feature 5: Image delete
+  async function deleteProductImage(imageId: string) {
+    if (!confirm('Delete this image?')) return
+    setDeletingImageId(imageId)
+    try {
+      const r = await fetch('/api/vendor/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', imageId }) })
+      const j = await r.json()
+      if (j.success) { setEditProductImages(prev => prev.filter((img: any) => img.id !== imageId)); showToast('Image deleted') }
+      else showToast('Error: ' + j.error)
+    } catch { showToast('Network error') }
+    setDeletingImageId(null)
+  }
+
   // Product handlers
   async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', year:'', condition:'Good', price:'', quantity:'1', show_price:true }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files || []); setProductImages(p => [...p, ...files]); files.forEach(f => { const r = new FileReader(); r.onload = ev => setImagePreviews(p => [...p, ev.target?.result as string]); r.readAsDataURL(f) }) }
@@ -262,7 +346,90 @@ export default function VendorDashboard() {
   async function handleZipUpload(e: React.ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f || bulkData.length === 0) { showToast('Upload CSV first'); return }; setZipFile(f.name); setZipProcessing(true); try { const map = await extractZipImages(f); const idMap = new Map<string, number>(); bulkData.forEach((r, i) => idMap.set(r.partId.toLowerCase(), i)); let matched = 0, unmatched = 0, totalImages = 0; const unmatchedFolders: string[] = []; const ud = bulkData.map(r => ({ ...r, imageFiles: [] as File[], hasImage: false, imageCount: 0 })); for (const [folder, files] of map) { const idx = idMap.get(folder.toLowerCase()); if (idx !== undefined) { ud[idx].imageFiles = files; ud[idx].hasImage = true; ud[idx].imageCount = files.length; matched++; totalImages += files.length } else { unmatched++; unmatchedFolders.push(folder) } }; setBulkData(ud); setZipSummary({ matched, unmatched, unmatchedFolders, totalImages }); showToast(matched + ' matched') } catch { showToast('ZIP error') } setZipProcessing(false) }
   function updateBulkRow(i: number, k: string, v: string) { setBulkData(p => { const u = [...p]; u[i] = { ...u[i], [k]: v }; return u }) }
   function removeBulkRow(i: number) { setBulkData(p => p.filter((_, x) => x !== i)) }
-  async function handleBulkImport() { if (!bulkData.length) return; const noImg = bulkData.filter(r => !r.hasImage).length; if (noImg > 0 && !confirm(noImg + ' without images. Continue?')) return; setBulkLoading(true); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulk_create', products: bulkData.map(row => ({ sku: row.partId, name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, year: row.year, condition: row.condition, price: row.price, quantity: row.quantity, show_price: row.show_price })) }) }); const j = await r.json(); if (j.success && j.products) { let ic = 0; for (let i = 0; i < j.products.length; i++) { const row = bulkData[i]; if (row?.imageFiles?.length > 0) { await uploadImagesForProduct(j.products[i].id, row.imageFiles); ic += row.imageFiles.length } }; showToast(j.count + ' products, ' + ic + ' images!'); setBulkData([]); setBulkFile(''); setZipFile(''); setZipSummary(null); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setBulkLoading(false) }
+  async function handleBulkImport() {
+    if (!bulkData.length) return
+    const noImg = bulkData.filter(r => !r.hasImage).length
+    if (noImg > 0 && !confirm(noImg + ' without images. Continue?')) return
+
+    setBulkProgress({ current: 0, total: bulkData.length, phase: 'Checking for duplicates...', detail: '' })
+    setBulkLoading(true)
+
+    try {
+      const skus = bulkData.map(r => r.partId).filter(Boolean)
+      const checkRes = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulk_check_skus', skus }) })
+      const checkJson = await checkRes.json()
+
+      if (checkJson.duplicates && checkJson.duplicates.length > 0) {
+        setBulkDuplicates(checkJson.duplicates)
+        setShowDuplicateModal(true)
+        setBulkLoading(false)
+        setBulkProgress({ current: 0, total: 0, phase: '', detail: '' })
+        return
+      }
+
+      await executeBulkImport('skip')
+    } catch {
+      showToast('Network error')
+      setBulkLoading(false)
+      setBulkProgress({ current: 0, total: 0, phase: '', detail: '' })
+    }
+  }
+
+  async function executeBulkImport(mode: 'skip' | 'update') {
+    setShowDuplicateModal(false)
+    setBulkLoading(true)
+    const totalSteps = bulkData.length + 1
+
+    try {
+      setBulkProgress({ current: 0, total: totalSteps, phase: 'Creating products...', detail: 'Sending product data to server' })
+
+      const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        action: 'bulk_create', mode,
+        products: bulkData.map(row => ({ sku: row.partId, name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, year: row.year, condition: row.condition, price: row.price, quantity: row.quantity, show_price: row.show_price }))
+      }) })
+      const j = await r.json()
+
+      if (!j.success) { showToast('Error: ' + j.error); setBulkLoading(false); setBulkProgress({ current: 0, total: 0, phase: '', detail: '' }); return }
+
+      setBulkProgress(prev => ({ ...prev, current: 1, phase: 'Uploading images...', detail: `${j.count} products created` }))
+
+      let imageCount = 0
+      const skuToId = new Map()
+      if (j.products) j.products.forEach((p: any) => skuToId.set(p.sku, p.id))
+
+      for (let i = 0; i < bulkData.length; i++) {
+        const row = bulkData[i]
+        if (!row?.imageFiles?.length) continue
+        const productId = skuToId.get(row.partId)
+        if (!productId) continue
+
+        setBulkProgress(prev => ({
+          ...prev,
+          current: 1 + Math.round((imageCount / Math.max(bulkData.filter(r => r?.imageFiles?.length).length, 1)) * (totalSteps - 1)),
+          phase: 'Uploading images...',
+          detail: `${row.partId}: ${row.imageFiles.length} image${row.imageFiles.length > 1 ? 's' : ''}`
+        }))
+
+        await uploadImagesForProduct(productId, row.imageFiles)
+        imageCount += row.imageFiles.length
+      }
+
+      setBulkProgress({ current: totalSteps, total: totalSteps, phase: 'Complete!', detail: '' })
+
+      const summary = []
+      if (j.insertedCount) summary.push(`${j.insertedCount} new`)
+      if (j.updatedCount) summary.push(`${j.updatedCount} updated`)
+      if (j.skippedCount) summary.push(`${j.skippedCount} skipped`)
+      if (imageCount) summary.push(`${imageCount} images`)
+      showToast(summary.join(', ') + ' — Import complete!')
+
+      setBulkData([]); setBulkFile(''); setZipFile(''); setZipSummary(null); setBulkDuplicates([])
+      await fetchData(); setTab('products')
+    } catch { showToast('Import failed') }
+
+    setBulkLoading(false)
+    setTimeout(() => setBulkProgress({ current: 0, total: 0, phase: '', detail: '' }), 3000)
+  }
 
   // POS - Customer search
   async function searchCustomers(query: string) {
@@ -528,11 +695,54 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
 
         {/* PRODUCTS */}
         {tab === 'products' && (<div>
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3"><h1 className="text-2xl font-black text-slate-900">Products</h1><div className="flex gap-2"><input type="text" placeholder="Search..." value={productSearch} onChange={e => setProductSearch(e.target.value)} className="px-4 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 w-56" /><button onClick={() => setTab('add')} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">+ Add</button></div></div>
-          {editingProduct && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setEditingProduct(null)}><div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}><h3 className="text-lg font-bold mb-4">Edit Product</h3><div className="space-y-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Part ID</label><input value={editingProduct.sku || ''} onChange={e => setEditingProduct({...editingProduct, sku: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Name</label><input value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Price</label><input type="number" value={editingProduct.price || ''} onChange={e => setEditingProduct({...editingProduct, price: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Qty</label><input type="number" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="grid grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Make</label><input value={editingProduct.make || ''} onChange={e => setEditingProduct({...editingProduct, make: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model</label><input value={editingProduct.model || ''} onChange={e => setEditingProduct({...editingProduct, model: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Condition</label><select value={editingProduct.condition} onChange={e => setEditingProduct({...editingProduct, condition: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Category</label><select value={editingProduct.category} onChange={e => setEditingProduct({...editingProduct, category: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div></div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, condition: editingProduct.condition, category: editingProduct.category })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3"><h1 className="text-2xl font-black text-slate-900">Products</h1><div className="flex gap-2"><button onClick={() => setTab('add')} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">+ Add</button></div></div>
+          {/* Feature 3: Selection toolbar */}
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-3">
+              <input type="text" placeholder="Search..." value={productSearch} onChange={e => setProductSearch(e.target.value)} className="px-4 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 w-56" />
+              {selectedProducts.size > 0 && <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-full">{selectedProducts.size} selected</span>}
+            </div>
+            {selectedProducts.size > 0 && (
+              <button onClick={deleteSelectedProducts} className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5">🗑️ Delete {selectedProducts.size} Item{selectedProducts.size > 1 ? 's' : ''}</button>
+            )}
+          </div>
+          {editingProduct && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setEditingProduct(null)}><div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}><h3 className="text-lg font-bold mb-4">Edit Product</h3><div className="space-y-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Part ID</label><input value={editingProduct.sku || ''} onChange={e => setEditingProduct({...editingProduct, sku: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Name</label><input value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Price</label><input type="number" value={editingProduct.price || ''} onChange={e => setEditingProduct({...editingProduct, price: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Qty</label><input type="number" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="grid grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Make</label><input value={editingProduct.make || ''} onChange={e => setEditingProduct({...editingProduct, make: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model</label><input value={editingProduct.model || ''} onChange={e => setEditingProduct({...editingProduct, model: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Condition</label><select value={editingProduct.condition} onChange={e => setEditingProduct({...editingProduct, condition: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Category</label><select value={editingProduct.category} onChange={e => setEditingProduct({...editingProduct, category: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
+            {/* Feature 5: Existing Images with Delete */}
+            {editProductImages.length > 0 && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-2">Current Images ({editProductImages.length})</label>
+                <div className="flex gap-2 flex-wrap">
+                  {editProductImages.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)).map((img: any, idx: number) => (
+                    <div key={img.id} className="relative group w-20 h-20 rounded-lg overflow-hidden border border-slate-200">
+                      <img src={img.url} alt={`Image ${idx + 1}`} className="w-full h-full object-cover" />
+                      <button onClick={() => deleteProductImage(img.id)} disabled={deletingImageId === img.id}
+                        className="absolute inset-0 bg-black/0 group-hover:bg-black/40 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100">
+                        {deletingImageId === img.id
+                          ? <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          : <span className="bg-red-500 text-white text-xs font-bold w-7 h-7 rounded-full flex items-center justify-center shadow-lg">✕</span>}
+                      </button>
+                      {idx === 0 && <span className="absolute bottom-0.5 left-0.5 bg-orange-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">PRIMARY</span>}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">Hover and click ✕ to delete</p>
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Add More Images</label>
+              <input type="file" accept="image/*" multiple onChange={async (e) => {
+                const files = Array.from(e.target.files || [])
+                if (files.length === 0 || !editingProduct) return
+                showToast('Uploading...')
+                await uploadImagesForProduct(editingProduct.id, files)
+                await fetchData()
+                showToast('Images uploaded!')
+              }} className="w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100" />
+            </div>
+          </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, condition: editingProduct.condition, category: editingProduct.category })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
           {products.length === 0 ? <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><p className="text-4xl mb-3">📦</p><p className="text-slate-500 font-semibold">No products</p></div> : (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
-              {filteredProducts.map((p: any, i: number) => { const img = p.images?.find((x: any) => x.sort_order === 0) || p.images?.[0]; return (<tr key={p.id} className={'border-t border-slate-100 ' + (i % 2 ? 'bg-slate-50/50' : '')}><td className="px-4 py-2.5">{img ? <img src={img.url} alt="" className="w-12 h-12 rounded-lg object-cover" /> : <div className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center text-xl">🔧</div>}</td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className="px-4 py-2.5">{p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => setEditingProduct({...p})} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
+              {filteredProducts.map((p: any, i: number) => { const img = p.images?.find((x: any) => x.sort_order === 0) || p.images?.[0]; return (<tr key={p.id} className={'border-t border-slate-100 ' + (selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5">{img ? <img src={img.url} alt="" className="w-12 h-12 rounded-lg object-cover" /> : <div className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center text-xl">🔧</div>}</td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className="px-4 py-2.5">{p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
             </tbody></table></div></div>
           )}
         </div>)}
@@ -641,6 +851,59 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
             </div>
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50"><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Part ID</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Name</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Category</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Make</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Price</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Qty</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Images</th><th className="px-3 py-2"></th></tr></thead><tbody>{bulkData.map((r, i) => (<tr key={i} className={'border-t ' + (!r.hasImage ? 'bg-amber-50/50' : '')}><td className="px-3 py-2"><span className="font-mono text-xs px-2 py-0.5 rounded font-bold bg-slate-100">{r.partId}</span></td><td className="px-3 py-2"><input value={r.name} onChange={e => updateBulkRow(i,'name',e.target.value)} className="w-full px-2 py-1 border border-slate-200 rounded text-xs" /></td><td className="px-3 py-2"><select value={r.category} onChange={e => updateBulkRow(i,'category',e.target.value)} className="px-2 py-1 border border-slate-200 rounded text-xs">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></td><td className="px-3 py-2 text-xs text-slate-500">{r.make || '-'}</td><td className="px-3 py-2"><input type="number" value={r.price} onChange={e => updateBulkRow(i,'price',e.target.value)} className="w-20 px-2 py-1 border border-slate-200 rounded text-xs" /></td><td className="px-3 py-2"><input type="number" value={r.quantity} onChange={e => updateBulkRow(i,'quantity',e.target.value)} className="w-14 px-2 py-1 border border-slate-200 rounded text-xs" /></td><td className="px-3 py-2">{r.hasImage ? <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">✓ {r.imageCount}</span> : <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">No images</span>}</td><td className="px-3 py-2"><button onClick={() => removeBulkRow(i)} className="text-red-400 hover:text-red-600 text-xs font-bold">✕</button></td></tr>))}</tbody></table></div></div>
           </div>)}
+
+            {/* Feature 2: Import Progress Bar */}
+            {bulkLoading && bulkProgress.total > 0 && (
+              <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4 mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-bold text-slate-700">{bulkProgress.phase}</span>
+                  <span className="text-xs font-mono text-slate-400">{Math.round((bulkProgress.current / bulkProgress.total) * 100)}%</span>
+                </div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-500 ease-out" style={{
+                    width: `${Math.round((bulkProgress.current / bulkProgress.total) * 100)}%`,
+                    background: bulkProgress.phase === 'Complete!' ? 'linear-gradient(90deg, #06D6A0, #10B981)' : 'linear-gradient(90deg, #FF6B35, #F59E0B)'
+                  }} />
+                </div>
+                {bulkProgress.detail && <p className="text-xs text-slate-400 mt-1.5">{bulkProgress.detail}</p>}
+              </div>
+            )}
+
+            {/* Feature 1: Duplicate SKU Warning Modal */}
+            {showDuplicateModal && (
+              <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowDuplicateModal(false)}>
+                <div className="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                  <div className="bg-amber-50 border-b border-amber-200 px-5 py-4">
+                    <h3 className="font-bold text-base text-amber-800 flex items-center gap-2">⚠️ {bulkDuplicates.length} Duplicate SKU{bulkDuplicates.length > 1 ? 's' : ''} Found</h3>
+                    <p className="text-xs text-amber-600 mt-1">These Part IDs already exist in your shop. Choose how to handle them:</p>
+                  </div>
+                  <div className="px-5 py-3 max-h-48 overflow-y-auto border-b border-slate-100">
+                    {bulkDuplicates.map((d: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+                        <span className="font-mono text-xs font-bold text-slate-700">{d.sku}</span>
+                        <span className="text-xs text-slate-400 truncate ml-3">{d.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="px-5 py-4 space-y-2">
+                    <label className="flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition hover:bg-slate-50" style={{ borderColor: duplicateAction === 'skip' ? '#FF6B35' : '#E2E8F0' }} onClick={() => setDuplicateAction('skip')}>
+                      <input type="radio" name="dupAction" checked={duplicateAction === 'skip'} onChange={() => setDuplicateAction('skip')} className="mt-0.5 accent-orange-500" />
+                      <div><span className="font-bold text-sm text-slate-800">Skip Duplicates</span><p className="text-xs text-slate-400 mt-0.5">Only import new products. Existing ones stay unchanged.</p></div>
+                    </label>
+                    <label className="flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition hover:bg-slate-50" style={{ borderColor: duplicateAction === 'update' ? '#FF6B35' : '#E2E8F0' }} onClick={() => setDuplicateAction('update')}>
+                      <input type="radio" name="dupAction" checked={duplicateAction === 'update'} onChange={() => setDuplicateAction('update')} className="mt-0.5 accent-orange-500" />
+                      <div><span className="font-bold text-sm text-slate-800">Update Existing</span><p className="text-xs text-slate-400 mt-0.5">Overwrite duplicate products with the new CSV data.</p></div>
+                    </label>
+                  </div>
+                  <div className="px-5 py-3 bg-slate-50 flex gap-2 justify-end rounded-b-2xl">
+                    <button onClick={() => { setShowDuplicateModal(false); setBulkLoading(false) }} className="text-sm text-slate-500 px-4 py-2 font-semibold">Cancel</button>
+                    <button onClick={() => executeBulkImport(duplicateAction)} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-5 py-2 rounded-lg">
+                      {duplicateAction === 'skip' ? `Import ${bulkData.length - bulkDuplicates.length} New` : `Import & Update All ${bulkData.length}`}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
         </div>)}
 
         {/* POS */}
@@ -1211,6 +1474,30 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
           <h1 className="text-2xl font-black text-slate-900 mb-4">⚙️ Settings</h1>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+            {/* Feature 8: Pending Changes Banner */}
+            {pendingChangeRequest && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 lg:col-span-2">
+                <div className="flex items-start gap-2">
+                  <span className="text-lg">⏳</span>
+                  <div>
+                    <h3 className="font-bold text-sm text-amber-800">Pending Changes Awaiting Admin Approval</h3>
+                    <p className="text-xs text-amber-600 mt-1">You requested changes to: {Object.keys(pendingChangeRequest.requested_changes).join(', ')}</p>
+                    <div className="mt-2 space-y-1">
+                      {Object.entries(pendingChangeRequest.requested_changes).map(([key, value]) => (
+                        <div key={key} className="text-xs flex items-center gap-2">
+                          <span className="font-semibold text-slate-600 capitalize w-20">{key}:</span>
+                          <span className="text-slate-400 line-through">{(pendingChangeRequest.current_values as any)[key]}</span>
+                          <span className="text-orange-500">→</span>
+                          <span className="font-semibold text-slate-800">{value as string}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-amber-500 mt-2">Submitted {new Date(pendingChangeRequest.requested_at).toLocaleDateString()}</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Shop Info */}
             <div className="bg-white rounded-xl border border-slate-200 p-5">

@@ -1,3 +1,9 @@
+// ============================================================
+// FILE: src/app/api/admin/products/route.ts
+// REPLACES: the entire existing file
+// FEATURE: 3 (bulk_delete for super admin)
+// ============================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createServerSupabase } from '@/lib/supabase/server'
@@ -17,7 +23,6 @@ export async function POST(request: NextRequest) {
 
   switch (action) {
     case 'toggle': {
-      // Toggle active/inactive
       const { data: product } = await admin
         .from('products')
         .select('is_active')
@@ -45,11 +50,45 @@ export async function POST(request: NextRequest) {
     }
 
     case 'delete': {
-      // Delete images first
+      // Delete images from storage
+      const { data: images } = await admin.from('product_images').select('url').eq('product_id', productId)
+      if (images && images.length > 0) {
+        const paths = images.map((img: any) => { const m = img.url.match(/product-images\/(.+)$/); return m ? m[1] : null }).filter(Boolean)
+        if (paths.length > 0) await admin.storage.from('product-images').remove(paths)
+      }
       await admin.from('product_images').delete().eq('product_id', productId)
       const { error } = await admin.from('products').delete().eq('id', productId)
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
       return NextResponse.json({ success: true, message: 'Product deleted' })
+    }
+
+    // ─── [NEW] BULK DELETE MULTIPLE PRODUCTS ───
+    case 'bulk_delete': {
+      const { productIds } = body
+      if (!productIds || !Array.isArray(productIds) || productIds.length === 0)
+        return NextResponse.json({ error: 'No products selected' }, { status: 400 })
+
+      // Delete images from storage
+      const { data: images } = await admin
+        .from('product_images')
+        .select('url')
+        .in('product_id', productIds)
+
+      if (images && images.length > 0) {
+        const paths = images
+          .map((img: any) => { const m = img.url.match(/product-images\/(.+)$/); return m ? m[1] : null })
+          .filter(Boolean)
+        if (paths.length > 0) await admin.storage.from('product-images').remove(paths)
+      }
+
+      await admin.from('product_images').delete().in('product_id', productIds)
+      const { error } = await admin.from('products').delete().in('id', productIds)
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      return NextResponse.json({
+        success: true,
+        deletedCount: productIds.length,
+        message: `${productIds.length} product${productIds.length > 1 ? 's' : ''} deleted`
+      })
     }
 
     default:

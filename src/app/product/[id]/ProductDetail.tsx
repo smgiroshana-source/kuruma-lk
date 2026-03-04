@@ -244,7 +244,22 @@ export default function ProductDetailPage() {
               <div className="hidden md:flex gap-2 mt-4">
                 <a href={buildWhatsAppUrl()} target="_blank" className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold text-sm text-center py-3 rounded-xl transition">💬 WhatsApp Inquiry</a>
                 <a href={`tel:${vendor.phone}`} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm px-6 py-3 rounded-xl transition">📞 Call</a>
-                <a href={buildShareUrl()} target="_blank" className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm px-4 py-3 rounded-xl transition" title="Share via WhatsApp">↗️</a>
+                <button
+                  onClick={() => {
+                    if (navigator.share) {
+                      navigator.share({
+                        title: product.name,
+                        text: `Check out this part on kuruma.lk: ${product.name}`,
+                        url: window.location.href,
+                      }).catch(() => {})
+                    } else {
+                      window.open(buildShareUrl(), '_blank')
+                    }
+                  }}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm px-4 py-3 rounded-xl transition"
+                  title="Share this product">
+                  📤 Share
+                </button>
               </div>
             )}
 
@@ -327,7 +342,15 @@ export default function ProductDetailPage() {
               <p className="font-black text-orange-600 text-lg leading-tight">{formatPrice(product.price, product.show_price)}</p>
               <p className="text-[10px] text-slate-400 truncate">{product.name}</p>
             </div>
-            <a href={buildShareUrl()} target="_blank" className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-sm active:bg-slate-50 flex-shrink-0" title="Share">↗️</a>
+            <button
+              onClick={() => {
+                if (navigator.share) {
+                  navigator.share({ title: product.name, text: `Check out this part on kuruma.lk: ${product.name}`, url: window.location.href }).catch(() => {})
+                } else {
+                  window.open(buildShareUrl(), '_blank')
+                }
+              }}
+              className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-sm active:bg-slate-50 flex-shrink-0" title="Share">📤</button>
             <a href={`tel:${vendor.phone}`} className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-base active:bg-slate-50 flex-shrink-0">📞</a>
             <a href={buildWhatsAppUrl()} target="_blank" className="bg-green-500 active:bg-green-600 text-white font-bold text-sm px-5 py-2.5 rounded-xl flex-shrink-0">💬 WhatsApp</a>
           </div>

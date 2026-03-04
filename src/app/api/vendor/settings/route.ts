@@ -1,3 +1,9 @@
+// ============================================================
+// FILE: src/app/api/vendor/settings/route.ts
+// REPLACES: the entire existing file
+// FEATURE: 8 (Vendor detail changes with admin approval)
+// ============================================================
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -7,10 +13,8 @@ async function getVendor() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { vendor: null, user: null }
   const admin = createAdminClient()
-  // Check direct vendor ownership
   let { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
   if (!vendor) {
-    // Check if user is staff member
     const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
     if (staffLink?.vendor) {
       vendor = staffLink.vendor
@@ -29,13 +33,11 @@ export async function GET(req: NextRequest) {
   const action = url.searchParams.get('action')
 
   if (action === 'staff') {
-    // Owner only
     if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
     const { data: staffList } = await admin.from('vendor_staff').select('*').eq('vendor_id', vendor.id).eq('active', true).order('created_at')
     return NextResponse.json({ staff: staffList || [] })
   }
 
-  // Get vendor settings
   const { data: settings } = await admin.from('vendor_settings').select('*').eq('vendor_id', vendor.id).single()
 
   return NextResponse.json({
@@ -64,7 +66,6 @@ export async function POST(req: NextRequest) {
       const fileName = `logos/${vendor.id}/logo.${ext}`
       const buffer = Buffer.from(await file.arrayBuffer())
 
-      // Upload to Supabase storage
       const { error: uploadError } = await admin.storage.from('vendor-assets').upload(fileName, buffer, {
         contentType: file.type, upsert: true,
       })
@@ -73,7 +74,6 @@ export async function POST(req: NextRequest) {
       const { data: urlData } = admin.storage.from('vendor-assets').getPublicUrl(fileName)
       const logo_url = urlData.publicUrl
 
-      // Save to settings
       await admin.from('vendor_settings').upsert({
         vendor_id: vendor.id, logo_url, updated_at: new Date().toISOString(),
       }, { onConflict: 'vendor_id' })
@@ -107,15 +107,110 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true })
   }
 
+  // ─── [MODIFIED] UPDATE VENDOR — now with admin approval for key fields ───
   if (action === 'update_vendor') {
     if (staff) return NextResponse.json({ error: 'Only owner can edit shop info' }, { status: 403 })
-    const { name, location, address, phone, whatsapp, description } = body
-    const { error } = await admin.from('vendors').update({
-      name, location, address, phone, whatsapp, description,
-    }).eq('id', vendor.id)
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ success: true })
+    const { name, location, address, phone, whatsapp, description } = body
+
+    // Fields that require admin approval before they take effect
+    const APPROVAL_FIELDS = ['name', 'phone', 'whatsapp', 'location']
+
+    // Get current vendor data for comparison
+    const { data: currentVendor } = await admin.from('vendors').select('*').eq('id', vendor.id).single()
+    if (!currentVendor) return NextResponse.json({ error: 'Vendor not found' }, { status: 404 })
+
+    const requestedChanges: Record<string, any> = {}
+    const autoChanges: Record<string, any> = {}
+    const currentValues: Record<string, any> = {}
+
+    const allChanges: Record<string, any> = { name, location, address, phone, whatsapp, description }
+
+    for (const [key, value] of Object.entries(allChanges)) {
+      if (value === undefined) continue
+      const current = (currentVendor as any)[key]
+      if (value === current) continue // No actual change
+
+      if (APPROVAL_FIELDS.includes(key)) {
+        requestedChanges[key] = value
+        currentValues[key] = current
+      } else {
+        autoChanges[key] = value
+      }
+    }
+
+    // Apply auto-approved changes immediately (address, description)
+    if (Object.keys(autoChanges).length > 0) {
+      const { error } = await admin.from('vendors').update(autoChanges).eq('id', vendor.id)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    // Create change request for approval-required fields
+    let changeRequestId = null
+    if (Object.keys(requestedChanges).length > 0) {
+      // Check for existing pending request
+      const { data: existing } = await admin
+        .from('vendor_change_requests')
+        .select('id')
+        .eq('vendor_id', vendor.id)
+        .eq('status', 'pending')
+        .single()
+
+      if (existing) {
+        // Update existing pending request
+        const { error } = await admin
+          .from('vendor_change_requests')
+          .update({
+            requested_changes: requestedChanges,
+            current_values: currentValues,
+            requested_at: new Date().toISOString(),
+          })
+          .eq('id', existing.id)
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        changeRequestId = existing.id
+      } else {
+        // Create new request
+        const { data: req, error } = await admin
+          .from('vendor_change_requests')
+          .insert({
+            vendor_id: vendor.id,
+            requested_changes: requestedChanges,
+            current_values: currentValues,
+          })
+          .select()
+          .single()
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        changeRequestId = req?.id
+      }
+    }
+
+    const messages = []
+    if (Object.keys(autoChanges).length > 0) messages.push('Address/description updated')
+    if (Object.keys(requestedChanges).length > 0) {
+      messages.push(`Changes to ${Object.keys(requestedChanges).join(', ')} sent for admin approval`)
+    }
+    if (messages.length === 0) messages.push('No changes detected')
+
+    return NextResponse.json({
+      success: true,
+      pendingApproval: Object.keys(requestedChanges).length > 0,
+      changeRequestId,
+      message: messages.join('. '),
+    })
+  }
+
+  // ─── [NEW] GET PENDING CHANGE REQUEST ───
+  if (action === 'get_change_request') {
+    const { data: request } = await admin
+      .from('vendor_change_requests')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .eq('status', 'pending')
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    return NextResponse.json({ success: true, request: request || null })
   }
 
   if (action === 'change_password') {
@@ -129,12 +224,10 @@ export async function POST(req: NextRequest) {
     if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
     const { email, name, role, pin } = body
 
-    // Check if user exists in auth
     const { data: existingUsers } = await admin.auth.admin.listUsers()
     let staffUser = existingUsers?.users?.find((u: any) => u.email === email)
 
     if (!staffUser) {
-      // Create auth user with temp password
       const tempPassword = 'Staff' + Math.random().toString(36).slice(2, 10) + '!'
       const { data: newUser, error: createError } = await admin.auth.admin.createUser({
         email,
@@ -147,7 +240,6 @@ export async function POST(req: NextRequest) {
 
     if (!staffUser) return NextResponse.json({ error: 'Could not find/create user' }, { status: 400 })
 
-    // Check not already staff
     const { data: existing } = await admin.from('vendor_staff').select('id').eq('vendor_id', vendor.id).eq('user_id', staffUser.id).eq('active', true).single()
     if (existing) return NextResponse.json({ error: 'Already a staff member' }, { status: 400 })
 
