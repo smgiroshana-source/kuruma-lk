@@ -116,9 +116,45 @@ export default function HomePage() {
   }
 
   function buildWhatsAppUrl(vendor: Vendor, items: Product[]) {
-    const lines = items.map((p) => `- ${p.sku} - ${p.name}`).join('%0A')
-    const msg = `Hi ${vendor.name},%0AI'm interested in these parts:%0A${lines}%0A%0APlease let me know availability and pricing.`
+    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'
+    const lines = items.map((p: any) => {
+      const price = p.show_price && p.price ? `Rs.${Number(p.price).toLocaleString()}` : 'Ask price'
+      return `🔧 ${p.sku} — ${p.name} (${price})\n   ${siteUrl}/product/${p.id}`
+    }).join('\n\n')
+    const msg = encodeURIComponent(
+      `Hi ${vendor.name},\n\n` +
+      `I found these parts on kuruma.lk and I'm interested:\n\n` +
+      `${lines}\n\n` +
+      `Please confirm availability and best prices. Thank you!`
+    )
     return `https://wa.me/${vendor.whatsapp}?text=${msg}`
+  }
+
+  function buildVendorWhatsAppUrl(vendor: Vendor) {
+    const msg = encodeURIComponent(
+      `Hi ${vendor.name},\n\n` +
+      `I'm browsing your shop on kuruma.lk.\n` +
+      `I'd like to check availability of some parts. Are you available?`
+    )
+    return `https://wa.me/${vendor.whatsapp}?text=${msg}`
+  }
+
+  function buildProductInquiryUrl(product: any) {
+    if (!product.vendor) return '#'
+    const price = product.show_price && product.price ? `Rs.${Number(product.price).toLocaleString()}` : 'price not listed'
+    const vehicle = [product.make, product.model, product.year].filter(Boolean).join(' ')
+    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'
+    const msg = encodeURIComponent(
+      `Hi ${product.vendor.name},\n\n` +
+      `I'm interested in this part from kuruma.lk:\n` +
+      `🔧 *${product.name}*\n` +
+      `📋 ${product.sku}\n` +
+      (vehicle ? `🚗 ${vehicle}\n` : '') +
+      `💰 Listed: ${price}\n` +
+      `🔗 ${siteUrl}/product/${product.id}\n\n` +
+      `Is this available?`
+    )
+    return `https://wa.me/${product.vendor.whatsapp}?text=${msg}`
   }
 
   return (
@@ -146,7 +182,7 @@ export default function HomePage() {
               </div>
               <div className="flex gap-1.5 flex-shrink-0">
                 <a href={`tel:${selectedVendorObj!.phone}`} className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-base active:bg-slate-50">📞</a>
-                <a href={`https://wa.me/${selectedVendorObj!.whatsapp}`} target="_blank" className="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base active:bg-green-600">💬</a>
+                <a href={buildVendorWhatsAppUrl(selectedVendorObj!)} target="_blank" className="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base active:bg-green-600">💬</a>
               </div>
             </div>
           ) : (
@@ -315,9 +351,17 @@ export default function HomePage() {
                             </button>
                           )}
 
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${CATEGORY_COLORS[product.category] || 'bg-slate-100 text-slate-600'}`}>{product.category}</span>
-                            <span className="text-[10px] text-slate-300">{product.quantity} in stock</span>
+                          <div className="flex items-center justify-between mt-1.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold flex-shrink-0 ${CATEGORY_COLORS[product.category] || 'bg-slate-100 text-slate-600'}`}>{product.category}</span>
+                              <span className="text-[10px] text-slate-300 truncate">{product.quantity} in stock</span>
+                            </div>
+                            {product.vendor?.whatsapp && (
+                              <a href={buildProductInquiryUrl(product)} target="_blank" onClick={(e) => e.stopPropagation()}
+                                className="w-7 h-7 rounded-full bg-green-500 flex items-center justify-center text-[11px] active:bg-green-600 flex-shrink-0 -mr-0.5" title="Ask on WhatsApp">
+                                💬
+                              </a>
+                            )}
                           </div>
                         </div>
                       </a>
@@ -375,7 +419,7 @@ export default function HomePage() {
                     {/* Contact bar — separate from main tap */}
                     <div className="flex border-t border-slate-100">
                       <a href={`tel:${vendor.phone}`} className="flex-1 text-center text-xs font-semibold text-slate-500 py-2.5 active:bg-slate-50 border-r border-slate-100">📞 Call</a>
-                      <a href={`https://wa.me/${vendor.whatsapp}`} target="_blank" className="flex-1 text-center text-xs font-semibold text-green-600 py-2.5 active:bg-green-50 border-r border-slate-100">💬 WhatsApp</a>
+                      <a href={buildVendorWhatsAppUrl(vendor)} target="_blank" className="flex-1 text-center text-xs font-semibold text-green-600 py-2.5 active:bg-green-50 border-r border-slate-100">💬 WhatsApp</a>
                       <button onClick={() => selectVendor(vendor.id)} className="flex-1 text-center text-xs font-bold text-orange-500 py-2.5 active:bg-orange-50">View parts →</button>
                     </div>
                   </div>
@@ -408,6 +452,19 @@ export default function HomePage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* WhatsApp Help CTA */}
+      {!selectedItems.size && (
+        <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-4 py-6 text-center">
+          <p className="font-black text-lg mb-1">Can&apos;t find a part?</p>
+          <p className="text-sm text-green-100 mb-3">Send us what you need — we&apos;ll find it from our network of dealers</p>
+          <a href={`https://wa.me/${typeof window !== 'undefined' ? '94XXXXXXXXX' : '94XXXXXXXXX'}?text=${encodeURIComponent('Hi kuruma.lk,\n\nI\'m looking for a part:\n\n🚗 Vehicle: \n🔧 Part needed: \n\nCan you help me find it?')}`}
+            target="_blank"
+            className="inline-block bg-white text-green-600 font-bold text-sm px-6 py-3 rounded-xl active:bg-green-50 shadow-lg">
+            💬 WhatsApp Us Your Requirement
+          </a>
         </div>
       )}
 

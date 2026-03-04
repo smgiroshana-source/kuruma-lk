@@ -1,0 +1,24 @@
+import { NextResponse } from 'next/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+
+export async function GET() {
+  const admin = createAdminClient()
+
+  const { data: products } = await admin
+    .from('products')
+    .select('*, vendor:vendors(id, name, slug, location, phone, whatsapp), images:product_images(id, url, sort_order)')
+    .eq('is_active', true)
+    .gt('quantity', 0)
+    .order('created_at', { ascending: false })
+
+  const { data: vendors } = await admin
+    .from('vendors')
+    .select('*')
+    .eq('status', 'approved')
+    .order('name')
+
+  return NextResponse.json({
+    products: products || [],
+    vendors: vendors || [],
+  })
+}

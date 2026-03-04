@@ -1,0 +1,12 @@
+<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f97316;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <text x="600" y="260" text-anchor="middle" font-family="Arial,sans-serif" font-weight="900" font-size="96" fill="white">kuruma.lk</text>
+  <text x="600" y="340" text-anchor="middle" font-family="Arial,sans-serif" font-weight="600" font-size="36" fill="rgba(255,255,255,0.8)">Auto Parts Marketplace</text>
+  <text x="600" y="400" text-anchor="middle" font-family="Arial,sans-serif" font-weight="400" font-size="28" fill="rgba(255,255,255,0.6)">Find parts from trusted dealers across Sri Lanka</text>
+</svg>
