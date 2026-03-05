@@ -10,27 +10,9 @@ const CATEGORIES = [
   'Wheels & Tires', 'Lighting', 'AC & Heating', 'Other'
 ]
 
-const CATEGORY_COLORS: Record<string, string> = {
-  'Engine Parts': 'bg-red-100 text-red-700',
-  'Transmission': 'bg-purple-100 text-purple-700',
-  'Brakes': 'bg-orange-100 text-orange-700',
-  'Suspension': 'bg-blue-100 text-blue-700',
-  'Electrical': 'bg-yellow-100 text-yellow-700',
-  'Body Parts': 'bg-emerald-100 text-emerald-700',
-  'Interior': 'bg-pink-100 text-pink-700',
-  'Exhaust': 'bg-gray-100 text-gray-700',
-  'Cooling System': 'bg-cyan-100 text-cyan-700',
-  'Fuel System': 'bg-amber-100 text-amber-700',
-  'Steering': 'bg-indigo-100 text-indigo-700',
-  'Wheels & Tires': 'bg-stone-100 text-stone-700',
-  'Lighting': 'bg-lime-100 text-lime-700',
-  'AC & Heating': 'bg-sky-100 text-sky-700',
-  'Other': 'bg-slate-100 text-slate-700',
-}
-
 function formatPrice(price: number | null, showPrice: boolean) {
   if (!showPrice || price === null) return 'Ask Price'
-  return 'Rs.' + price.toLocaleString()
+  return 'Rs. ' + price.toLocaleString()
 }
 
 function getProductImage(product: any): string | null {
@@ -50,7 +32,6 @@ export default function HomePage() {
   const [selectedVendor, setSelectedVendor] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
-  // Feature 4: Filtering & sorting
   const [sortBy, setSortBy] = useState<string>('newest')
   const [conditionFilter, setConditionFilter] = useState<string>('All')
   const [makeFilter, setMakeFilter] = useState<string>('All')
@@ -75,7 +56,6 @@ export default function HomePage() {
     fetchData()
   }, [])
 
-  // Feature 4: Computed filter values
   const uniqueMakes = ['All', ...Array.from(new Set(products.map(p => p.make).filter(Boolean))).sort()] as string[]
   const uniqueConditions = ['All', 'Excellent', 'Good', 'Fair', 'Salvage']
 
@@ -163,274 +143,287 @@ export default function HomePage() {
   function buildWhatsAppUrl(vendor: Vendor, items: Product[]) {
     const lines = items.map((p) => `- ${p.sku} - ${p.name}`).join('%0A')
     const msg = `Hi ${vendor.name},%0AI'm interested in these parts:%0A${lines}%0A%0APlease let me know availability and pricing.`
-    return `https://wa.me/${vendor.whatsapp}?text=${msg}`
+    return `https://wa.me/${(vendor.whatsapp || '').replace(/[^0-9]/g, '')}?text=${msg}`
+  }
+
+  function clearAllFilters() {
+    setSearch(''); setSelectedCategory('All'); setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0], priceRange[1]]); setSortBy('newest')
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#f5f5f5]">
 
-      {/* ─── HEADER ─── */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4">
+      {/* ═══ HEADER ═══ */}
+      <header className="bg-white sticky top-0 z-50 shadow-[0_1px_3px_rgba(0,0,0,0.06)] border-b border-[#f0f0f0]">
+        <div className="max-w-7xl mx-auto px-3 sm:px-5">
 
           {isVendorView ? (
-            /* ── Vendor-filtered header: back + vendor info ── */
-            <div className="flex items-center gap-2.5 py-2.5">
-              <button onClick={clearVendor} className="flex items-center gap-1 text-sm font-semibold text-slate-500 active:text-slate-700 py-1 -ml-1 flex-shrink-0">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-                <span className="hidden sm:inline">All Shops</span>
+            <div className="flex items-center gap-3 py-2.5">
+              <button onClick={clearVendor} className="flex items-center gap-1 text-sm font-semibold text-[#666] active:text-[#333] py-1 -ml-1 flex-shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 18l-6-6 6-6" /></svg>
+                Back
               </button>
-              <div className="flex items-center gap-2 flex-1 min-w-0">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-white font-black text-sm flex-shrink-0">
+              <div className="w-px h-6 bg-[#eee]" />
+              <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                <div className="w-9 h-9 rounded-[10px] flex items-center justify-center text-white font-black text-sm flex-shrink-0 shadow-[0_2px_8px_rgba(255,107,53,0.3)]" style={{ background: 'linear-gradient(135deg, #ff6b35, #ff8f65)' }}>
                   {selectedVendorObj!.name.charAt(0)}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h2 className="font-bold text-sm text-slate-900 truncate">{selectedVendorObj!.name}</h2>
-                  <p className="text-[11px] text-slate-400 truncate">{selectedVendorObj!.location} · {filteredProducts.length} parts</p>
+                  <h2 className="font-bold text-[15px] text-[#111] truncate">{selectedVendorObj!.name}</h2>
+                  <p className="text-xs text-[#999] truncate">{selectedVendorObj!.location} · {filteredProducts.length} parts</p>
                 </div>
               </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                <a href={`tel:${selectedVendorObj!.phone}`} className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-base active:bg-slate-50">📞</a>
-                <a href={`https://wa.me/${selectedVendorObj!.whatsapp}`} target="_blank" className="w-10 h-10 rounded-full bg-green-500 flex items-center justify-center text-base active:bg-green-600">💬</a>
+              <div className="flex gap-2 flex-shrink-0">
+                <a href={`tel:${selectedVendorObj!.phone}`} className="w-9 h-9 rounded-[10px] bg-[#f7f7f7] border border-[#eee] flex items-center justify-center text-sm active:bg-[#eee]">📞</a>
+                <a href={`https://wa.me/${(selectedVendorObj!.whatsapp || '').replace(/[^0-9]/g, '')}`} target="_blank" className="w-9 h-9 rounded-[10px] bg-[#25d366] flex items-center justify-center text-sm active:bg-[#1fb855]">💬</a>
               </div>
             </div>
           ) : (
-            /* ── Normal header ── */
             <>
               <div className="flex items-center justify-between py-2.5">
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl sm:text-2xl font-black text-orange-500">kuruma.lk</h1>
-                  <span className="text-[10px] text-slate-400 hidden sm:inline">Auto Parts Marketplace</span>
+                <div className="flex items-center gap-0.5">
+                  <span className="text-2xl font-black tracking-tight text-[#ff6b35]">kuruma</span>
+                  <span className="text-2xl font-black tracking-tight text-[#222]">.lk</span>
                 </div>
-                {/* Mobile: compact icons. Desktop: full buttons */}
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                  <a href="/login" className="sm:hidden w-9 h-9 rounded-full border border-slate-200 flex items-center justify-center text-sm active:bg-slate-50">🏪</a>
-                  <a href="/register" className="sm:hidden w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-sm active:bg-orange-600">🚀</a>
-                  <a href="/login" className="hidden sm:flex text-sm font-semibold text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 items-center gap-1.5">🏪 Vendor Portal</a>
-                  <a href="/register" className="hidden sm:flex text-sm font-bold bg-orange-500 text-white px-4 py-1.5 rounded-lg items-center gap-1.5 hover:bg-orange-600">🚀 Start Selling</a>
+                <div className="flex gap-2 items-center">
+                  <a href="/login" className="sm:hidden text-xs font-semibold px-3 py-2 rounded-[10px] bg-white text-[#555] border-[1.5px] border-[#e5e5e5] active:bg-[#f5f5f5]">Login</a>
+                  <a href="/login" className="hidden sm:flex text-xs font-semibold px-3.5 py-2 rounded-[10px] bg-white text-[#555] border-[1.5px] border-[#e5e5e5] items-center active:bg-[#f5f5f5]">Vendor Login</a>
+                  <a href="/register" className="text-xs font-bold px-4 py-2 rounded-[10px] text-white flex items-center gap-1 shadow-[0_2px_8px_rgba(255,107,53,0.3)]" style={{ background: 'linear-gradient(135deg, #ff6b35, #ff8f65)' }}>
+                    <span className="hidden sm:inline">Start Selling</span>
+                    <span className="sm:hidden">Sell</span>
+                  </a>
                 </div>
               </div>
 
-              {/* Search with clear button */}
-              <div className="relative pb-2">
+              <div className="relative pb-2.5">
+                <svg className="absolute left-3.5 top-[13px] text-[#bbb]" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
                 <input
                   ref={searchRef} type="text"
                   placeholder="Search parts, vehicles, shops..."
                   value={search} onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-4 pr-10 py-2.5 rounded-xl border-2 border-slate-200 text-sm outline-none focus:border-orange-400 transition bg-slate-50 focus:bg-white"
+                  className="w-full pl-11 pr-10 py-[11px] rounded-[14px] text-sm outline-none bg-[#f7f7f7] text-[#333] transition-all duration-200 border-2 border-transparent focus:bg-white focus:border-[#ff6b35] focus:shadow-[0_0_0_4px_rgba(255,107,53,0.08)]"
                 />
                 {search && (
                   <button onClick={() => { setSearch(''); searchRef.current?.focus() }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 active:text-slate-600 rounded-full">
-                    ✕
-                  </button>
+                    className="absolute right-3 top-[11px] w-[22px] h-[22px] bg-[#eee] rounded-full flex items-center justify-center text-[11px] text-[#888] active:bg-[#ddd]">✕</button>
                 )}
               </div>
 
-              {/* Two clean tabs only — no dynamic 3rd tab */}
-              <div className="flex border-t border-slate-100">
-                <button onClick={() => { setActiveTab('products'); setSelectedVendor(null) }}
-                  className={`flex-1 py-2.5 text-center text-sm font-bold border-b-2 transition ${activeTab === 'products' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 active:text-slate-600'}`}>
-                  Products
-                </button>
-                <button onClick={() => { setActiveTab('shops'); setSelectedVendor(null) }}
-                  className={`flex-1 py-2.5 text-center text-sm font-bold border-b-2 transition ${activeTab === 'shops' ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 active:text-slate-600'}`}>
-                  Shops ({vendors.length})
-                </button>
+              <div className="flex">
+                {[
+                  { key: 'products' as const, label: 'Products' },
+                  { key: 'shops' as const, label: `Shops (${vendors.length})` },
+                ].map(t => (
+                  <button key={t.key}
+                    onClick={() => { setActiveTab(t.key); setSelectedVendor(null) }}
+                    className={`flex-1 py-3 text-center text-[13px] font-bold transition-colors border-b-[2.5px] ${activeTab === t.key ? 'border-[#ff6b35] text-[#ff6b35]' : 'border-transparent text-[#aaa] active:text-[#666]'
+                      }`}>
+                    {t.label}
+                  </button>
+                ))}
               </div>
             </>
           )}
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+      <main className="max-w-7xl mx-auto px-3 sm:px-5 py-4">
 
-        {/* ─── PRODUCTS VIEW (also used for vendor-filtered) ─── */}
         {(activeTab === 'products' || isVendorView) && (
           <div>
-            {/* Vendor description */}
             {isVendorView && selectedVendorObj!.description && (
-              <p className="text-xs text-slate-500 bg-white rounded-lg border border-slate-100 px-3 py-2.5 mb-3 line-clamp-2">{selectedVendorObj!.description}</p>
+              <p className="text-[13px] bg-white rounded-[14px] px-4 py-3 mb-3.5 text-[#777] border border-[#eee] leading-relaxed">{selectedVendorObj!.description}</p>
             )}
 
-            {/* In-vendor search */}
             {isVendorView && (
               <div className="relative mb-3">
+                <svg className="absolute left-3 top-[11px] text-[#bbb]" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
                 <input type="text" placeholder={`Search in ${selectedVendorObj!.name}...`} value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-4 pr-10 py-2.5 rounded-xl border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white" />
-                {search && <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400">✕</button>}
+                  className="w-full pl-9 pr-10 py-2.5 rounded-[14px] text-sm outline-none bg-white border-[1.5px] border-[#e8e8e8] focus:border-[#ff6b35]" />
+                {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#aaa]">✕</button>}
               </div>
             )}
 
-            {/* Category pills with fade scroll hint */}
+            {/* Category pills */}
             <div className="relative mb-3">
-              <div className="flex gap-2 overflow-x-auto pb-2" style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              <div className="flex gap-2 overflow-x-auto pb-1.5" style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {CATEGORIES.map((cat) => (
                   <button key={cat} onClick={() => setSelectedCategory(cat)}
-                    className={`whitespace-nowrap px-3.5 py-2 rounded-full text-xs font-bold transition flex-shrink-0 ${selectedCategory === cat ? 'bg-orange-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 active:border-orange-300 active:bg-orange-50'}`}>
+                    className={`whitespace-nowrap px-4 py-[9px] rounded-full text-xs font-semibold transition-all duration-200 flex-shrink-0 ${selectedCategory === cat
+                      ? 'bg-[#ff6b35] text-white shadow-[0_4px_12px_rgba(255,107,53,0.3)]'
+                      : 'bg-white text-[#777] border-[1.5px] border-[#e8e8e8] active:border-[#ff6b35] active:bg-[#fff5f0]'
+                      }`}>
                     {cat}
                   </button>
                 ))}
               </div>
-              <div className="absolute right-0 top-0 bottom-2 w-8 bg-gradient-to-l from-slate-50 to-transparent pointer-events-none" />
+              <div className="absolute right-0 top-0 bottom-1.5 w-12 bg-gradient-to-l from-[#f5f5f5] to-transparent pointer-events-none" />
             </div>
 
-            {/* Feature 4: Sort & Filter Bar */}
-            <div className="flex items-center gap-2 mb-3">
-              <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-                className="text-xs font-semibold bg-white border border-slate-200 rounded-lg px-2.5 py-2 outline-none focus:border-orange-400 text-slate-600 appearance-none pr-7"
-                style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}>
-                <option value="newest">Newest First</option>
-                <option value="price-low">Price: Low → High</option>
-                <option value="price-high">Price: High → Low</option>
-                <option value="name-az">Name: A → Z</option>
-                <option value="name-za">Name: Z → A</option>
-              </select>
+            {/* Controls */}
+            <div className="flex items-center gap-2 mb-3.5 flex-wrap">
+              <div className="relative">
+                <select value={sortBy} onChange={e => setSortBy(e.target.value)}
+                  className="text-xs font-semibold bg-white rounded-[10px] pl-3 pr-8 py-[9px] border-[1.5px] border-[#e8e8e8] text-[#555] outline-none appearance-none cursor-pointer">
+                  <option value="newest">Newest First</option>
+                  <option value="price-low">Price: Low to High</option>
+                  <option value="price-high">Price: High to Low</option>
+                  <option value="name-az">Name: A → Z</option>
+                  <option value="name-za">Name: Z → A</option>
+                </select>
+                <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[#999]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+              </div>
+
               <button onClick={() => setShowFilters(!showFilters)}
-                className={`text-xs font-bold px-3 py-2 rounded-lg border transition flex items-center gap-1.5 ${
-                  showFilters || activeFilterCount > 0 ? 'bg-orange-50 border-orange-300 text-orange-600' : 'bg-white border-slate-200 text-slate-500 active:border-orange-300'
-                }`}>
-                🔍 Filters
-                {activeFilterCount > 0 && <span className="bg-orange-500 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center">{activeFilterCount}</span>}
+                className={`text-xs font-semibold px-3.5 py-[9px] rounded-[10px] flex items-center gap-1.5 transition-all duration-200 ${showFilters || activeFilterCount > 0
+                  ? 'bg-[#fff5f0] border-[1.5px] border-[#ff6b35] text-[#ff6b35]'
+                  : 'bg-white border-[1.5px] border-[#e8e8e8] text-[#777] active:border-[#ff6b35]'
+                  }`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="20" y2="12" /><line x1="12" y1="18" x2="20" y2="18" /></svg>
+                Filters
+                {activeFilterCount > 0 && <span className="bg-[#ff6b35] text-white text-[9px] font-black w-[18px] h-[18px] rounded-full flex items-center justify-center">{activeFilterCount}</span>}
               </button>
+
               {activeFilterCount > 0 && (
                 <button onClick={() => { setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0], priceRange[1]]) }}
-                  className="text-[11px] text-orange-500 font-semibold active:text-orange-700">Clear filters</button>
+                  className="text-xs font-semibold text-[#ff6b35] underline underline-offset-2">Clear all</button>
               )}
+              <div className="flex-1" />
+              {!loading && <span className="text-xs text-[#bbb] font-medium">{filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''}</span>}
             </div>
 
-            {/* Expandable Filter Panel */}
+            {/* Filter Panel */}
             {showFilters && (
-              <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3 space-y-3">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Condition</label>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {uniqueConditions.map(cond => (
-                      <button key={cond} onClick={() => setConditionFilter(cond)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold transition ${
-                          conditionFilter === cond ? 'bg-orange-500 text-white' : 'bg-slate-50 text-slate-500 border border-slate-200 active:bg-orange-50'
-                        }`}>{cond}</button>
-                    ))}
+              <div className="bg-white rounded-2xl p-4 sm:p-5 mb-4 border border-[#eee] shadow-[0_4px_24px_rgba(0,0,0,0.04)]">
+                <div className="flex flex-col sm:flex-row gap-5">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold uppercase tracking-[1.2px] text-[#bbb] mb-2.5 block">Condition</label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {uniqueConditions.map(cond => (
+                        <button key={cond} onClick={() => setConditionFilter(cond)}
+                          className={`px-3.5 py-[7px] rounded-lg text-xs font-semibold transition-all duration-150 ${conditionFilter === cond
+                            ? 'bg-[#ff6b35] text-white shadow-[0_2px_8px_rgba(255,107,53,0.25)]'
+                            : 'bg-[#f5f5f5] text-[#888] active:bg-[#eee]'
+                            }`}>{cond}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-bold uppercase tracking-[1.2px] text-[#bbb] mb-2.5 block">Vehicle Make</label>
+                    <div className="relative">
+                      <select value={makeFilter} onChange={e => setMakeFilter(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-[10px] text-sm font-semibold border-[1.5px] border-[#eee] text-[#555] outline-none bg-[#fafafa] appearance-none cursor-pointer">
+                        {uniqueMakes.map(make => <option key={make} value={make}>{make}</option>)}
+                      </select>
+                      <svg className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[#999]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6" /></svg>
+                    </div>
                   </div>
                 </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Vehicle Make</label>
-                  <select value={makeFilter} onChange={e => setMakeFilter(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400">
-                    {uniqueMakes.map(make => <option key={make} value={make}>{make}</option>)}
-                  </select>
-                </div>
                 {priceRange[1] > 0 && (
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">
-                      Price Range: Rs.{priceFilter[0].toLocaleString()} – Rs.{priceFilter[1].toLocaleString()}
+                  <div className="mt-4 pt-4 border-t border-[#f0f0f0]">
+                    <label className="text-[10px] font-bold uppercase tracking-[1.2px] text-[#bbb] mb-2.5 block">
+                      Price: <span className="text-[#ff6b35]">Rs.{priceFilter[0].toLocaleString()}</span> – <span className="text-[#ff6b35]">Rs.{priceFilter[1].toLocaleString()}</span>
                     </label>
                     <div className="flex items-center gap-3">
                       <input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[0]}
                         onChange={e => { const val = parseInt(e.target.value); setPriceFilter([Math.min(val, priceFilter[1] - 100), priceFilter[1]]) }}
-                        className="flex-1 accent-orange-500 h-2" />
+                        className="flex-1 h-1.5 accent-[#ff6b35]" />
                       <input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[1]}
                         onChange={e => { const val = parseInt(e.target.value); setPriceFilter([priceFilter[0], Math.max(val, priceFilter[0] + 100)]) }}
-                        className="flex-1 accent-orange-500 h-2" />
-                    </div>
-                    <div className="flex justify-between text-[10px] text-slate-400 mt-1">
-                      <span>Rs.{priceRange[0].toLocaleString()}</span>
-                      <span>Rs.{priceRange[1].toLocaleString()}</span>
+                        className="flex-1 h-1.5 accent-[#ff6b35]" />
                     </div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* Results count + clear filters */}
-            {!loading && (
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-slate-400 font-semibold">{filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''}{selectedCategory !== 'All' ? ` in ${selectedCategory}` : ''}</p>
-                {(search || selectedCategory !== 'All' || activeFilterCount > 0) && (
-                  <button onClick={() => { setSearch(''); setSelectedCategory('All'); setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0], priceRange[1]]); setSortBy('newest') }} className="text-xs text-orange-500 font-semibold active:text-orange-700">Clear all</button>
-                )}
-              </div>
-            )}
-
-            {/* Product grid */}
+            {/* Product Grid */}
             {loading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {[...Array(8)].map((_, i) => (
-                  <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden animate-pulse">
-                    <div className="aspect-square bg-slate-100" />
-                    <div className="p-2.5 space-y-2"><div className="h-3 bg-slate-100 rounded w-1/2" /><div className="h-3.5 bg-slate-100 rounded" /><div className="h-3 bg-slate-100 rounded w-2/3" /></div>
+                  <div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]">
+                    <div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse" />
+                    <div className="p-3 space-y-2.5">
+                      <div className="flex gap-1.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse" /><div className="h-5 w-12 bg-[#f0f0f0] rounded-md animate-pulse" /></div>
+                      <div className="h-4 bg-[#f0f0f0] rounded animate-pulse" />
+                      <div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3" />
+                      <div className="h-5 bg-[#f0f0f0] rounded animate-pulse w-1/2 mt-1" />
+                    </div>
                   </div>
                 ))}
               </div>
             ) : filteredProducts.length === 0 ? (
               <div className="text-center py-20">
-                <p className="text-5xl mb-3 opacity-80">🔍</p>
-                <p className="text-slate-500 font-bold text-base">No parts found</p>
-                <p className="text-slate-400 text-sm mt-1">Try a different search or category</p>
-                {isVendorView && <button onClick={clearVendor} className="mt-4 text-sm font-bold text-orange-500 active:text-orange-700 underline">Browse all shops</button>}
+                <div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🔍</div>
+                <p className="font-bold text-[17px] text-[#333]">No parts found</p>
+                <p className="text-sm text-[#aaa] mt-1.5">Try adjusting your search or filters</p>
+                {(search || selectedCategory !== 'All' || activeFilterCount > 0) && (
+                  <button onClick={clearAllFilters} className="mt-5 text-sm font-bold px-6 py-2.5 rounded-xl text-white shadow-[0_4px_12px_rgba(255,107,53,0.25)]" style={{ background: 'linear-gradient(135deg, #ff6b35, #ff8f65)' }}>Clear all filters</button>
+                )}
+                {isVendorView && <button onClick={clearVendor} className="mt-3 block mx-auto text-sm font-bold text-[#ff6b35] underline">Browse all shops</button>}
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                 {filteredProducts.map((product) => {
                   const imageUrl = getProductImage(product)
                   const imageCount = product.images?.length || 0
                   const isSelected = selectedItems.has(product.id)
 
                   return (
-                    <div key={product.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden active:shadow-md transition group relative">
+                    <div key={product.id}
+                      className="bg-white rounded-2xl overflow-hidden relative group transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)]"
+                      style={{ border: isSelected ? '2px solid #ff6b35' : '1px solid #eee' }}>
 
-                      {/* Select: 44px min touch target */}
                       <button
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSelect(product.id) }}
-                        className={`absolute top-1.5 right-1.5 z-10 w-8 h-8 rounded-full border-2 flex items-center justify-center text-xs font-bold transition ${
-                          isSelected ? 'bg-orange-500 border-orange-500 text-white scale-110' : 'bg-white/90 border-slate-300/70 text-transparent backdrop-blur-sm'
-                        }`}>✓</button>
+                        className={`absolute top-2.5 right-2.5 z-10 w-[30px] h-[30px] rounded-lg flex items-center justify-center text-xs font-bold transition-all duration-200 ${isSelected
+                          ? 'bg-[#ff6b35] text-white shadow-[0_2px_12px_rgba(255,107,53,0.4)] scale-105'
+                          : 'bg-white/95 backdrop-blur-sm text-transparent group-hover:text-[#ccc] border-[1.5px] border-black/10 shadow-[0_1px_4px_rgba(0,0,0,0.08)]'
+                          }`}>✓</button>
 
                       <a href={`/product/${product.id}`} className="block">
-                        {/* Square on mobile, 4:3 on desktop */}
-                        <div className="aspect-square sm:aspect-[4/3] bg-gradient-to-br from-slate-50 to-slate-100 relative overflow-hidden">
+                        <div className="aspect-square sm:aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
                           {imageUrl ? (
-                            <img src={imageUrl} alt={product.name} loading="lazy" className="w-full h-full object-cover" />
+                            <img src={imageUrl} alt={product.name} loading="lazy" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]" />
                           ) : (
-                            <div className="w-full h-full flex items-center justify-center"><span className="text-3xl opacity-20">🔧</span></div>
+                            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>
                           )}
                           {imageCount > 1 && (
-                            <span className="absolute bottom-1.5 left-1.5 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">{imageCount} photos</span>
+                            <span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-md">📷 {imageCount}</span>
                           )}
                         </div>
 
-                        <div className="p-2.5 sm:p-3">
-                          {/* Price first — most important */}
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-black text-orange-600 text-sm sm:text-base">{formatPrice(product.price, product.show_price)}</span>
-                            <span className={`text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                              product.condition === 'Excellent' ? 'bg-emerald-100 text-emerald-700' :
-                              product.condition === 'Good' ? 'bg-blue-100 text-blue-700' :
-                              product.condition === 'Fair' ? 'bg-amber-100 text-amber-700' :
-                              'bg-red-100 text-red-700'
-                            }`}>{product.condition}</span>
+                        <div className="p-3">
+                          <div className="flex items-center gap-1.5 mb-1.5">
+                            <span className={`text-[10px] font-bold px-2 py-[3px] rounded-md ${product.condition === 'Excellent' ? 'bg-[#ecfdf5] text-[#059669]' :
+                              product.condition === 'Good' ? 'bg-[#eff6ff] text-[#2563eb]' :
+                                product.condition === 'Fair' ? 'bg-[#fffbeb] text-[#d97706]' :
+                                  'bg-[#fef2f2] text-[#dc2626]'
+                              }`}>{product.condition}</span>
+                            <span className="text-[10px] font-medium text-[#ccc]">{product.category}</span>
                           </div>
 
-                          <h3 className="font-bold text-xs sm:text-sm text-slate-900 leading-tight line-clamp-2">{product.name}</h3>
+                          <h3 className="font-bold text-[13px] text-[#222] leading-tight line-clamp-2 min-h-[36px]">{product.name}</h3>
 
                           {(product.make || product.model) && (
-                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{[product.make, product.model, product.year].filter(Boolean).join(' · ')}</p>
+                            <p className="text-[11px] text-[#aaa] mt-1 truncate">🚗 {[product.make, product.model, product.year].filter(Boolean).join(' · ')}</p>
                           )}
 
-                          {/* Shop name — tappable to filter by vendor */}
+                          <div className="flex items-baseline justify-between mt-2 pt-2 border-t border-[#f5f5f5]">
+                            <span className="font-black text-base text-[#ff6b35] tracking-tight">{formatPrice(product.price, product.show_price)}</span>
+                            <span className={`text-[10px] font-semibold px-[7px] py-[2px] rounded-[5px] ${product.quantity <= 3 ? 'bg-[#fef2f2] text-[#ef4444]' : 'bg-[#ecfdf5] text-[#10b981]'
+                              }`}>{product.quantity <= 3 ? `Only ${product.quantity}` : 'In Stock'}</span>
+                          </div>
+
                           {!isVendorView && product.vendor && (
                             <button
                               onClick={(e) => { e.preventDefault(); e.stopPropagation(); selectVendor(product.vendor_id) }}
-                              className="text-[11px] text-orange-500 font-semibold mt-1 truncate block w-full text-left active:text-orange-700">
-                              {product.vendor.name} →
+                              className="text-[11px] font-semibold text-[#888] hover:text-[#ff6b35] mt-2 flex items-center gap-1 transition-colors">
+                              🏪 {product.vendor.name}
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
                             </button>
                           )}
-
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${CATEGORY_COLORS[product.category] || 'bg-slate-100 text-slate-600'}`}>{product.category}</span>
-                            <span className="text-[10px] text-slate-300">{product.quantity} in stock</span>
-                          </div>
                         </div>
                       </a>
                     </div>
@@ -441,7 +434,7 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* ─── SHOPS TAB ─── */}
+        {/* ═══ SHOPS TAB ═══ */}
         {activeTab === 'shops' && !isVendorView && (() => {
           const filteredVendors = vendors.filter(v => {
             if (!search) return true
@@ -450,45 +443,43 @@ export default function HomePage() {
           })
           return filteredVendors.length === 0 ? (
             <div className="text-center py-20">
-              <p className="text-5xl mb-3 opacity-80">🏪</p>
-              <p className="text-slate-500 font-bold">No shops found</p>
+              <div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🏪</div>
+              <p className="font-bold text-[17px] text-[#333]">No shops found</p>
             </div>
           ) : (
-            <div className="space-y-2.5 sm:space-y-0 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:gap-4">
+            <div className="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:gap-3">
               {filteredVendors.map((vendor) => {
                 const vendorProducts = products.filter((p) => p.vendor_id === vendor.id)
                 const vendorCategories = [...new Set(vendorProducts.map(p => p.category))].slice(0, 4)
                 return (
-                  <div key={vendor.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                    {/* Main tappable area */}
-                    <button onClick={() => selectVendor(vendor.id)} className="w-full p-4 pb-3 text-left active:bg-orange-50 transition">
-                      <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-white font-black text-base flex-shrink-0">
+                  <div key={vendor.id} className="bg-white rounded-2xl overflow-hidden border border-[#eee] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
+                    <button onClick={() => selectVendor(vendor.id)} className="w-full p-[18px] pb-3.5 text-left active:bg-[#fafafa] transition">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-[52px] h-[52px] rounded-[14px] flex items-center justify-center text-white font-black text-[22px] flex-shrink-0 shadow-[0_4px_12px_rgba(255,107,53,0.25)]" style={{ background: 'linear-gradient(135deg, #ff6b35, #ff8f65)' }}>
                           {vendor.name.charAt(0)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-sm text-slate-900">{vendor.name}</h3>
-                          <p className="text-xs text-slate-400 truncate">{vendor.location}</p>
+                          <h3 className="font-bold text-[16px] text-[#222]">{vendor.name}</h3>
+                          <p className="text-[13px] text-[#999] mt-0.5">📍 {vendor.location}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <p className="text-sm font-black text-orange-500">{vendorProducts.length}</p>
-                          <p className="text-[10px] text-slate-400">parts</p>
+                          <p className="text-[22px] font-black text-[#ff6b35]">{vendorProducts.length}</p>
+                          <p className="text-[10px] font-semibold text-[#ccc] uppercase tracking-wide">parts</p>
                         </div>
                       </div>
-                      {vendor.description && <p className="text-xs text-slate-400 mt-2 ml-14 line-clamp-1">{vendor.description}</p>}
+                      {vendor.description && <p className="text-xs text-[#aaa] mt-3 leading-relaxed">{vendor.description}</p>}
                       {vendorCategories.length > 0 && (
-                        <div className="flex gap-1 flex-wrap mt-2 ml-14">
+                        <div className="flex gap-1.5 flex-wrap mt-2.5">
                           {vendorCategories.map(cat => (
-                            <span key={cat} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[cat] || 'bg-slate-100 text-slate-600'}`}>{cat}</span>
+                            <span key={cat} className="text-[10px] font-semibold px-2.5 py-1 rounded-md bg-[#f7f7f7] text-[#888]">{cat}</span>
                           ))}
                         </div>
                       )}
                     </button>
-                    {/* Contact bar — separate from main tap */}
-                    <div className="flex border-t border-slate-100">
-                      <a href={`tel:${vendor.phone}`} className="flex-1 text-center text-xs font-semibold text-slate-500 py-2.5 active:bg-slate-50 border-r border-slate-100">📞 Call</a>
-                      <a href={`https://wa.me/${vendor.whatsapp}`} target="_blank" className="flex-1 text-center text-xs font-semibold text-green-600 py-2.5 active:bg-green-50 border-r border-slate-100">💬 WhatsApp</a>
-                      <button onClick={() => selectVendor(vendor.id)} className="flex-1 text-center text-xs font-bold text-orange-500 py-2.5 active:bg-orange-50">View parts →</button>
+                    <div className="flex border-t border-[#f0f0f0]">
+                      <a href={`tel:${vendor.phone}`} className="flex-1 text-center text-xs font-semibold text-[#888] py-3.5 active:bg-[#fafafa] hover:bg-[#fafafa] transition border-r border-[#f0f0f0]">📞 Call</a>
+                      <a href={`https://wa.me/${(vendor.whatsapp || '').replace(/[^0-9]/g, '')}`} target="_blank" className="flex-1 text-center text-xs font-bold text-[#25d366] py-3.5 active:bg-[#f0fdf4] hover:bg-[#f0fdf4] transition border-r border-[#f0f0f0]">💬 WhatsApp</a>
+                      <button onClick={() => selectVendor(vendor.id)} className="flex-1 text-center text-xs font-bold text-[#ff6b35] py-3.5 active:bg-[#fff5f0] hover:bg-[#fff5f0] transition">View Parts →</button>
                     </div>
                   </div>
                 )
@@ -498,22 +489,22 @@ export default function HomePage() {
         })()}
       </main>
 
-      {/* ─── SELECTED ITEMS BAR ─── */}
+      {/* ═══ SELECTED ITEMS BAR ═══ */}
       {selectedItems.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-orange-500 shadow-2xl z-50" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-          <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3">
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t-2 border-[#ff6b35] shadow-[0_-4px_24px_rgba(0,0,0,0.1)]" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+          <div className="max-w-7xl mx-auto px-3 sm:px-5 py-3">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div className="flex items-center justify-between sm:justify-start gap-2">
+              <div className="flex items-center justify-between sm:justify-start gap-3">
                 <div>
-                  <span className="font-bold text-slate-900 text-sm">{selectedItems.size} item{selectedItems.size > 1 ? 's' : ''}</span>
-                  <span className="text-slate-400 text-xs ml-1.5">· {Object.keys(getSelectedByVendor()).length} shop{Object.keys(getSelectedByVendor()).length > 1 ? 's' : ''}</span>
+                  <span className="font-bold text-[#222] text-sm">{selectedItems.size} item{selectedItems.size > 1 ? 's' : ''} selected</span>
+                  <span className="text-xs text-[#aaa] ml-2">from {Object.keys(getSelectedByVendor()).length} shop{Object.keys(getSelectedByVendor()).length > 1 ? 's' : ''}</span>
                 </div>
-                <button onClick={() => setSelectedItems(new Set())} className="text-xs text-slate-400 font-semibold px-2 py-1 active:text-slate-600 rounded">Clear</button>
+                <button onClick={() => setSelectedItems(new Set())} className="text-[11px] font-semibold text-[#aaa] bg-[#f5f5f5] px-3 py-1.5 rounded-lg active:bg-[#eee]">Clear</button>
               </div>
               <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {Object.entries(getSelectedByVendor()).map(([vendorId, group]) => (
                   <a key={vendorId} href={buildWhatsAppUrl(group.vendor, group.items)} target="_blank"
-                    className="flex-shrink-0 inline-flex items-center gap-1.5 bg-green-500 active:bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">
+                    className="flex-shrink-0 inline-flex items-center gap-1.5 bg-[#25d366] active:bg-[#1fb855] text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-[0_2px_8px_rgba(37,211,102,0.3)]">
                     💬 {group.vendor.name} ({group.items.length})
                   </a>
                 ))}
@@ -523,9 +514,12 @@ export default function HomePage() {
         </div>
       )}
 
-      <footer className={`bg-slate-900 text-slate-400 text-xs py-6 text-center ${selectedItems.size > 0 ? 'pb-28' : ''}`}>
-        <p className="font-bold text-white text-sm mb-0.5">kuruma.lk</p>
-        <p>Sri Lanka&apos;s Auto Parts Marketplace</p>
+      <footer className={`bg-[#fafafa] border-t border-[#eee] py-7 text-center ${selectedItems.size > 0 ? 'pb-24' : ''}`}>
+        <div className="flex items-baseline justify-center gap-0.5 mb-1">
+          <span className="text-lg font-black text-[#ff6b35]">kuruma</span>
+          <span className="text-lg font-black text-[#333]">.lk</span>
+        </div>
+        <p className="text-xs text-[#bbb]">Sri Lanka&apos;s Auto Parts Marketplace</p>
       </footer>
 
       <style jsx global>{`
