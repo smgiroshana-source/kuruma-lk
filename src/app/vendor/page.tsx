@@ -428,6 +428,8 @@ export default function VendorDashboard() {
   async function executeBulkImport(mode: 'skip' | 'update') {
     setShowDuplicateModal(false)
     setBulkLoading(true)
+    let wakeLock: any = null
+    try { wakeLock = await (navigator as any).wakeLock?.request("screen") } catch {}
     const totalSteps = bulkData.length + 1
 
     try {
@@ -443,7 +445,7 @@ export default function VendorDashboard() {
 
       setBulkProgress(prev => ({ ...prev, current: 1, phase: 'Uploading images...', detail: `${j.count} products created` }))
 
-      let imageCount = 0
+      let imageCount = 0; let productsProcessed = 0; const productsWithImages = bulkData.filter(r => r?.imageFiles?.length).length
       const skuToId = new Map()
       if (j.products) j.products.forEach((p: any) => skuToId.set(p.sku, p.id))
 
@@ -455,13 +457,13 @@ export default function VendorDashboard() {
 
         setBulkProgress(prev => ({
           ...prev,
-          current: 1 + Math.round((imageCount / Math.max(bulkData.filter(r => r?.imageFiles?.length).length, 1)) * (totalSteps - 1)),
+          current: 1 + Math.round((productsProcessed / Math.max(productsWithImages, 1)) * (totalSteps - 1)),
           phase: 'Uploading images...',
           detail: `${row.partId}: ${row.imageFiles.length} image${row.imageFiles.length > 1 ? 's' : ''}`
         }))
 
         await uploadImagesForProduct(productId, row.imageFiles)
-        imageCount += row.imageFiles.length
+        imageCount += row.imageFiles.length; productsProcessed++
       }
 
       setBulkProgress({ current: totalSteps, total: totalSteps, phase: 'Complete!', detail: '' })
@@ -478,6 +480,7 @@ export default function VendorDashboard() {
     } catch { showToast('Import failed') }
 
     setBulkLoading(false)
+    try { wakeLock?.release() } catch {}
     setTimeout(() => setBulkProgress({ current: 0, total: 0, phase: '', detail: '' }), 3000)
   }
 
