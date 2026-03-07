@@ -68,19 +68,20 @@ export async function POST(req: NextRequest) {
   // ─── [MODIFIED] BULK CREATE — now supports skip/update mode ───
   if (action === 'bulk_create') {
     const { products: items, mode: importMode } = body
-    // importMode: 'skip' (default) | 'update'
     if (!items || !Array.isArray(items) || items.length === 0)
       return NextResponse.json({ success: false, error: 'No products' }, { status: 400 })
 
-    // Check which SKUs already exist for this vendor
-    const skus = items.map((item: any) => item.sku?.trim()).filter(Boolean)
-    const { data: existingProducts } = await admin
-      .from('products')
-      .select('id, sku')
-      .eq('vendor_id', vendor.id)
-      .in('sku', skus)
+    // Batch helper — Supabase .in() and .insert() fail with 100+ items
+    const BATCH = 80
+    function chunk(arr: any[]) { const chunks = []; for (let i = 0; i < arr.length; i += BATCH) chunks.push(arr.slice(i, i + BATCH)); return chunks }
 
-    const existingMap = new Map((existingProducts || []).map((p: any) => [p.sku, p.id]))
+    // Check existing SKUs in batches
+    const skus = items.map((item: any) => item.sku?.trim()).filter(Boolean)
+    const existingMap = new Map<string, string>()
+    for (const batch of chunk(skus)) {
+      const { data } = await admin.from('products').select('id, sku').eq('vendor_id', vendor.id).in('sku', batch)
+      if (data) data.forEach((p: any) => existingMap.set(p.sku, p.id))
+    }
 
     const toInsert: any[] = []
     const toUpdate: any[] = []
@@ -89,27 +90,18 @@ export async function POST(req: NextRequest) {
     for (const item of items) {
       const sku = item.sku?.trim() || generateSKU()
       const row = {
-        vendor_id: vendor.id,
-        sku,
-        name: item.name || 'Untitled Part',
-        description: item.description || '',
-        category: item.category || 'Other',
-        make: item.make || null,
-        model: item.model || null,
-        year: item.year || null,
+        vendor_id: vendor.id, sku,
+        name: item.name || 'Untitled Part', description: item.description || '',
+        category: item.category || 'Other', make: item.make || null,
+        model: item.model || null, year: item.year || null,
         condition: item.condition || 'Good',
         price: item.price ? parseInt(item.price) : null,
         show_price: item.show_price !== false,
-        quantity: parseInt(item.quantity) || 1,
-        is_active: true,
+        quantity: parseInt(item.quantity) || 1, is_active: true,
       }
-
       if (existingMap.has(sku)) {
-        if (importMode === 'update') {
-          toUpdate.push({ ...row, id: existingMap.get(sku) })
-        } else {
-          skipped.push(sku)
-        }
+        if (importMode === 'update') toUpdate.push({ ...row, id: existingMap.get(sku) })
+        else skipped.push(sku)
       } else {
         toInsert.push(row)
       }
@@ -117,29 +109,23 @@ export async function POST(req: NextRequest) {
 
     const results: any[] = []
 
-    // Insert new products
-    if (toInsert.length > 0) {
-      const { data: created, error } = await admin.from('products').insert(toInsert).select()
-      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
+    // Insert new products in batches
+    for (const batch of chunk(toInsert)) {
+      const { data: created, error } = await admin.from('products').insert(batch).select()
+      if (error) return NextResponse.json({ success: false, error: error.message + ' (at batch insert)', status: 400 })
       results.push(...(created || []))
     }
 
     // Update existing products
-    if (toUpdate.length > 0) {
-      for (const item of toUpdate) {
-        const { id, ...updateData } = item
-        await admin.from('products').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', id)
-        results.push({ id, ...updateData })
-      }
+    for (const item of toUpdate) {
+      const { id, ...updateData } = item
+      await admin.from('products').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', id)
+      results.push({ id, ...updateData })
     }
 
     return NextResponse.json({
-      success: true,
-      count: results.length,
-      products: results,
-      skipped,
-      skippedCount: skipped.length,
-      updatedCount: toUpdate.length,
+      success: true, count: results.length, products: results, skipped,
+      skippedCount: skipped.length, updatedCount: toUpdate.length,
       insertedCount: toInsert.length,
       message: `${toInsert.length} new, ${toUpdate.length} updated, ${skipped.length} skipped`,
     })
@@ -185,36 +171,39 @@ export async function POST(req: NextRequest) {
     if (!productIds || !Array.isArray(productIds) || productIds.length === 0)
       return NextResponse.json({ success: false, error: 'No products selected' }, { status: 400 })
 
-    // Verify all products belong to this vendor
-    const { data: products } = await admin
-      .from('products')
-      .select('id, vendor_id')
-      .in('id', productIds)
+    // Batch helper — Supabase .in() fails with 200+ IDs
+    const BATCH = 100
+    function chunk(arr: any[]) { const chunks = []; for (let i = 0; i < arr.length; i += BATCH) chunks.push(arr.slice(i, i + BATCH)); return chunks }
 
-    const ownedIds = (products || [])
-      .filter((p: any) => p.vendor_id === vendor.id)
-      .map((p: any) => p.id)
+    // Verify all products belong to this vendor (batched)
+    const ownedIds: string[] = []
+    for (const batch of chunk(productIds)) {
+      const { data } = await admin.from('products').select('id, vendor_id').in('id', batch)
+      if (data) ownedIds.push(...data.filter((p: any) => p.vendor_id === vendor.id).map((p: any) => p.id))
+    }
 
     if (ownedIds.length === 0)
       return NextResponse.json({ success: false, error: 'No matching products found' }, { status: 404 })
 
-    // Delete images from storage
-    const { data: images } = await admin
-      .from('product_images')
-      .select('url')
-      .in('product_id', ownedIds)
-
-    if (images && images.length > 0) {
-      const paths = images
-        .map((img: any) => { const m = img.url.match(/product-images\/(.+)$/); return m ? m[1] : null })
-        .filter(Boolean)
-      if (paths.length > 0) await admin.storage.from('product-images').remove(paths)
+    // Delete images from storage (batched)
+    for (const batch of chunk(ownedIds)) {
+      const { data: images } = await admin.from('product_images').select('url').in('product_id', batch)
+      if (images && images.length > 0) {
+        const paths = images.map((img: any) => { const m = img.url.match(/product-images\/(.+)$/); return m ? m[1] : null }).filter(Boolean)
+        // Storage remove also has limits — batch by 100
+        for (let i = 0; i < paths.length; i += 100) {
+          await admin.storage.from('product-images').remove(paths.slice(i, i + 100))
+        }
+      }
     }
 
-    // Delete image records then products
-    await admin.from('product_images').delete().in('product_id', ownedIds)
-    const { error } = await admin.from('products').delete().in('id', ownedIds)
-    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
+    // Delete image records then products (batched)
+    for (const batch of chunk(ownedIds)) {
+      await admin.from('product_images').delete().in('product_id', batch)
+    }
+    for (const batch of chunk(ownedIds)) {
+      await admin.from('products').delete().in('id', batch)
+    }
 
     return NextResponse.json({
       success: true,

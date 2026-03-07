@@ -11,8 +11,8 @@ export async function GET() {
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).single()
   if (!vendor) return NextResponse.json({ error: 'No vendor found' }, { status: 403 })
 
-  const { data: products } = await admin.from('products').select('*, images:product_images(*)').eq('vendor_id', vendor.id).order('created_at', { ascending: false })
-  const { data: sales } = await admin.from('sales').select('*').eq('vendor_id', vendor.id).order('created_at', { ascending: false })
+  const { data: products } = await admin.from('products').select('*, images:product_images(*)').eq('vendor_id', vendor.id).order('created_at', { ascending: false }).limit(10000)
+  const { data: sales } = await admin.from('sales').select('*').eq('vendor_id', vendor.id).order('created_at', { ascending: false }).limit(10000)
 
   const totalProducts = products?.length || 0
   const activeProducts = products?.filter((p: any) => p.is_active).length || 0

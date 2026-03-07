@@ -94,9 +94,10 @@ export default function VendorDashboard() {
   const [bulkData, setBulkData] = useState<any[]>([])
   const [bulkFile, setBulkFile] = useState('')
   const [bulkLoading, setBulkLoading] = useState(false)
-  const [zipFile, setZipFile] = useState('')
+  const [zipFiles, setZipFiles] = useState<string[]>([])
   const [zipProcessing, setZipProcessing] = useState(false)
   const [zipSummary, setZipSummary] = useState<any>(null)
+  const [zipProgress, setZipProgress] = useState({ current: 0, total: 0, label: '', detail: '' })
   const bulkFileRef = useRef<HTMLInputElement>(null)
   const zipFileRef = useRef<HTMLInputElement>(null)
 
@@ -342,8 +343,57 @@ export default function VendorDashboard() {
   function removeImage(i: number) { setProductImages(p => p.filter((_, x) => x !== i)); setImagePreviews(p => p.filter((_, x) => x !== i)) }
 
   // Bulk handlers
-  function handleBulkFileUpload(e: React.ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f) return; setBulkFile(f.name); setZipFile(''); setZipSummary(null); const r = new FileReader(); r.onload = ev => { const rows = parseCSV(ev.target?.result as string).map(mapCSVRow); setBulkData(rows.map(row => ({ ...row, partId: row.partId || generatePartId(), autoId: !row.partId }))) }; r.readAsText(f) }
-  async function handleZipUpload(e: React.ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f || bulkData.length === 0) { showToast('Upload CSV first'); return }; setZipFile(f.name); setZipProcessing(true); try { const map = await extractZipImages(f); const idMap = new Map<string, number>(); bulkData.forEach((r, i) => idMap.set(r.partId.toLowerCase(), i)); let matched = 0, unmatched = 0, totalImages = 0; const unmatchedFolders: string[] = []; const ud = bulkData.map(r => ({ ...r, imageFiles: [] as File[], hasImage: false, imageCount: 0 })); for (const [folder, files] of map) { const idx = idMap.get(folder.toLowerCase()); if (idx !== undefined) { ud[idx].imageFiles = files; ud[idx].hasImage = true; ud[idx].imageCount = files.length; matched++; totalImages += files.length } else { unmatched++; unmatchedFolders.push(folder) } }; setBulkData(ud); setZipSummary({ matched, unmatched, unmatchedFolders, totalImages }); showToast(matched + ' matched') } catch { showToast('ZIP error') } setZipProcessing(false) }
+  function handleBulkFileUpload(e: React.ChangeEvent<HTMLInputElement>) { const f = e.target.files?.[0]; if (!f) return; setBulkFile(f.name); setZipFiles([]); setZipSummary(null); const r = new FileReader(); r.onload = ev => { const rows = parseCSV(ev.target?.result as string).map(mapCSVRow); setBulkData(rows.map(row => ({ ...row, partId: row.partId || generatePartId(), autoId: !row.partId }))) }; r.readAsText(f) }
+  async function handleZipUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || [])
+    if (!files.length || bulkData.length === 0) { showToast('Upload CSV first'); return }
+    setZipFiles(files.map(f => f.name))
+    setZipProcessing(true)
+    setZipProgress({ current: 0, total: files.length, label: 'Starting...', detail: '' })
+
+    try {
+      // Build ID map from CSV
+      const idMap = new Map<string, number>()
+      bulkData.forEach((r, i) => idMap.set(r.partId.toLowerCase(), i))
+
+      // Start with clean image data
+      const ud = bulkData.map(r => ({ ...r, imageFiles: [] as File[], hasImage: false, imageCount: 0 }))
+      let totalMatched = 0, totalUnmatched = 0, totalImages = 0
+      const allUnmatchedFolders: string[] = []
+
+      // Process each ZIP one by one
+      for (let zi = 0; zi < files.length; zi++) {
+        const zipFile = files[zi]
+        setZipProgress({ current: zi + 1, total: files.length, label: `Processing ZIP ${zi + 1} of ${files.length}`, detail: zipFile.name })
+
+        const map = await extractZipImages(zipFile)
+        let matched = 0, unmatched = 0
+
+        for (const [folder, imageFiles] of map) {
+          const idx = idMap.get(folder.toLowerCase())
+          if (idx !== undefined) {
+            // Append images (in case same product has images across multiple ZIPs)
+            ud[idx].imageFiles = [...(ud[idx].imageFiles || []), ...imageFiles]
+            ud[idx].hasImage = true
+            ud[idx].imageCount = ud[idx].imageFiles.length
+            matched++
+            totalImages += imageFiles.length
+          } else {
+            unmatched++
+            allUnmatchedFolders.push(folder)
+          }
+        }
+        totalMatched += matched
+        totalUnmatched += unmatched
+      }
+
+      setBulkData(ud)
+      setZipSummary({ matched: totalMatched, unmatched: totalUnmatched, unmatchedFolders: allUnmatchedFolders, totalImages, zipCount: files.length })
+      showToast(`${totalMatched} products matched from ${files.length} ZIP${files.length > 1 ? 's' : ''}`)
+    } catch { showToast('ZIP processing error') }
+    setZipProcessing(false)
+    setZipProgress({ current: 0, total: 0, label: '', detail: '' })
+  }
   function updateBulkRow(i: number, k: string, v: string) { setBulkData(p => { const u = [...p]; u[i] = { ...u[i], [k]: v }; return u }) }
   function removeBulkRow(i: number) { setBulkData(p => p.filter((_, x) => x !== i)) }
   async function handleBulkImport() {
@@ -423,7 +473,7 @@ export default function VendorDashboard() {
       if (imageCount) summary.push(`${imageCount} images`)
       showToast(summary.join(', ') + ' — Import complete!')
 
-      setBulkData([]); setBulkFile(''); setZipFile(''); setZipSummary(null); setBulkDuplicates([])
+      setBulkData([]); setBulkFile(''); setZipFiles([]); setZipSummary(null); setBulkDuplicates([])
       await fetchData(); setTab('products')
     } catch { showToast('Import failed') }
 
@@ -828,14 +878,28 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
             </div>
 
             <div className={'bg-white rounded-xl border-2 border-dashed p-5 transition ' + (bulkData.length ? 'border-slate-200 hover:border-green-400' : 'border-slate-100 opacity-60')}>
-              <div className="flex items-center gap-2 mb-3"><span className={'text-[10px] font-black px-2.5 py-1 rounded-full ' + (bulkData.length ? 'bg-cyan-100 text-cyan-600' : 'bg-slate-100 text-slate-400')}>STEP 4</span><h3 className="font-bold text-sm">Upload ZIP Images</h3></div>
-              <input ref={zipFileRef} type="file" accept=".zip" onChange={handleZipUpload} className="hidden" />
+              <div className="flex items-center gap-2 mb-3"><span className={'text-[10px] font-black px-2.5 py-1 rounded-full ' + (bulkData.length ? 'bg-cyan-100 text-cyan-600' : 'bg-slate-100 text-slate-400')}>STEP 4</span><h3 className="font-bold text-sm">Upload ZIP Images (multiple supported)</h3></div>
+              <input ref={zipFileRef} type="file" accept=".zip" multiple onChange={handleZipUpload} className="hidden" />
               <button onClick={() => { if (!bulkData.length) { showToast('Upload CSV first (Step 3)'); return }; zipFileRef.current?.click() }} disabled={zipProcessing} className="w-full py-8 border-2 border-dashed border-slate-200 rounded-xl hover:border-green-400 hover:bg-green-50 transition disabled:opacity-50">
                 <span className="text-3xl block mb-2">📦</span>
-                <span className="font-bold text-sm text-slate-600">{zipProcessing ? 'Extracting...' : zipFile || 'Click to select compressed ZIP'}</span>
-                {zipSummary && <span className="block text-xs text-green-600 font-semibold mt-1">✓ {zipSummary.matched} products matched ({zipSummary.totalImages} images)</span>}
-                {zipSummary && zipSummary.unmatched > 0 && <span className="block text-xs text-amber-500 font-semibold mt-0.5">⚠ {zipSummary.unmatched} folders didn't match any Part ID</span>}
+                <span className="font-bold text-sm text-slate-600">{zipProcessing ? 'Processing...' : zipFiles.length > 0 ? `${zipFiles.length} ZIP file${zipFiles.length > 1 ? 's' : ''} loaded` : 'Click to select ZIP file(s)'}</span>
+                {zipFiles.length > 0 && !zipProcessing && <span className="block text-[11px] text-slate-400 mt-1">{zipFiles.join(', ')}</span>}
+                {zipSummary && <span className="block text-xs text-green-600 font-semibold mt-1">✓ {zipSummary.matched} products matched ({zipSummary.totalImages} images) from {zipSummary.zipCount} ZIP{zipSummary.zipCount > 1 ? 's' : ''}</span>}
+                {zipSummary && zipSummary.unmatched > 0 && <span className="block text-xs text-amber-500 font-semibold mt-0.5">⚠ {zipSummary.unmatched} folders didn&apos;t match any Part ID</span>}
               </button>
+              {/* ZIP processing progress */}
+              {zipProcessing && zipProgress.total > 0 && (
+                <div className="mt-3 bg-slate-50 rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-bold text-slate-600">{zipProgress.label}</span>
+                    <span className="text-xs font-mono text-slate-400">{zipProgress.current}/{zipProgress.total}</span>
+                  </div>
+                  <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.round((zipProgress.current / zipProgress.total) * 100)}%`, background: 'linear-gradient(90deg, #06b6d4, #10b981)' }} />
+                  </div>
+                  {zipProgress.detail && <p className="text-[10px] text-slate-400 mt-1 truncate">{zipProgress.detail}</p>}
+                </div>
+              )}
               {!bulkData.length && <p className="text-[10px] text-slate-400 mt-2 text-center">Upload CSV first to enable this step</p>}
             </div>
           </div>
@@ -845,7 +909,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2"><span className="bg-orange-100 text-orange-600 text-[10px] font-black px-2.5 py-1 rounded-full">STEP 5</span><h3 className="font-bold">Review & Import ({bulkData.length} products)</h3></div>
               <div className="flex gap-2">
-                <button onClick={() => { setBulkData([]); setBulkFile(''); setZipFile(''); setZipSummary(null) }} className="text-sm text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200">Clear All</button>
+                <button onClick={() => { setBulkData([]); setBulkFile(''); setZipFiles([]); setZipSummary(null) }} className="text-sm text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200">Clear All</button>
                 <button onClick={handleBulkImport} disabled={bulkLoading} className="bg-orange-500 text-white text-sm font-bold px-5 py-1.5 rounded-lg disabled:opacity-50 hover:bg-orange-600">{bulkLoading ? 'Importing...' : '🚀 Import All'}</button>
               </div>
             </div>
@@ -854,7 +918,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
 
             {/* Feature 2: Import Progress Bar */}
             {bulkLoading && bulkProgress.total > 0 && (
-              <div className="bg-white rounded-xl border border-slate-200 p-5 mb-4 mt-4">
+              <div className="bg-white rounded-xl border-2 border-orange-400 p-5 mb-4 mt-4 sticky top-[52px] z-40 shadow-lg">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-bold text-slate-700">{bulkProgress.phase}</span>
                   <span className="text-xs font-mono text-slate-400">{Math.round((bulkProgress.current / bulkProgress.total) * 100)}%</span>

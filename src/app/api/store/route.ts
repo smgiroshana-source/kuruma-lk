@@ -9,7 +9,7 @@ export async function GET() {
     .select('*, vendor:vendors(id, name, slug, location, phone, whatsapp), images:product_images(id, url, sort_order)')
     .eq('is_active', true)
     .gt('quantity', 0)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false }).limit(10000)
 
   const { data: vendors } = await admin
     .from('vendors')

@@ -4,651 +4,389 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>kuruma.lk Image Compressor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
-  *{margin:0;padding:0;box-sizing:border-box;}
-  :root{--coral:#FF6B35;--coral-l:#FFF0EB;--dark:#0F172A;--text2:#475569;--text3:#94A3B8;--bg:#F8FAFC;--bg2:#F1F5F9;--surface:#FFF;--green:#06D6A0;--green-l:#ECFDF5;--red:#EF4444;--yellow:#F59E0B;--blue:#2563EB;--border:#E2E8F0;--purple:#7C3AED;}
-  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--dark);min-height:100vh;}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; min-height: 100vh; }
+  .container { max-width: 720px; margin: 0 auto; padding: 20px 16px; }
+  h1 { font-size: 22px; font-weight: 900; margin-bottom: 4px; }
+  h1 span { color: #ff6b35; }
+  .subtitle { font-size: 13px; color: #999; margin-bottom: 24px; }
+  .card { background: white; border-radius: 16px; border: 1px solid #eee; padding: 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .step { background: #ff6b35; color: white; font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 20px; }
+  .card p { font-size: 12px; color: #999; margin-bottom: 12px; line-height: 1.5; }
+  .drop-zone { border: 2px dashed #ddd; border-radius: 12px; padding: 40px 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .drop-zone:hover { border-color: #ff6b35; background: #fff8f5; }
+  .drop-zone.active { border-color: #ff6b35; background: #fff3ee; }
+  .drop-zone .icon { font-size: 36px; margin-bottom: 8px; }
+  .drop-zone .label { font-size: 13px; font-weight: 700; color: #555; }
+  .drop-zone .hint { font-size: 11px; color: #bbb; margin-top: 4px; }
+  .settings { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .settings label { font-size: 11px; font-weight: 600; color: #888; display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 120px; }
+  .settings input, .settings select { padding: 8px 10px; border-radius: 8px; border: 1.5px solid #e5e5e5; font-size: 13px; font-weight: 600; outline: none; }
+  .settings input:focus, .settings select:focus { border-color: #ff6b35; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 24px; border-radius: 12px; font-size: 14px; font-weight: 700; border: none; cursor: pointer; transition: all 0.2s; width: 100%; }
+  .btn-primary { background: linear-gradient(135deg, #ff6b35, #ff8f65); color: white; box-shadow: 0 4px 12px rgba(255,107,53,0.25); }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(255,107,53,0.35); }
+  .btn-primary:disabled { opacity: 0.5; transform: none; cursor: not-allowed; }
+  .btn-secondary { background: #f5f5f5; color: #666; border: 1.5px solid #e5e5e5; }
 
-  .header{background:linear-gradient(135deg,var(--coral),var(--purple));padding:20px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
-  .header h1{font-family:'Outfit',sans-serif;font-size:24px;font-weight:900;color:white;}
-  .header span{color:rgba(255,255,255,.7);font-size:13px;}
+  /* Progress */
+  .progress-container { margin-top: 16px; }
+  .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .progress-label { font-size: 12px; font-weight: 600; color: #555; }
+  .progress-pct { font-size: 12px; font-weight: 700; color: #ff6b35; font-family: monospace; }
+  .progress-bar { height: 8px; background: #f0f0f0; border-radius: 10px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 10px; transition: width 0.3s ease; background: linear-gradient(90deg, #ff6b35, #ff8f65); }
+  .progress-fill.done { background: linear-gradient(90deg, #10b981, #34d399); }
+  .progress-detail { font-size: 11px; color: #aaa; margin-top: 4px; }
 
-  .container{max-width:900px;margin:0 auto;padding:24px 20px 60px;}
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin-top: 16px; }
+  .stat { background: #f9f9f9; border-radius: 10px; padding: 10px 12px; text-align: center; }
+  .stat .val { font-size: 18px; font-weight: 900; color: #ff6b35; }
+  .stat .lbl { font-size: 10px; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
 
-  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 24px;margin-bottom:16px;box-shadow:0 1px 3px rgba(15,23,42,.06);}
-  .card h2{font-family:'Outfit',sans-serif;font-size:17px;font-weight:800;margin-bottom:4px;color:var(--dark);}
-  .card .sub{font-size:13px;color:var(--text3);margin-bottom:14px;}
+  /* Log */
+  .log { margin-top: 12px; max-height: 150px; overflow-y: auto; background: #fafafa; border-radius: 10px; padding: 10px; font-size: 11px; font-family: monospace; color: #888; line-height: 1.6; }
+  .log .warn { color: #d97706; }
+  .log .ok { color: #059669; }
+  .log .err { color: #dc2626; }
 
-  .step-badge{display:inline-flex;align-items:center;gap:6px;background:var(--coral-l);color:var(--coral);font-size:11px;font-weight:700;padding:3px 10px;border-radius:12px;margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px;}
+  /* Structure guide */
+  .structure { background: #f9f9f9; border-radius: 10px; padding: 12px 14px; font-family: monospace; font-size: 11px; color: #666; line-height: 1.8; margin-bottom: 12px; }
+  .structure .folder { color: #ff6b35; font-weight: 700; }
+  .structure .file { color: #999; }
 
-  .drop-zone{border:2.5px dashed var(--border);border-radius:14px;padding:48px 24px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg);}
-  .drop-zone:hover,.drop-zone.drag{border-color:var(--coral);background:var(--coral-l);}
-  .drop-zone h3{font-family:'Outfit',sans-serif;font-size:18px;font-weight:700;margin-top:10px;color:var(--dark);}
-  .drop-zone p{font-size:13px;color:var(--text3);margin-top:6px;}
-
-  .settings-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
-  .setting-item label{display:block;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
-  .setting-item input,.setting-item select{width:100%;padding:8px 12px;border:2px solid var(--border);border-radius:8px;font-size:14px;font-family:'Plus Jakarta Sans',sans-serif;outline:none;transition:border-color .2s;}
-  .setting-item input:focus,.setting-item select:focus{border-color:var(--coral);}
-
-  .product-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px;}
-  .product-table thead th{text-align:left;padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid var(--border);background:var(--bg);}
-  .product-table tbody td{padding:8px 12px;border-bottom:1px solid var(--border);}
-  .product-table tbody tr:hover{background:var(--bg);}
-  .product-table .mono{font-family:'JetBrains Mono',monospace;font-size:12px;}
-  .product-table .tag{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700;}
-  .tag-ok{background:var(--green-l);color:var(--green);}
-  .tag-warn{background:#FEF3C7;color:var(--yellow);}
-
-  .summary-bar{display:flex;gap:16px;flex-wrap:wrap;padding:14px 0;border-top:1px solid var(--border);margin-top:12px;}
-  .summary-item{text-align:center;}
-  .summary-item .n{font-family:'Outfit',sans-serif;font-size:22px;font-weight:800;color:var(--coral);}
-  .summary-item .l{font-size:11px;color:var(--text3);margin-top:1px;}
-
-  .btn{display:inline-flex;align-items:center;gap:6px;padding:11px 24px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;border:none;font-family:'Plus Jakarta Sans',sans-serif;transition:all .2s;}
-  .btn:hover{transform:translateY(-1px);}
-  .btn:disabled{opacity:.5;cursor:not-allowed;transform:none;}
-  .btn-coral{background:var(--coral);color:white;box-shadow:0 3px 12px rgba(255,107,53,.25);}
-  .btn-green{background:var(--green);color:white;box-shadow:0 3px 12px rgba(6,214,160,.25);}
-  .btn-outline{background:var(--surface);color:var(--text2);border:2px solid var(--border);}
-
-  .progress-wrap{margin-top:16px;}
-  .progress-bar{height:10px;background:var(--bg2);border-radius:6px;overflow:hidden;}
-  .progress-fill{height:100%;background:linear-gradient(90deg,var(--coral),var(--green));border-radius:6px;transition:width .3s;width:0%;}
-  .progress-text{font-size:12px;color:var(--text2);margin-top:6px;}
-
-  .result-row{display:flex;align-items:center;gap:8px;padding:8px;background:var(--bg);border-radius:8px;margin-bottom:4px;font-size:12px;}
-  .result-row .pid{font-family:'JetBrains Mono',monospace;font-weight:600;min-width:120px;}
-  .result-row .fname{color:var(--text3);min-width:60px;}
-  .result-row .sizes{flex:1;display:flex;align-items:center;gap:4px;}
-  .result-row .orig{color:var(--text3);text-decoration:line-through;}
-  .result-row .arrow{color:var(--coral);}
-  .result-row .comp{font-weight:700;color:var(--dark);}
-  .result-row .saved{font-weight:700;color:var(--green);margin-left:auto;font-family:'JetBrains Mono',monospace;}
-
-  .total-box{background:linear-gradient(135deg,var(--coral-l),#F5F3FF);border:2px solid var(--coral);border-radius:14px;padding:20px 24px;margin-top:16px;text-align:center;}
-  .total-box h3{font-family:'Outfit',sans-serif;font-size:20px;font-weight:800;color:var(--dark);margin-bottom:6px;}
-  .total-box .big{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:var(--green);}
-  .total-stats{display:flex;justify-content:center;gap:24px;margin-top:10px;flex-wrap:wrap;}
-  .total-stat{text-align:center;}
-  .total-stat .v{font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:var(--dark);}
-  .total-stat .k{font-size:11px;color:var(--text3);}
-
-  .hidden{display:none;}
-
-  @media(max-width:600px){
-    .settings-grid{grid-template-columns:1fr;}
-    .header{padding:14px 16px;}
-    .container{padding:14px 12px 40px;}
-    .card{padding:16px;}
-  }
+  /* ZIP list */
+  .zip-list { margin-top: 12px; }
+  .zip-item { display: flex; align-items: center; justify-content: space-between; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 10px 14px; margin-bottom: 6px; }
+  .zip-item .name { font-size: 13px; font-weight: 700; color: #166534; }
+  .zip-item .size { font-size: 11px; color: #16a34a; }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div>
-    <h1>kuruma.lk Image Compressor</h1>
-    <span>Compress product photos for upload — works offline, no installation needed</span>
-  </div>
-  <span style="color:rgba(255,255,255,.5);font-size:12px;">v1.0</span>
-</div>
-
 <div class="container">
+  <h1><span>kuruma</span>.lk Image Compressor</h1>
+  <p class="subtitle">Compress product photos and auto-split into upload-ready ZIP files</p>
 
-  <!-- STEP 1: SELECT FOLDER -->
-  <div class="card" id="card-select">
-    <div class="step-badge">Step 1</div>
-    <h2>Select Product Images Folder</h2>
-    <p class="sub">Choose your main folder. Inside it, create subfolders for each product — the <strong>subfolder name becomes the Product ID</strong> (e.g., 100001, BRK-2024-005, or any format your shop uses). Put up to 5 images in each subfolder.</p>
-
-    <div class="drop-zone" id="dropZone" onclick="document.getElementById('folderInput').click()">
-      <div style="font-size:40px;">📁</div>
-      <h3>Click to Select Folder</h3>
-      <p>Or drag and drop a folder here</p>
-      <p style="margin-top:8px;font-size:11px;color:var(--text3);">Supports: JPG, PNG, BMP, WebP, GIF</p>
-    </div>
-    <input type="file" id="folderInput" webkitdirectory multiple style="display:none" onchange="handleFolderSelect(event)">
-
-    <input type="file" id="fileInput" style="display:none">
-  </div>
-
-  <!-- SCAN RESULTS -->
-  <div class="card hidden" id="card-scan">
-    <div class="step-badge">Scanned</div>
-    <h2>Folder Contents</h2>
-    <div id="scanSummary" class="summary-bar"></div>
-    <table class="product-table">
-      <thead>
-        <tr>
-          <th>Product ID (Folder Name)</th>
-          <th>Images</th>
-          <th>Total Size</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody id="scanBody"></tbody>
-    </table>
-  </div>
-
-  <!-- STEP 2: SETTINGS -->
-  <div class="card hidden" id="card-settings">
-    <div class="step-badge">Step 2</div>
-    <h2>Compression Settings</h2>
-    <p class="sub">Default settings work great for most cases. Adjust if needed.</p>
-
-    <div class="settings-grid">
-      <div class="setting-item">
-        <label>Max Width (px)</label>
-        <input type="number" id="setWidth" value="800" min="200" max="2000">
-      </div>
-      <div class="setting-item">
-        <label>JPEG Quality (1-100)</label>
-        <input type="number" id="setQuality" value="70" min="10" max="100">
-      </div>
-      <div class="setting-item">
-        <label>Max Images per Product</label>
-        <input type="number" id="setMaxImg" value="5" min="1" max="20">
-      </div>
-    </div>
-
-    <div style="margin-top:14px;">
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer;">
-        <input type="checkbox" id="setRename" checked> Rename images sequentially (1.jpg, 2.jpg, 3.jpg...)
+  <!-- Step 1: Settings -->
+  <div class="card">
+    <h2><span class="step">1</span> Settings</h2>
+    <p>Configure compression quality and ZIP size limits</p>
+    <div class="settings">
+      <label>Max image size (KB)
+        <input type="number" id="maxSizeKB" value="125" min="50" max="500">
+      </label>
+      <label>Max resolution (px)
+        <input type="number" id="maxWidth" value="1200" min="400" max="3000">
+      </label>
+      <label>Max ZIP size (MB)
+        <input type="number" id="maxZipMB" value="400" min="50" max="800">
+      </label>
+      <label>Output format
+        <select id="outputFormat">
+          <option value="jpeg" selected>JPEG (smaller)</option>
+          <option value="webp">WebP (smallest)</option>
+        </select>
       </label>
     </div>
   </div>
 
-  <!-- STEP 3: COMPRESS -->
-  <div class="card hidden" id="card-compress">
-    <div class="step-badge">Step 3</div>
-    <h2>Compress & Download</h2>
-    <p class="sub">Click to compress all images. A ZIP file will be downloaded automatically, ready to upload to kuruma.lk.</p>
-
-    <div style="display:flex;gap:10px;flex-wrap:wrap;">
-      <button class="btn btn-green" id="btnCompress" onclick="startCompress()">
-        Compress All & Download ZIP
-      </button>
-      <button class="btn btn-outline hidden" id="btnReset" onclick="resetAll()">
-        Start Over
-      </button>
+  <!-- Step 2: Select folder -->
+  <div class="card">
+    <h2><span class="step">2</span> Select Product Photos Folder</h2>
+    <p>Organize your photos in folders named by Part ID:</p>
+    <div class="structure">
+      <span class="folder">📁 My Product Photos/</span><br>
+      &nbsp;&nbsp;<span class="folder">📁 BRK-001/</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">📷 front.jpg</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">📷 back.jpg</span><br>
+      &nbsp;&nbsp;<span class="folder">📁 ENG-002/</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">📷 photo1.jpg</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">📷 photo2.jpg</span><br>
+      &nbsp;&nbsp;<span class="folder">📁 SUS-003/</span><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">📷 img.jpg</span>
     </div>
-
-    <div class="progress-wrap hidden" id="progressWrap">
-      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-      <div class="progress-text" id="progressText">Preparing...</div>
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('folderInput').click()">
+      <div class="icon">📁</div>
+      <div class="label" id="dropLabel">Click to select folder</div>
+      <div class="hint">Or drag & drop your product photos folder here</div>
     </div>
+    <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
   </div>
 
-  <!-- RESULTS -->
-  <div class="card hidden" id="card-results">
-    <div class="step-badge" style="background:var(--green-l);color:var(--green);">Complete</div>
-    <h2>Compression Results</h2>
+  <!-- Step 3: Process -->
+  <div class="card" id="processCard" style="display:none">
+    <h2><span class="step">3</span> Compress & Split</h2>
+    <p id="processInfo">Ready to compress</p>
 
-    <div class="total-box" id="totalBox"></div>
+    <button class="btn btn-primary" id="processBtn" onclick="startProcessing()">
+      🚀 Start Compressing
+    </button>
 
-    <div style="margin-top:16px;">
-      <h3 style="font-size:14px;font-weight:700;margin-bottom:8px;">Details</h3>
-      <div id="resultsList"></div>
+    <div class="progress-container" id="progressArea" style="display:none">
+      <div class="progress-header">
+        <span class="progress-label" id="progressLabel">Compressing...</span>
+        <span class="progress-pct" id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+      <div class="progress-detail" id="progressDetail"></div>
     </div>
-  </div>
 
-  <!-- HELP -->
-  <div class="card" style="border-left:3px solid var(--blue);">
-    <h2 style="font-size:14px;">How to Prepare Your Images</h2>
-    <p style="font-size:13px;color:var(--text2);line-height:1.7;margin-top:6px;">
-      1. Create a main folder on your computer (e.g., "My Product Photos")<br>
-      2. Inside it, create subfolders — <strong>name each subfolder as your Product ID</strong><br>
-      3. You can use any ID format: <strong>100001</strong>, <strong>BRK-2024-005</strong>, <strong>TOYOTA-PADS-01</strong>, etc.<br>
-      4. Put your product photos in each subfolder (maximum 5 per product)<br>
-      5. Select the main folder here and compress<br>
-      6. Upload the downloaded ZIP to kuruma.lk
-    </p>
-    <div style="background:var(--bg);border-radius:8px;padding:12px;margin-top:10px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text2);line-height:1.8;">
-      My Product Photos/<br>
-      &nbsp;&nbsp;100001/<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;front.jpg &nbsp;&nbsp;&nbsp;→ becomes 1.jpg (compressed)<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;back.jpg &nbsp;&nbsp;&nbsp;&nbsp;→ becomes 2.jpg (compressed)<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;side.jpg &nbsp;&nbsp;&nbsp;&nbsp;→ becomes 3.jpg (compressed)<br>
-      &nbsp;&nbsp;100002/<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;photo1.jpg &nbsp;→ becomes 1.jpg (compressed)<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;photo2.jpg &nbsp;→ becomes 2.jpg (compressed)<br>
-      &nbsp;&nbsp;BRK-005/<br>
-      &nbsp;&nbsp;&nbsp;&nbsp;img.jpg &nbsp;&nbsp;&nbsp;&nbsp;→ becomes 1.jpg (compressed)
+    <div class="stats" id="statsArea" style="display:none">
+      <div class="stat"><div class="val" id="statProducts">0</div><div class="lbl">Products</div></div>
+      <div class="stat"><div class="val" id="statImages">0</div><div class="lbl">Images</div></div>
+      <div class="stat"><div class="val" id="statZips">0</div><div class="lbl">ZIP Files</div></div>
+      <div class="stat"><div class="val" id="statSaved">0%</div><div class="lbl">Size Saved</div></div>
     </div>
-    <p style="font-size:12px;color:var(--text3);margin-top:10px;line-height:1.6;">
-      <strong style="color:var(--coral);">Important:</strong> The subfolder name IS the Product ID. 
-      It must match your product listing on kuruma.lk. 
-      Default is 6 digits (e.g., 100001) but each vendor can use their own format.
-    </p>
-  </div>
 
+    <div class="zip-list" id="zipList"></div>
+    <div class="log" id="logArea" style="display:none"></div>
+  </div>
 </div>
 
-<!-- JSZip for creating ZIP files -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<!-- FileSaver for downloading -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-
 <script>
-// ─── State ───
-let products = {}; // { productId: [File, File, ...] }
-let mode = "folder";
-let lastZip = null;
-let lastZipName = "";
+  const state = { files: [], folders: new Map(), processing: false }
+  const IMG_EXTS = ['jpg','jpeg','png','gif','webp','bmp','heic']
 
-const SUPPORTED = new Set(['image/jpeg','image/png','image/bmp','image/webp','image/gif','image/tiff']);
+  // Drag & drop
+  const dropZone = document.getElementById('dropZone')
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('active') })
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('active'))
+  dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('active'); handleFiles(e.dataTransfer.files) })
+  document.getElementById('folderInput').addEventListener('change', e => handleFiles(e.target.files))
 
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
+  function handleFiles(fileList) {
+    state.files = []
+    state.folders = new Map()
+    let skipped = 0
 
-// ─── Drag & Drop ───
-const dropZone = document.getElementById('dropZone');
-dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
-dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('drag');
-  const items = e.dataTransfer.items;
-  if (items && items.length > 0) {
-    const entries = [];
-    for (let i = 0; i < items.length; i++) {
-      const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
-      if (entry) entries.push(entry);
+    for (const file of fileList) {
+      const path = file.webkitRelativePath || file.name
+      const parts = path.split('/').filter(p => p.length > 0)
+      if (parts.length < 2) continue
+      if (file.name.startsWith('.') || file.name.startsWith('._') || path.includes('__MACOSX')) continue
+
+      const ext = file.name.split('.').pop().toLowerCase()
+      if (!IMG_EXTS.includes(ext)) { skipped++; continue }
+
+      // Folder name = Part ID (second-to-last segment if nested, or first segment)
+      const folderName = parts.length >= 2 ? parts[parts.length - 2] : parts[0]
+      if (!state.folders.has(folderName)) state.folders.set(folderName, [])
+      state.folders.get(folderName).push(file)
+      state.files.push(file)
     }
-    if (entries.length > 0 && entries.some(e => e.isDirectory)) {
-      readEntries(entries);
-      return;
-    }
-  }
-  // Fallback: treat as individual files
-  const files = Array.from(e.dataTransfer.files).filter(f => SUPPORTED.has(f.type));
-  if (files.length > 0) handleIndividualFiles(files);
-});
 
-async function readEntries(entries) {
-  products = {};
+    const totalSize = state.files.reduce((s, f) => s + f.size, 0)
+    document.getElementById('dropLabel').textContent = `${state.folders.size} product folders · ${state.files.length} images · ${formatSize(totalSize)}`
+    dropZone.classList.add('active')
 
-  // Check if dropped items ARE product folders (multiple folders dropped)
-  let hasSubDirs = false;
-  for (const entry of entries) {
-    if (entry.isDirectory) {
-      const reader = entry.createReader();
-      const subEntries = await new Promise(res => reader.readEntries(res));
-      const subDirs = subEntries.filter(e => e.isDirectory);
-
-      if (subDirs.length > 0) {
-        // This is the MAIN folder — subfolders are product IDs
-        hasSubDirs = true;
-        for (const sub of subEntries) {
-          if (sub.isDirectory) {
-            await readDirectoryFiles(sub, sub.name);
-          }
-        }
-      } else {
-        // This folder itself is a product ID folder
-        await readDirectoryFiles(entry, entry.name);
-      }
+    if (state.folders.size > 0) {
+      document.getElementById('processCard').style.display = 'block'
+      document.getElementById('processInfo').textContent =
+        `${state.folders.size} products, ${state.files.length} images (${formatSize(totalSize)}).` +
+        (skipped > 0 ? ` ${skipped} non-image files skipped.` : '') +
+        ` Will compress and split into ZIP files.`
     }
   }
 
-  if (Object.keys(products).length > 0) {
-    mode = "folder";
-    showScanResults();
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB'
+    if (bytes < 1024*1024*1024) return (bytes/1024/1024).toFixed(1) + ' MB'
+    return (bytes/1024/1024/1024).toFixed(2) + ' GB'
   }
-}
 
-function readDirectoryFiles(dirEntry, productId) {
-  return new Promise((resolve) => {
-    const reader = dirEntry.createReader();
-    reader.readEntries(async (entries) => {
-      const files = [];
-      for (const entry of entries) {
-        if (entry.isFile) {
-          const file = await new Promise(res => entry.file(res));
-          if (SUPPORTED.has(file.type)) files.push(file);
-        }
-      }
-      if (files.length > 0) {
-        // Sort files by name for consistent ordering
-        files.sort((a, b) => a.name.localeCompare(b.name));
-        products[productId] = files;
-      }
-      resolve();
-    });
-  });
-}
-
-// ─── Folder Select ───
-function handleFolderSelect(event) {
-  const files = Array.from(event.target.files);
-  products = {};
-
-  // Group files by their parent folder name (which is the Product ID)
-  files.forEach(file => {
-    if (!SUPPORTED.has(file.type)) return;
-    const path = file.webkitRelativePath || file.name;
-    const parts = path.split('/');
-
-    if (parts.length >= 3) {
-      // MainFolder / ProductID / image.jpg
-      // The SECOND part is the product ID (subfolder name)
-      const productId = parts[1];
-      if (!products[productId]) products[productId] = [];
-      products[productId].push(file);
-    } else if (parts.length === 2) {
-      // MainFolder / image.jpg (no subfolders — all images loose in main folder)
-      if (!products['_unsorted']) products['_unsorted'] = [];
-      products['_unsorted'].push(file);
-    }
-  });
-
-  // Sort files within each product by name
-  Object.keys(products).forEach(pid => {
-    products[pid].sort((a, b) => {
-      const nameA = (a.webkitRelativePath || a.name).split('/').pop();
-      const nameB = (b.webkitRelativePath || b.name).split('/').pop();
-      return nameA.localeCompare(nameB);
-    });
-  });
-
-  if (Object.keys(products).length > 0) {
-    mode = "folder";
-    showScanResults();
+  function log(msg, type='') {
+    const area = document.getElementById('logArea')
+    area.style.display = 'block'
+    area.innerHTML += `<div class="${type}">${msg}</div>`
+    area.scrollTop = area.scrollHeight
   }
-}
 
-// ─── Individual Files ───
-function handleFileSelect(event) {
-  const files = Array.from(event.target.files).filter(f => SUPPORTED.has(f.type));
-  if (files.length > 0) handleIndividualFiles(files);
-}
+  function updateProgress(pct, label, detail) {
+    document.getElementById('progressArea').style.display = 'block'
+    document.getElementById('progressFill').style.width = pct + '%'
+    document.getElementById('progressPct').textContent = Math.round(pct) + '%'
+    if (label) document.getElementById('progressLabel').textContent = label
+    if (detail) document.getElementById('progressDetail').textContent = detail
+  }
 
-function handleIndividualFiles(files) {
-  products = { "Unsorted-Images": files };
-  mode = "single";
-  showScanResults();
-}
-
-// ─── Show Scan Results ───
-function showScanResults() {
-  const maxImg = parseInt(document.getElementById('setMaxImg').value) || 5;
-  const scanBody = document.getElementById('scanBody');
-  scanBody.innerHTML = '';
-
-  let totalProducts = 0;
-  let totalImages = 0;
-  let totalSize = 0;
-  let warnings = 0;
-
-  const sortedIds = Object.keys(products).sort();
-
-  sortedIds.forEach(pid => {
-    const files = products[pid];
-    const count = files.length;
-    const size = files.reduce((s, f) => s + f.size, 0);
-
-    totalProducts++;
-    totalImages += count;
-    totalSize += size;
-
-    let status, tagClass;
-    if (count > maxImg) {
-      status = `${count} found — will use first ${maxImg}`;
-      tagClass = 'tag-warn';
-      warnings++;
-    } else {
-      status = 'Ready';
-      tagClass = 'tag-ok';
-    }
-
-    const displayId = pid === '_unsorted' ? '(No subfolders — loose images)' : pid;
-
-    scanBody.innerHTML += `
-      <tr>
-        <td class="mono" style="font-weight:600;">${displayId}</td>
-        <td class="mono">${count}</td>
-        <td class="mono">${formatSize(size)}</td>
-        <td><span class="tag ${tagClass}">${status}</span></td>
-      </tr>`;
-  });
-
-  document.getElementById('scanSummary').innerHTML = `
-    <div class="summary-item"><div class="n">${totalProducts}</div><div class="l">Products</div></div>
-    <div class="summary-item"><div class="n">${totalImages}</div><div class="l">Images</div></div>
-    <div class="summary-item"><div class="n">${formatSize(totalSize)}</div><div class="l">Total Size</div></div>
-    ${warnings > 0 ? `<div class="summary-item"><div class="n" style="color:var(--yellow)">${warnings}</div><div class="l">Over Limit</div></div>` : ''}
-  `;
-
-  document.getElementById('card-scan').classList.remove('hidden');
-  document.getElementById('card-settings').classList.remove('hidden');
-  document.getElementById('card-compress').classList.remove('hidden');
-  document.getElementById('card-results').classList.add('hidden');
-}
-
-// ─── Compress Image ───
-function compressImage(file, maxWidth, quality) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onerror = () => reject(new Error('Failed to load image'));
+  function compressImage(file, maxKB, maxW, format) {
+    return new Promise(resolve => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let w = img.width, h = img.height;
+        URL.revokeObjectURL(url)
+        const canvas = document.createElement('canvas')
+        let { width, height } = img
+        if (width > maxW) { height = Math.round(height * (maxW / width)); width = maxW }
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0, width, height)
 
-        if (w > maxWidth) {
-          h = (maxWidth / w) * h;
-          w = maxWidth;
+        const mime = format === 'webp' ? 'image/webp' : 'image/jpeg'
+        const ext = format === 'webp' ? '.webp' : '.jpg'
+
+        let lo = 0.1, hi = 0.92, bestBlob = null
+        function tryQ() {
+          const mid = (lo + hi) / 2
+          canvas.toBlob(blob => {
+            if (!blob) { resolve({ blob: file, name: file.name }); return }
+            if (blob.size / 1024 <= maxKB) { bestBlob = blob; lo = mid } else { hi = mid; if (!bestBlob) bestBlob = blob }
+            if (hi - lo > 0.02) tryQ()
+            else {
+              const outName = file.name.replace(/\.[^.]+$/, ext)
+              resolve({ blob: bestBlob || blob, name: outName })
+            }
+          }, mime, mid)
         }
-
-        canvas.width = Math.round(w);
-        canvas.height = Math.round(h);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        canvas.toBlob((blob) => {
-          if (!blob) { reject(new Error('Compression failed')); return; }
-          resolve({
-            blob,
-            originalSize: file.size,
-            compressedSize: blob.size,
-            savings: Math.round((1 - blob.size / file.size) * 100),
-            width: canvas.width,
-            height: canvas.height
-          });
-        }, 'image/jpeg', quality / 100);
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-// ─── Start Compression ───
-async function startCompress() {
-  const maxWidth = parseInt(document.getElementById('setWidth').value) || 800;
-  const quality = parseInt(document.getElementById('setQuality').value) || 70;
-  const maxImg = parseInt(document.getElementById('setMaxImg').value) || 5;
-  const rename = document.getElementById('setRename').checked;
-
-  const btn = document.getElementById('btnCompress');
-  btn.disabled = true;
-  btn.textContent = 'Processing...';
-
-  document.getElementById('progressWrap').classList.remove('hidden');
-  document.getElementById('card-results').classList.add('hidden');
-
-  const zip = new JSZip();
-  const results = [];
-  let totalOrig = 0, totalComp = 0;
-
-  const sortedIds = Object.keys(products).sort();
-  const totalProducts = sortedIds.length;
-
-  for (let pi = 0; pi < sortedIds.length; pi++) {
-    const pid = sortedIds[pi];
-    const files = products[pid].slice(0, maxImg);
-
-    // Use product ID (subfolder name) as ZIP folder name — whatever it is
-    const folderName = pid === '_unsorted' ? 'unsorted' : pid;
-    const folder = zip.folder(folderName);
-
-    for (let fi = 0; fi < files.length; fi++) {
-      try {
-        const result = await compressImage(files[fi], maxWidth, quality);
-
-        let fileName;
-        if (rename) {
-          fileName = `${fi + 1}.jpg`;
-        } else {
-          // Keep original name but change extension to .jpg
-          const origName = (files[fi].webkitRelativePath || files[fi].name).split('/').pop();
-          fileName = origName.replace(/\.[^.]+$/, '.jpg');
-        }
-
-        folder.file(fileName, result.blob);
-        totalOrig += result.originalSize;
-        totalComp += result.compressedSize;
-
-        results.push({
-          productId: folderName,
-          fileName,
-          originalSize: result.originalSize,
-          compressedSize: result.compressedSize,
-          savings: result.savings,
-          dimensions: `${result.width}x${result.height}`
-        });
-      } catch (err) {
-        results.push({
-          productId: folderName,
-          fileName: files[fi].name,
-          originalSize: files[fi].size,
-          compressedSize: 0,
-          savings: 0,
-          error: err.message
-        });
+        tryQ()
       }
-    }
-
-    const progress = Math.round(((pi + 1) / totalProducts) * 100);
-    document.getElementById('progressFill').style.width = progress + '%';
-    document.getElementById('progressText').textContent = `Compressing... ${pi + 1}/${totalProducts} products (${results.length} images)`;
-
-    // Yield to UI so it doesn't freeze
-    await new Promise(r => setTimeout(r, 0));
+      img.onerror = () => { URL.revokeObjectURL(url); resolve({ blob: file, name: file.name }) }
+      img.src = url
+    })
   }
 
-  // Generate and download ZIP
-  document.getElementById('progressText').textContent = 'Creating ZIP file...';
+  async function startProcessing() {
+    if (state.processing || state.folders.size === 0) return
+    state.processing = true
 
-  const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  lastZipName = `kuruma-lk-images-${timestamp}.zip`;
+    const btn = document.getElementById('processBtn')
+    btn.disabled = true
+    btn.textContent = 'Processing...'
 
-  try {
-    lastZip = await zip.generateAsync({
+    const maxKB = parseInt(document.getElementById('maxSizeKB').value) || 125
+    const maxW = parseInt(document.getElementById('maxWidth').value) || 1200
+    const maxZipBytes = (parseInt(document.getElementById('maxZipMB').value) || 400) * 1024 * 1024
+    const format = document.getElementById('outputFormat').value
+
+    document.getElementById('logArea').innerHTML = ''
+    document.getElementById('zipList').innerHTML = ''
+
+    const folderEntries = [...state.folders.entries()]
+    const totalImages = state.files.length
+    let processedImages = 0
+    let totalOriginalSize = 0
+    let totalCompressedSize = 0
+    let zipIndex = 1
+    let currentZip = new JSZip()
+    let currentZipSize = 0
+    let currentZipProducts = 0
+    const downloadedZips = []
+
+    log(`Starting compression: ${folderEntries.length} products, ${totalImages} images`, 'ok')
+    log(`Settings: max ${maxKB}KB, ${maxW}px, ${format.toUpperCase()}, ZIP split at ${formatSize(maxZipBytes)}`)
+
+    for (let fi = 0; fi < folderEntries.length; fi++) {
+      const [folderName, files] = folderEntries[fi]
+
+      // Estimate: will this product's images push us over the ZIP limit?
+      // If current ZIP already has content and adding this might exceed, save and start new
+      const estimatedProductSize = files.length * maxKB * 1024 // rough estimate
+      if (currentZipSize > 0 && currentZipSize + estimatedProductSize > maxZipBytes * 0.95) {
+        // Save current ZIP
+        await saveZip(currentZip, zipIndex, currentZipProducts, currentZipSize, downloadedZips)
+        zipIndex++
+        currentZip = new JSZip()
+        currentZipSize = 0
+        currentZipProducts = 0
+      }
+
+      const folder = currentZip.folder(folderName)
+      let productImageCount = 0
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        totalOriginalSize += file.size
+
+        try {
+          const { blob, name } = await compressImage(file, maxKB, maxW, format)
+          folder.file(name, blob)
+          currentZipSize += blob.size
+          totalCompressedSize += blob.size
+          productImageCount++
+        } catch (err) {
+          log(`⚠ Failed: ${folderName}/${file.name}`, 'warn')
+          totalCompressedSize += file.size
+        }
+
+        processedImages++
+        const pct = (processedImages / totalImages) * 100
+        updateProgress(pct,
+          `Compressing... (ZIP ${zipIndex})`,
+          `${folderName}/${files[i].name} · ${processedImages}/${totalImages} images · ZIP ${zipIndex}`
+        )
+      }
+
+      currentZipProducts++
+      log(`✓ ${folderName}: ${productImageCount} image${productImageCount > 1 ? 's' : ''}`, 'ok')
+    }
+
+    // Save final ZIP if it has content
+    if (currentZipProducts > 0) {
+      await saveZip(currentZip, zipIndex, currentZipProducts, currentZipSize, downloadedZips)
+    }
+
+    // Done
+    const savedPct = totalOriginalSize > 0 ? Math.round((1 - totalCompressedSize / totalOriginalSize) * 100) : 0
+
+    updateProgress(100, 'Complete!', `${downloadedZips.length} ZIP file${downloadedZips.length > 1 ? 's' : ''} downloaded`)
+    document.getElementById('progressFill').classList.add('done')
+
+    document.getElementById('statsArea').style.display = 'grid'
+    document.getElementById('statProducts').textContent = folderEntries.length
+    document.getElementById('statImages').textContent = totalImages
+    document.getElementById('statZips').textContent = downloadedZips.length
+    document.getElementById('statSaved').textContent = savedPct + '%'
+
+    log(`\n✅ Done! ${folderEntries.length} products, ${totalImages} images → ${downloadedZips.length} ZIP file${downloadedZips.length > 1 ? 's' : ''}`, 'ok')
+    log(`Original: ${formatSize(totalOriginalSize)} → Compressed: ${formatSize(totalCompressedSize)} (${savedPct}% saved)`, 'ok')
+
+    btn.textContent = '✅ Done — Scroll down to see ZIP files'
+    state.processing = false
+  }
+
+  async function saveZip(zip, index, productCount, approxSize, downloadedList) {
+    updateProgress(
+      (document.getElementById('progressFill').style.width.replace('%', '') * 1),
+      `Generating ZIP ${index}...`,
+      `Packaging ${productCount} products...`
+    )
+
+    const blob = await zip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
       compressionOptions: { level: 6 }
-    }, (meta) => {
-      document.getElementById('progressText').textContent = `Creating ZIP... ${meta.percent.toFixed(0)}%`;
-    });
+    }, meta => {
+      // ZIP generation progress (optional)
+    })
 
-    saveAs(lastZip, lastZipName);
+    const fileName = `products-part${index}.zip`
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = fileName; a.click()
+    URL.revokeObjectURL(url)
 
-    document.getElementById('progressFill').style.width = '100%';
-    document.getElementById('progressText').textContent = `ZIP downloaded: ${lastZipName} (${formatSize(lastZip.size)})`;
-  } catch (err) {
-    document.getElementById('progressText').textContent = `Error creating ZIP: ${err.message}`;
+    downloadedList.push({ name: fileName, size: blob.size, products: productCount })
+
+    // Add to ZIP list UI
+    const listEl = document.getElementById('zipList')
+    listEl.innerHTML += `
+      <div class="zip-item">
+        <div>
+          <div class="name">📦 ${fileName}</div>
+          <div class="size">${productCount} products · ${formatSize(blob.size)}</div>
+        </div>
+        <div class="size">✅ Downloaded</div>
+      </div>
+    `
+
+    log(`📦 ${fileName}: ${productCount} products, ${formatSize(blob.size)}`, 'ok')
   }
-
-  showResults(results, totalOrig, totalComp);
-
-  btn.disabled = false;
-  btn.textContent = 'Download ZIP Again';
-  btn.onclick = () => { if (lastZip) saveAs(lastZip, lastZipName); };
-
-  document.getElementById('btnReset').classList.remove('hidden');
-}
-
-// ─── Show Results ───
-function showResults(results, totalOrig, totalComp) {
-  const totalSavings = totalOrig > 0 ? Math.round((1 - totalComp / totalOrig) * 100) : 0;
-  const successCount = results.filter(r => !r.error).length;
-  const errorCount = results.filter(r => r.error).length;
-  const productCount = new Set(results.map(r => r.productId)).size;
-
-  document.getElementById('totalBox').innerHTML = `
-    <h3>Compression Complete!</h3>
-    <div class="big">-${totalSavings}% Total Savings</div>
-    <div class="total-stats">
-      <div class="total-stat"><div class="v">${successCount}</div><div class="k">Images Compressed</div></div>
-      <div class="total-stat"><div class="v">${productCount}</div><div class="k">Products</div></div>
-      <div class="total-stat"><div class="v">${formatSize(totalOrig)}</div><div class="k">Original Size</div></div>
-      <div class="total-stat"><div class="v">${formatSize(totalComp)}</div><div class="k">Compressed Size</div></div>
-      <div class="total-stat"><div class="v">${formatSize(totalOrig - totalComp)}</div><div class="k">Space Saved</div></div>
-      ${errorCount > 0 ? `<div class="total-stat"><div class="v" style="color:var(--red);">${errorCount}</div><div class="k">Errors</div></div>` : ''}
-    </div>
-  `;
-
-  const list = document.getElementById('resultsList');
-  list.innerHTML = '';
-
-  results.forEach(r => {
-    if (r.error) {
-      list.innerHTML += `<div class="result-row" style="border-left:3px solid var(--red);">
-        <span class="pid">${r.productId}</span>
-        <span class="fname">${r.fileName}</span>
-        <span style="color:var(--red);font-size:11px;">Error: ${r.error}</span>
-      </div>`;
-    } else {
-      list.innerHTML += `<div class="result-row">
-        <span class="pid">${r.productId}</span>
-        <span class="fname">${r.fileName}</span>
-        <span class="sizes">
-          <span class="orig">${formatSize(r.originalSize)}</span>
-          <span class="arrow">→</span>
-          <span class="comp">${formatSize(r.compressedSize)}</span>
-        </span>
-        <span class="saved">-${r.savings}%</span>
-      </div>`;
-    }
-  });
-
-  document.getElementById('card-results').classList.remove('hidden');
-  document.getElementById('card-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-// ─── Reset ───
-function resetAll() {
-  products = {};
-  mode = "folder";
-  lastZip = null;
-  lastZipName = "";
-
-  document.getElementById('card-scan').classList.add('hidden');
-  document.getElementById('card-settings').classList.add('hidden');
-  document.getElementById('card-compress').classList.add('hidden');
-  document.getElementById('card-results').classList.add('hidden');
-  document.getElementById('progressWrap').classList.add('hidden');
-  document.getElementById('btnReset').classList.add('hidden');
-
-  const btn = document.getElementById('btnCompress');
-  btn.disabled = false;
-  btn.textContent = 'Compress All & Download ZIP';
-  btn.onclick = startCompress;
-
-  document.getElementById('folderInput').value = '';
-  document.getElementById('fileInput').value = '';
-  document.getElementById('progressFill').style.width = '0%';
-
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
 </script>
 
 </body>
