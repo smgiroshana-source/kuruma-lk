@@ -152,6 +152,7 @@ export default function VendorDashboard() {
   // Feature 1,2: Bulk upload duplicate detection + progress
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, phase: '', detail: '' })
   const [bulkDuplicates, setBulkDuplicates] = useState<any[]>([])
+  const [onlyWithImages, setOnlyWithImages] = useState(false)
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [duplicateAction, setDuplicateAction] = useState<'skip' | 'update'>('skip')
 
@@ -397,15 +398,15 @@ export default function VendorDashboard() {
   function updateBulkRow(i: number, k: string, v: string) { setBulkData(p => { const u = [...p]; u[i] = { ...u[i], [k]: v }; return u }) }
   function removeBulkRow(i: number) { setBulkData(p => p.filter((_, x) => x !== i)) }
   async function handleBulkImport() {
-    if (!bulkData.length) return
-    const noImg = bulkData.filter(r => !r.hasImage).length
+    const importData = onlyWithImages ? bulkData.filter(r => r.hasImage) : bulkData; if (!importData.length) { showToast(onlyWithImages ? "No products with images" : "No products"); return }
+    const noImg = importData.filter(r => !r.hasImage).length
     if (noImg > 0 && !confirm(noImg + ' without images. Continue?')) return
 
-    setBulkProgress({ current: 0, total: bulkData.length, phase: 'Checking for duplicates...', detail: '' })
+    setBulkProgress({ current: 0, total: importData.length, phase: 'Checking for duplicates...', detail: '' })
     setBulkLoading(true)
 
     try {
-      const skus = bulkData.map(r => r.partId).filter(Boolean)
+      const skus = importData.map(r => r.partId).filter(Boolean)
       const checkRes = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'bulk_check_skus', skus }) })
       const checkJson = await checkRes.json()
 
@@ -430,14 +431,14 @@ export default function VendorDashboard() {
     setBulkLoading(true)
     let wakeLock: any = null
     try { wakeLock = await (navigator as any).wakeLock?.request("screen") } catch {}
-    const totalSteps = bulkData.length + 1
+    const importData = onlyWithImages ? bulkData.filter(r => r.hasImage) : bulkData; const totalSteps = importData.length + 1
 
     try {
       setBulkProgress({ current: 0, total: totalSteps, phase: 'Creating products...', detail: 'Sending product data to server' })
 
       const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         action: 'bulk_create', mode,
-        products: bulkData.map(row => ({ sku: row.partId, name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, year: row.year, condition: row.condition, price: row.price, quantity: row.quantity, show_price: row.show_price }))
+        products: importData.map(row => ({ sku: row.partId, name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, year: row.year, condition: row.condition, price: row.price, quantity: row.quantity, show_price: row.show_price }))
       }) })
       const j = await r.json()
 
@@ -445,12 +446,12 @@ export default function VendorDashboard() {
 
       setBulkProgress(prev => ({ ...prev, current: 1, phase: 'Uploading images...', detail: `${j.count} products created` }))
 
-      let imageCount = 0; let productsProcessed = 0; const productsWithImages = bulkData.filter(r => r?.imageFiles?.length).length
+      let imageCount = 0; let productsProcessed = 0; const productsWithImages = importData.filter(r => r?.imageFiles?.length).length
       const skuToId = new Map()
       if (j.products) j.products.forEach((p: any) => skuToId.set(p.sku, p.id))
 
-      for (let i = 0; i < bulkData.length; i++) {
-        const row = bulkData[i]
+      for (let i = 0; i < importData.length; i++) {
+        const row = importData[i]
         if (!row?.imageFiles?.length) continue
         const productId = skuToId.get(row.partId)
         if (!productId) continue
@@ -913,6 +914,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
               <div className="flex items-center gap-2"><span className="bg-orange-100 text-orange-600 text-[10px] font-black px-2.5 py-1 rounded-full">STEP 5</span><h3 className="font-bold">Review & Import ({bulkData.length} products)</h3></div>
               <div className="flex gap-2">
                 <button onClick={() => { setBulkData([]); setBulkFile(''); setZipFiles([]); setZipSummary(null) }} className="text-sm text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200">Clear All</button>
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200"><input type="checkbox" checked={onlyWithImages} onChange={e => setOnlyWithImages(e.target.checked)} className="w-4 h-4 accent-orange-500" />Only with images</label>
                 <button onClick={handleBulkImport} disabled={bulkLoading} className="bg-orange-500 text-white text-sm font-bold px-5 py-1.5 rounded-lg disabled:opacity-50 hover:bg-orange-600">{bulkLoading ? 'Importing...' : '🚀 Import All'}</button>
               </div>
             </div>
