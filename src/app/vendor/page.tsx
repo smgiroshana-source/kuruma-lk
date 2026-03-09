@@ -110,6 +110,7 @@ export default function VendorDashboard() {
   const [posPayments, setPosPayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
   const [posNotes, setPosNotes] = useState('')
   const [posLoading, setPosLoading] = useState(false)
+  const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean }>({})
   const [posReceipt, setPosReceipt] = useState<any>(null)
   const [useAdvance, setUseAdvance] = useState(false)
 
@@ -119,6 +120,9 @@ export default function VendorDashboard() {
   const [salesLoading, setSalesLoading] = useState(false)
   const [expandedSale, setExpandedSale] = useState<string | null>(null)
   const [salesView, setSalesView] = useState('overview')
+  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10))
+  const [reportFrom, setReportFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+  const [reportTo, setReportTo] = useState(new Date().toISOString().slice(0, 10))
   const [customerHistoryId, setCustomerHistoryId] = useState<string | null>(null)
   const [customerHistoryName, setCustomerHistoryName] = useState('')
   const [customerHistory, setCustomerHistory] = useState<any[] | null>(null)
@@ -126,6 +130,8 @@ export default function VendorDashboard() {
   // Credit
   const [creditCustomers, setCreditCustomers] = useState<any[]>([])
   const [creditLoading, setCreditLoading] = useState(false)
+  const [showAllCustomers, setShowAllCustomers] = useState(false)
+  const [customerSearch, setCustomerSearch] = useState('')
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<any>(null)
   const [outstandingSales, setOutstandingSales] = useState<any[]>([])
   const [settleSale, setSettleSale] = useState<any>(null)
@@ -149,6 +155,12 @@ export default function VendorDashboard() {
   const [editingCustomer, setEditingCustomer] = useState<any>(null)
   const [editCustomerLoading, setEditCustomerLoading] = useState(false)
 
+  // Void sale modal
+  const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
+  const [returnModal, setReturnModal] = useState<any>(null)
+  const [returnItems, setReturnItems] = useState<Record<string, number>>({})
+  const [returnLoading, setReturnLoading] = useState(false)
+
   // Feature 1,2: Bulk upload duplicate detection + progress
   const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0, phase: '', detail: '' })
   const [bulkDuplicates, setBulkDuplicates] = useState<any[]>([])
@@ -168,7 +180,7 @@ export default function VendorDashboard() {
 
   useEffect(() => { fetchData(); fetchSettings() }, [])
   useEffect(() => { if (tab === 'sales') fetchSales() }, [tab, salesPeriod])
-  useEffect(() => { if (tab === 'credit') fetchCreditCustomers() }, [tab])
+  useEffect(() => { if (tab === 'credit') fetchCreditCustomers() }, [tab, showAllCustomers])
   useEffect(() => {
     if (!customerHistoryId) { setCustomerHistory(null); return }
     fetch(`/api/vendor/sales?customer_id=${customerHistoryId}`).then(r => r.json()).then(j => setCustomerHistory(j.sales || [])).catch(() => setCustomerHistory([]))
@@ -290,7 +302,22 @@ export default function VendorDashboard() {
 
   async function fetchData() { setLoading(true); try { const r = await fetch('/api/vendor/data'); if (r.status === 401 || r.status === 403) { window.location.href = '/login'; return }; if (r.ok) setData(await r.json()) } catch {} setLoading(false) }
   async function fetchSales() { setSalesLoading(true); try { const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`); if (r.ok) setSalesData(await r.json()) } catch {} setSalesLoading(false) }
-  async function fetchCreditCustomers() { setCreditLoading(true); try { const r = await fetch('/api/vendor/customers?credit=true'); if (r.ok) { const j = await r.json(); setCreditCustomers((j.customers || []).filter((c: any) => c.credit?.balance > 0 || c.advance > 0)) } } catch {} setCreditLoading(false) }
+  async function fetchCreditCustomers() {
+    setCreditLoading(true)
+    try {
+      const url = showAllCustomers ? '/api/vendor/customers?credit=true&all=true' : '/api/vendor/customers?credit=true'
+      const r = await fetch(url)
+      if (r.ok) {
+        const j = await r.json()
+        if (showAllCustomers) {
+          setCreditCustomers(j.customers || [])
+        } else {
+          setCreditCustomers((j.customers || []).filter((c: any) => c.credit?.balance > 0 || c.advance > 0))
+        }
+      }
+    } catch {}
+    setCreditLoading(false)
+  }
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 4000) }
   async function handleSignOut() { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = '/' }
@@ -528,6 +555,11 @@ export default function VendorDashboard() {
 
   async function handleCreateSale() {
     if (posCart.length === 0) { showToast('Add items'); return }
+    const errors: { name?: boolean; phone?: boolean } = {}
+    if (!posCustomer.name.trim()) errors.name = true
+    if (!posCustomer.phone.trim()) errors.phone = true
+    if (errors.name || errors.phone) { setPosErrors(errors); setTimeout(() => setPosErrors({}), 3000); return }
+    setPosErrors({})
     setPosLoading(true)
     try {
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -563,7 +595,29 @@ export default function VendorDashboard() {
     setSettleLoading(false)
   }
 
-  async function voidSale(saleId: string) { if (!confirm('Void this sale?')) return; try { const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'void_sale', saleId }) }); const j = await r.json(); if (j.success) { showToast(j.message); fetchSales(); fetchData() } else showToast('Error: ' + j.error) } catch { showToast('Network error') } }
+  async function handleReturn(refundMethod: 'advance' | 'cash') {
+    if (!returnModal) return
+    const items = Object.entries(returnItems).filter(([, qty]) => qty > 0).map(([saleItemId, quantity]) => ({ saleItemId, quantity }))
+    if (items.length === 0) { showToast('Select items to return'); return }
+    setReturnLoading(true)
+    try {
+      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod }) })
+      const j = await r.json()
+      if (j.success) { showToast(j.message); setReturnModal(null); setReturnItems({}); fetchSales(); fetchData() }
+      else showToast('Error: ' + j.error)
+    } catch { showToast('Network error') }
+    setReturnLoading(false)
+  }
+
+  async function voidSale(saleId: string, refundMethod: 'advance' | 'cash') {
+    setVoidModal(null)
+    try {
+      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'void_sale', saleId, refundMethod }) })
+      const j = await r.json()
+      if (j.success) { showToast(j.message); fetchSales(); fetchData() }
+      else showToast('Error: ' + j.error)
+    } catch { showToast('Network error') }
+  }
 
   async function handleEditCustomer() {
     if (!editingCustomer) return
@@ -697,6 +751,216 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
     msg += `%0APlease settle at your earliest convenience.%0AThank you! - ${vendorInfo?.name || 'kuruma.lk'}`
 
     window.open(`https://wa.me/${phone.replace(/[^0-9+]/g, '')}?text=${msg}`, '_blank')
+  }
+
+  // ─── REPORT GENERATORS ───
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any) {
+    // 7:30 PM cutoff: sales after 19:30 go to next day
+    const cutoffHour = 19, cutoffMin = 30
+    const filtered = salesList.filter((s: any) => {
+      if (s.payment_status === 'voided') return false
+      const d = new Date(s.created_at)
+      const saleDate = d.getHours() > cutoffHour || (d.getHours() === cutoffHour && d.getMinutes() >= cutoffMin)
+        ? new Date(d.getTime() + 86400000).toISOString().slice(0, 10)
+        : d.toISOString().slice(0, 10)
+      return saleDate === reportDate
+    })
+
+    const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
+    const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
+    const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
+
+    // Payment method breakdown from actual payments
+    const methodTotals: Record<string, number> = { cash: 0, cheque: 0, bank: 0, card: 0, advance: 0 }
+    filtered.forEach((sale: any) => {
+      if (sale.payments && sale.payments.length > 0) {
+        sale.payments.forEach((p: any) => {
+          const method = p.payment_method || 'cash'
+          methodTotals[method] = (methodTotals[method] || 0) + parseFloat(p.amount || 0)
+        })
+      } else if (parseFloat(sale.paid_amount || 0) > 0) {
+        // Fallback: use sale-level payment_method
+        const method = sale.payment_method || 'cash'
+        methodTotals[method] = (methodTotals[method] || 0) + parseFloat(sale.paid_amount || 0)
+      }
+    })
+
+    const shopName = settings?.invoice_title || vendorInfo?.name || 'kuruma.lk'
+    const dateStr = new Date(reportDate).toLocaleDateString('en-LK', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Daily Report - ${reportDate}</title>
+<style>@page{size:A4;margin:15mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;font-size:13px;color:#333;max-width:800px;margin:0 auto}
+.header{text-align:center;padding:20px 0;border-bottom:3px solid #ff6b35}.shop{font-size:24px;font-weight:900}.date{font-size:14px;color:#666;margin-top:4px}.report-title{font-size:18px;font-weight:800;color:#ff6b35;margin-top:8px;text-transform:uppercase;letter-spacing:1px}
+.summary{display:flex;gap:12px;margin:20px 0;flex-wrap:wrap}.summary-box{flex:1;min-width:120px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:15px;text-align:center}.summary-box .val{font-size:22px;font-weight:900}.summary-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
+.green{color:#16a34a}.red{color:#dc2626}.orange{color:#ff6b35}.blue{color:#2563eb}
+table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;text-align:left;font-size:11px;font-weight:700;padding:10px 8px;border-bottom:2px solid #e2e8f0;text-transform:uppercase}td{padding:10px 8px;font-size:12px;border-bottom:1px solid #f1f5f9}.text-right{text-align:right}
+.method-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:15px 0}.method-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}.method-box .val{font-size:18px;font-weight:900}.method-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
+.footer{text-align:center;padding:20px 0;color:#94a3b8;font-size:10px;border-top:1px solid #e2e8f0;margin-top:20px}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
+<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
+
+<div class="summary">
+<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
+<div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
+<div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
+<div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
+</div>
+
+<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
+<div class="method-grid">
+${methodTotals.cash > 0 ? '<div class="method-box"><div class="val green">Rs.' + methodTotals.cash.toLocaleString() + '</div><div class="lbl">💵 Cash</div></div>' : ''}
+${methodTotals.cheque > 0 ? '<div class="method-box"><div class="val blue">Rs.' + methodTotals.cheque.toLocaleString() + '</div><div class="lbl">📝 Cheque</div></div>' : ''}
+${methodTotals.bank > 0 ? '<div class="method-box"><div class="val" style="color:#7c3aed">Rs.' + methodTotals.bank.toLocaleString() + '</div><div class="lbl">🏦 Bank Transfer</div></div>' : ''}
+${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color:#0891b2">Rs.' + methodTotals.card.toLocaleString() + '</div><div class="lbl">💳 Card</div></div>' : ''}
+${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="color:#059669">Rs.' + methodTotals.advance.toLocaleString() + '</div><div class="lbl">💰 From Advance</div></div>' : ''}
+</div>
+
+<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Transactions (${filtered.length})</h3>
+<table><thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr></thead><tbody>
+${filtered.map((s: any) => '<tr><td><strong>' + s.invoice_no + '</strong></td><td>' + (s.customer_name || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + (s.items || []).map((i: any) => i.product_name).join(', ') + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>').join('')}
+</tbody></table>
+
+<div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
+
+    const win = window.open('', '_blank', 'width=850,height=700')
+    if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+  }
+
+  function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any) {
+    const filtered = salesList.filter((s: any) => s.payment_status !== 'voided')
+    const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
+    const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
+    const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
+
+    const methodTotals: Record<string, number> = { cash: 0, cheque: 0, bank: 0, card: 0, advance: 0 }
+    filtered.forEach((sale: any) => {
+      if (sale.payments && sale.payments.length > 0) {
+        sale.payments.forEach((p: any) => {
+          const method = p.payment_method || 'cash'
+          methodTotals[method] = (methodTotals[method] || 0) + parseFloat(p.amount || 0)
+        })
+      } else if (parseFloat(sale.paid_amount || 0) > 0) {
+        const method = sale.payment_method || 'cash'
+        methodTotals[method] = (methodTotals[method] || 0) + parseFloat(sale.paid_amount || 0)
+      }
+    })
+
+    // Customer-wise credit breakdown
+    const customerCredit: Record<string, { name: string; phone: string; total: number; paid: number; due: number; invoices: number }> = {}
+    filtered.forEach((s: any) => {
+      const due = parseFloat(s.balance_due || 0)
+      if (due <= 0) return
+      const id = s.customer_id || 'walkin'
+      const name = s.customer_name || 'Walk-in'
+      if (!customerCredit[id]) customerCredit[id] = { name, phone: s.customer_phone || '', total: 0, paid: 0, due: 0, invoices: 0 }
+      customerCredit[id].total += parseFloat(s.total || 0)
+      customerCredit[id].paid += parseFloat(s.paid_amount || 0)
+      customerCredit[id].due += due
+      customerCredit[id].invoices++
+    })
+    const creditList = Object.values(customerCredit).sort((a, b) => b.due - a.due)
+
+    // Also include customers with advance balance from the sales data
+    const customerAdvances: Record<string, { name: string; phone: string; advance: number }> = {}
+    filtered.forEach((s: any) => {
+      if (s.payments) {
+        s.payments.forEach((p: any) => {
+          if (p.payment_method === 'advance' && s.customer_id) {
+            const id = s.customer_id
+            if (!customerAdvances[id]) customerAdvances[id] = { name: s.customer_name || 'Unknown', phone: s.customer_phone || '', advance: 0 }
+            customerAdvances[id].advance += parseFloat(p.amount || 0)
+          }
+        })
+      }
+    })
+    const advanceList = Object.values(customerAdvances).filter(c => c.advance > 0).sort((a, b) => b.advance - a.advance)
+
+    const shopName = settings?.invoice_title || vendorInfo?.name || 'kuruma.lk'
+    const fromStr = new Date(fromDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })
+    const toStr = new Date(toDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sales Report ${fromDate} to ${toDate}</title>
+<style>@page{size:A4;margin:15mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;font-size:13px;color:#333;max-width:800px;margin:0 auto}
+.header{text-align:center;padding:20px 0;border-bottom:3px solid #ff6b35}.shop{font-size:24px;font-weight:900}.date{font-size:14px;color:#666;margin-top:4px}.report-title{font-size:18px;font-weight:800;color:#ff6b35;margin-top:8px;text-transform:uppercase;letter-spacing:1px}
+.summary{display:flex;gap:12px;margin:20px 0;flex-wrap:wrap}.summary-box{flex:1;min-width:120px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:15px;text-align:center}.summary-box .val{font-size:22px;font-weight:900}.summary-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
+.green{color:#16a34a}.red{color:#dc2626}.orange{color:#ff6b35}.blue{color:#2563eb}
+table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;text-align:left;font-size:11px;font-weight:700;padding:10px 8px;border-bottom:2px solid #e2e8f0;text-transform:uppercase}td{padding:10px 8px;font-size:12px;border-bottom:1px solid #f1f5f9}.text-right{text-align:right}
+.method-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:15px 0}.method-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}.method-box .val{font-size:18px;font-weight:900}.method-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
+.credit-section{margin-top:20px;page-break-before:auto}.credit-box{background:#fef2f2;border:2px solid #fecaca;border-radius:8px;padding:12px 15px;margin-bottom:8px}
+.footer{text-align:center;padding:20px 0;color:#94a3b8;font-size:10px;border-top:1px solid #e2e8f0;margin-top:20px}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
+<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Sales Report</div><div class="date">${fromStr} — ${toStr}</div></div>
+
+<div class="summary">
+<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
+<div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
+<div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
+<div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
+</div>
+
+<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
+<div class="method-grid">
+${methodTotals.cash > 0 ? '<div class="method-box"><div class="val green">Rs.' + methodTotals.cash.toLocaleString() + '</div><div class="lbl">💵 Cash</div></div>' : ''}
+${methodTotals.cheque > 0 ? '<div class="method-box"><div class="val blue">Rs.' + methodTotals.cheque.toLocaleString() + '</div><div class="lbl">📝 Cheque</div></div>' : ''}
+${methodTotals.bank > 0 ? '<div class="method-box"><div class="val" style="color:#7c3aed">Rs.' + methodTotals.bank.toLocaleString() + '</div><div class="lbl">🏦 Bank Transfer</div></div>' : ''}
+${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color:#0891b2">Rs.' + methodTotals.card.toLocaleString() + '</div><div class="lbl">💳 Card</div></div>' : ''}
+${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="color:#059669">Rs.' + methodTotals.advance.toLocaleString() + '</div><div class="lbl">💰 From Advance</div></div>' : ''}
+</div>
+
+${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Customer Credit Details (Rs.' + totalCredit.toLocaleString() + ' outstanding)</h3><table><thead><tr><th>Customer</th><th>Phone</th><th class="text-right">Total Sales</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th class="text-right">Invoices</th></tr></thead><tbody>' + creditList.map(c => '<tr><td><strong>' + c.name + '</strong></td><td style="font-size:11px">' + c.phone + '</td><td class="text-right">Rs.' + c.total.toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + c.paid.toLocaleString() + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + c.due.toLocaleString() + '</td><td class="text-right">' + c.invoices + '</td></tr>').join('') + '</tbody></table></div>' : ''}
+
+<div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
+
+    const win = window.open('', '_blank', 'width=850,height=700')
+    if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+  }
+
+  function whatsAppDailyReport(salesList: any[], vendorInfo: any, reportDate: string) {
+    const cutoffHour = 19, cutoffMin = 30
+    const filtered = salesList.filter((s: any) => {
+      if (s.payment_status === 'voided') return false
+      const d = new Date(s.created_at)
+      const saleDate = d.getHours() > cutoffHour || (d.getHours() === cutoffHour && d.getMinutes() >= cutoffMin)
+        ? new Date(d.getTime() + 86400000).toISOString().slice(0, 10)
+        : d.toISOString().slice(0, 10)
+      return saleDate === reportDate
+    })
+
+    const total = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
+    const paid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
+    const credit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
+
+    const methods: Record<string, number> = {}
+    filtered.forEach((sale: any) => {
+      if (sale.payments && sale.payments.length > 0) {
+        sale.payments.forEach((p: any) => {
+          const m = p.payment_method || 'cash'
+          methods[m] = (methods[m] || 0) + parseFloat(p.amount || 0)
+        })
+      } else if (parseFloat(sale.paid_amount || 0) > 0) {
+        const m = sale.payment_method || 'cash'
+        methods[m] = (methods[m] || 0) + parseFloat(sale.paid_amount || 0)
+      }
+    })
+
+    const dateStr = new Date(reportDate).toLocaleDateString('en-LK', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+    let msg = `*📊 Daily Sales Report*%0A${vendorInfo?.name || 'kuruma.lk'}%0A${dateStr}%0A%0A`
+    msg += `💰 *Total Sales: Rs.${total.toLocaleString()}*%0A`
+    msg += `✅ Collected: Rs.${paid.toLocaleString()}%0A`
+    if (credit > 0) msg += `⚠️ On Credit: Rs.${credit.toLocaleString()}%0A`
+    msg += `📋 Invoices: ${filtered.length}%0A%0A`
+
+    if (Object.keys(methods).length > 0) {
+      msg += `*Payment Breakdown:*%0A`
+      if (methods.cash) msg += `💵 Cash: Rs.${methods.cash.toLocaleString()}%0A`
+      if (methods.cheque) msg += `📝 Cheque: Rs.${methods.cheque.toLocaleString()}%0A`
+      if (methods.bank) msg += `🏦 Bank: Rs.${methods.bank.toLocaleString()}%0A`
+      if (methods.card) msg += `💳 Card: Rs.${methods.card.toLocaleString()}%0A`
+      if (methods.advance) msg += `💰 Advance: Rs.${methods.advance.toLocaleString()}%0A`
+    }
+
+    msg += `%0A— ${vendorInfo?.name || 'kuruma.lk'}`
+    window.open(`https://wa.me/?text=${msg}`, '_blank')
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>
@@ -1008,7 +1272,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
                   {/* Cart */}
                   {posCart.length === 0 ? <div className="bg-white rounded-xl border border-slate-200 p-8 text-center"><p className="text-3xl opacity-30">🛒</p><p className="text-slate-400 font-semibold">Add products above</p></div> : (
                     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-slate-50"><th className="px-4 py-2 text-left text-xs font-bold text-slate-500">Item</th><th className="px-4 py-2 text-xs font-bold text-slate-500 w-20">Qty</th><th className="px-4 py-2 text-xs font-bold text-slate-500 w-28">Price</th><th className="px-4 py-2 text-right text-xs font-bold text-slate-500 w-24">Total</th><th className="w-8"></th></tr></thead><tbody>
-                      {posCart.map((item, i) => (<tr key={i} className="border-t border-slate-100"><td className="px-4 py-2"><span className="font-mono text-xs text-slate-400 mr-1">{item.productSku}</span><span className="font-semibold">{item.productName}</span></td><td className="px-4 py-2"><input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-16 px-2 py-1 border border-slate-200 rounded text-center text-sm" /></td><td className="px-4 py-2"><input type="number" value={item.unitPrice} onChange={e => updateCartPrice(i, parseFloat(e.target.value) || 0)} className="w-24 px-2 py-1 border border-slate-200 rounded text-sm" /></td><td className="px-4 py-2 text-right font-bold">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td><td className="px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td></tr>))}
+                      {posCart.map((item, i) => (<tr key={i} className="border-t border-slate-100"><td className="px-4 py-2"><span className="font-mono text-xs text-slate-400 mr-1">{item.productSku}</span><span className="font-semibold">{item.productName}</span></td><td className="px-4 py-2"><input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-16 px-2 py-1 border border-slate-200 rounded text-center text-sm" /></td><td className="px-4 py-2"><input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className="w-24 px-2 py-1 border border-slate-200 rounded text-sm" /></td><td className="px-4 py-2 text-right font-bold">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td><td className="px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td></tr>))}
                     </tbody></table></div>
                   )}
                 </div>
@@ -1019,10 +1283,10 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
                     <h3 className="font-bold text-slate-800 text-sm">Customer</h3>
                     <div className="relative">
-                      <input value={posCustomer.name} onChange={e => { setPosCustomer({ ...posCustomer, id: null, name: e.target.value }); searchCustomers(e.target.value) }} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Customer name (type to search)" />
+                      <input value={posCustomer.name} onChange={e => { setPosCustomer({ ...posCustomer, id: null, name: e.target.value }); searchCustomers(e.target.value); if (posErrors.name) setPosErrors(prev => ({ ...prev, name: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none transition-all duration-200 ${posErrors.name ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Customer name (type to search)" />
                       {customerSuggestions.length > 0 && (<div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-40 overflow-y-auto mt-1">{customerSuggestions.map((c: any) => (<button key={c.id} onClick={() => selectCustomer(c)} className="w-full text-left px-3 py-2 hover:bg-orange-50 text-sm border-b border-slate-100"><span className="font-semibold">{c.name}</span>{c.phone && <span className="text-xs text-slate-400 ml-2">{c.phone}</span>}</button>))}</div>)}
                     </div>
-                    <input value={posCustomer.phone} onChange={e => setPosCustomer({...posCustomer, phone: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Phone / WhatsApp" />
+                    <input value={posCustomer.phone} onChange={e => { setPosCustomer({...posCustomer, phone: e.target.value}); if (posErrors.phone) setPosErrors(prev => ({ ...prev, phone: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none transition-all duration-200 ${posErrors.phone ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Phone / WhatsApp" />
                     {posCustomer.id && <p className="text-[10px] text-green-600 font-semibold">✓ Existing customer selected</p>}
                     {posCustomer.outstanding > 0 && (
                       <div className="bg-red-50 border border-red-200 rounded-lg p-2 mt-1">
@@ -1112,7 +1376,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
               const [salesSubTab, setSalesSubTab] = [salesView, setSalesView] as [string, (v: string) => void]
               return (<>
                 <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1">
-                  {[{v:'overview',l:'Overview'},{v:'transactions',l:'Transactions'},{v:'customers',l:'Customers'}].map(t => (
+                  {[{v:'overview',l:'Overview'},{v:'transactions',l:'Transactions'},{v:'customers',l:'Customers'},{v:'reports',l:'📊 Reports'}].map(t => (
                     <button key={t.v} onClick={() => setSalesSubTab(t.v)} className={`flex-1 py-2 text-xs font-bold rounded-md transition ${salesSubTab === t.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>{t.l}</button>
                   ))}
                 </div>
@@ -1259,13 +1523,18 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
                         </div>
                       </button>
                       {expandedSale === sale.id && (<div className="px-3 sm:px-4 pb-3 border-t border-slate-100">
-                        <table className="w-full text-xs mt-2"><tbody>{(sale.items || []).map((i: any) => (<tr key={i.id} className="border-b border-slate-50"><td className="py-1.5"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span>{i.product_name}</td><td className="py-1.5 text-right text-slate-500">x{i.quantity}</td><td className="py-1.5 text-right font-semibold">Rs.{parseFloat(i.total).toLocaleString()}</td></tr>))}</tbody></table>
+                        <table className="w-full text-xs mt-2"><tbody>{(sale.items || []).map((i: any) => { const returned = (i.returned_quantity || 0) >= i.quantity; const partialReturn = i.returned_quantity > 0 && i.returned_quantity < i.quantity; return (<tr key={i.id} className={'border-b border-slate-50 ' + (returned ? 'opacity-40' : '')}><td className="py-1.5"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span><span className={returned ? 'line-through' : ''}>{i.product_name}</span>{returned && <span className="ml-1.5 text-[9px] font-bold text-red-400 bg-red-50 px-1.5 py-0.5 rounded">RETURNED</span>}{partialReturn && <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded">{i.returned_quantity} returned</span>}</td><td className="py-1.5 text-right text-slate-500">x{i.quantity}</td><td className={'py-1.5 text-right font-semibold ' + (returned ? 'line-through text-slate-300' : '')}>{returned ? '' : 'Rs.'}{returned ? '' : parseFloat(i.total).toLocaleString()}{returned && <span className="text-red-400">Rs.{parseFloat(i.total).toLocaleString()}</span>}</td></tr>)})}</tbody></table>
                         {parseFloat(sale.balance_due) > 0 && <p className="text-xs font-bold text-red-600 mt-2">Balance Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p>}
                         <div className="flex gap-2 mt-3 flex-wrap">
-                          <button onClick={() => printInvoice(sale, salesData.vendor, 'thermal', vendorSettings)} className="text-[11px] font-semibold text-slate-600 px-3 py-1.5 rounded border border-slate-200 active:bg-slate-50">🖨️ Thermal</button>
-                          <button onClick={() => printInvoice(sale, salesData.vendor, 'a4', vendorSettings)} className="text-[11px] font-semibold text-blue-600 px-3 py-1.5 rounded border border-blue-200 active:bg-blue-50">📄 A4</button>
-                          {(sale.customer_phone || sale.customer?.phone) && <button onClick={() => sendWhatsAppBill(sale, salesData.vendor, sale.customer_phone || sale.customer?.phone)} className="text-[11px] font-semibold text-green-600 px-3 py-1.5 rounded border border-green-200 active:bg-green-50">💬 WhatsApp</button>}
-                          {sale.payment_status !== 'voided' && <button onClick={() => voidSale(sale.id)} className="text-[11px] font-semibold text-red-500 px-3 py-1.5 rounded border border-red-200 active:bg-red-50">Void</button>}
+                          <div className="relative">
+                            <button onClick={() => { const el = document.getElementById('print-menu-' + sale.id); if (el) el.classList.toggle('hidden') }} className="text-[11px] font-semibold text-slate-600 px-3 py-1.5 rounded border border-slate-200 active:bg-slate-50">🖨️ Print ▾</button>
+                            <div id={'print-menu-' + sale.id} className="hidden absolute left-0 bottom-full mb-1 bg-white rounded-lg border border-slate-200 shadow-lg z-20 overflow-hidden min-w-[140px]">
+                              <button onClick={() => { printInvoice(sale, salesData.vendor, 'thermal', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 border-b border-slate-100">🖨️ Thermal</button>
+                              <button onClick={() => { printInvoice(sale, salesData.vendor, 'a4', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border-b border-slate-100">📄 A4 Print</button>
+                              {(sale.customer_phone || sale.customer?.phone) && <button onClick={() => { sendWhatsAppBill(sale, salesData.vendor, sale.customer_phone || sale.customer?.phone); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-green-600 hover:bg-green-50">💬 WhatsApp</button>}
+                            </div>
+                          </div>
+                          {sale.payment_status !== 'voided' && <button onClick={() => { setReturnModal(sale); setReturnItems({}) }} className="text-[11px] font-semibold text-amber-600 px-3 py-1.5 rounded border border-amber-200 active:bg-amber-50">↩ Return</button>}
                           {sale.customer_id && <button onClick={() => { setCustomerHistoryId(sale.customer_id); setCustomerHistoryName(sale.customer?.name || sale.customer_name) }} className="text-[11px] font-semibold text-purple-600 px-3 py-1.5 rounded border border-purple-200 active:bg-purple-50">👤 History</button>}
                         </div>
                       </div>)}
@@ -1300,7 +1569,61 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
                     )}
                   </div>
                 )}
+
+                {/* ─── REPORTS ─── */}
+                {salesSubTab === "reports" && (
+                  <div className="space-y-4">
+                    <div className="bg-white rounded-xl border border-slate-200 p-5">
+                      <h3 className="font-bold text-sm text-slate-800 mb-3">📅 Daily Report</h3>
+                      <p className="text-xs text-slate-400 mb-3">Business day: 7:30 PM previous day to 7:30 PM selected day</p>
+                      <div className="flex items-end gap-3 flex-wrap">
+                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                        <button onClick={() => generateDailyReport(salesData?.sales || [], data?.vendor, reportDate, vendorSettings)} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                        <button onClick={() => whatsAppDailyReport(salesData?.sales || [], data?.vendor, reportDate)} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp Summary</button>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-5">
+                      <h3 className="font-bold text-sm text-slate-800 mb-3">📆 Period Report</h3>
+                      <p className="text-xs text-slate-400 mb-3">Includes customer-wise credit details</p>
+                      <div className="flex items-end gap-3 flex-wrap">
+                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label><input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label><input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                        <button onClick={() => { const allSales = (salesData?.sales || []).filter((s: any) => { const d = s.created_at.slice(0, 10); return d >= reportFrom && d <= reportTo }); generatePeriodReport(allSales, data?.vendor, reportFrom, reportTo, vendorSettings) }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        {[{l:"This Week",f:7},{l:"This Month",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(new Date().toISOString().slice(0, 10)) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>)
+
+
+                {salesSubTab === "reports" && (
+                  <div className="space-y-4">
+                    <div className="bg-white rounded-xl border border-slate-200 p-5">
+                      <h3 className="font-bold text-sm text-slate-800 mb-3">📅 Daily Report</h3>
+                      <p className="text-xs text-slate-400 mb-3">Business day: 7:30 PM previous day to 7:30 PM selected day</p>
+                      <div className="flex items-end gap-3 flex-wrap">
+                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                        <button onClick={() => generateDailyReport(salesData?.sales || [], data?.vendor, reportDate, vendorSettings)} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                        <button onClick={() => whatsAppDailyReport(salesData?.sales || [], data?.vendor, reportDate)} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp Summary</button>
+                      </div>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-5">
+                      <h3 className="font-bold text-sm text-slate-800 mb-3">📆 Period Report</h3>
+                      <p className="text-xs text-slate-400 mb-3">Includes customer-wise credit details</p>
+                      <div className="flex items-end gap-3 flex-wrap">
+                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label><input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label><input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                        <button onClick={() => { const allSales = (salesData?.sales || []).filter((s: any) => { const d = s.created_at.slice(0, 10); return d >= reportFrom && d <= reportTo }); generatePeriodReport(allSales, data?.vendor, reportFrom, reportTo, vendorSettings) }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        {[{l:"This Week",f:7},{l:"This Month",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(new Date().toISOString().slice(0, 10)) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
+                      </div>
+                    </div>
+                  </div>
+                )}
             })()}
 
           </div>) : null}
@@ -1368,7 +1691,19 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
 
         {/* CREDIT */}
         {tab === 'credit' && (<div>
-          <h1 className="text-2xl font-black text-slate-900 mb-4">💳 Credit & Settlements</h1>
+          <h1 className="text-2xl font-black text-slate-900 mb-4">💳 Credit & Customers</h1>
+            <div className="flex items-center gap-3 mb-4 flex-wrap">
+              <div className="relative flex-1 min-w-[200px]">
+                <svg className="absolute left-3 top-[10px] text-[#bbb]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                <input type="text" placeholder="Search customers..." value={customerSearch} onChange={e => setCustomerSearch(e.target.value)}
+                  className="w-full pl-8 pr-4 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                {customerSearch && <button onClick={() => setCustomerSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">✕</button>}
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-slate-200">
+                <input type="checkbox" checked={showAllCustomers} onChange={e => setShowAllCustomers(e.target.checked)} className="w-4 h-4 accent-orange-500" />
+                <span className="text-xs font-semibold text-slate-600">Show All Customers</span>
+              </label>
+            </div>
 
           {/* Settle modal */}
           {settleSale && selectedCreditCustomer && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setSettleSale(null)}>
@@ -1429,7 +1764,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
               {/* Customer list */}
               <div className="space-y-2">
                 <h3 className="font-bold text-slate-800 text-sm mb-2">Customers with Credit ({creditCustomers.length})</h3>
-                {creditCustomers.length === 0 ? <div className="bg-white rounded-xl border border-slate-200 p-6 text-center"><p className="text-2xl opacity-30">✅</p><p className="text-slate-400 text-sm font-semibold mt-2">No outstanding credit or advances</p></div> : creditCustomers.map((c: any) => (
+                {(() => { const filtered = creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }); return filtered.length === 0 })() ? <div className="bg-white rounded-xl border border-slate-200 p-6 text-center"><p className="text-2xl opacity-30">✅</p><p className="text-slate-400 text-sm font-semibold mt-2">No outstanding credit or advances</p></div> : creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }).map((c: any) => (
                   <button key={c.id} onClick={() => loadOutstanding(c)} className={'w-full text-left bg-white rounded-xl border px-4 py-3 hover:shadow-md transition ' + (selectedCreditCustomer?.id === c.id ? 'border-orange-500 bg-orange-50' : 'border-slate-200')}>
                     <div className="flex items-center justify-between">
                       <div><p className="font-bold text-sm">{c.name}</p>{c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}</div>
@@ -1537,6 +1872,141 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
             </div>
           )}
         </div>)}
+
+        {/* RETURN ITEMS MODAL */}
+        {returnModal && (
+          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setReturnModal(null)}>
+            <div className="bg-white rounded-2xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="bg-amber-50 px-5 py-4 border-b border-amber-100 flex-shrink-0">
+                <h3 className="font-bold text-base text-amber-800">↩ Return Items</h3>
+                <p className="text-xs text-amber-600 mt-1">{returnModal.invoice_no} · {returnModal.customer_name}</p>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 py-4">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select items & quantities to return</p>
+                <div className="space-y-3">
+                  {(returnModal.items || []).map((item: any) => {
+                    const maxReturn = item.quantity - (item.returned_quantity || 0)
+                    const currentReturn = returnItems[item.id] || 0
+                    if (maxReturn <= 0) return (
+                      <div key={item.id} className="bg-slate-50 rounded-xl p-3 opacity-50">
+                        <div className="flex justify-between items-center">
+                          <div><p className="font-semibold text-xs text-slate-500 line-through">{item.product_name}</p></div>
+                          <span className="text-[10px] font-bold text-slate-400">Fully returned</span>
+                        </div>
+                      </div>
+                    )
+                    return (
+                      <div key={item.id} className={`rounded-xl p-3 border-2 transition ${currentReturn > 0 ? 'border-amber-300 bg-amber-50' : 'border-slate-100 bg-white'}`}>
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-sm text-slate-800">{item.product_name}</p>
+                            <p className="text-xs text-slate-400">{item.product_sku} · Rs.{parseFloat(item.unit_price).toLocaleString()} each</p>
+                          </div>
+                          <span className="text-xs font-semibold text-slate-400 flex-shrink-0 ml-2">Bought: {item.quantity}</span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-semibold text-slate-500">Return:</span>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => setReturnItems(prev => ({ ...prev, [item.id]: Math.max(0, (prev[item.id] || 0) - 1) }))}
+                              className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center font-bold text-slate-600 active:bg-slate-200">−</button>
+                            <span className="w-10 text-center font-black text-base">{currentReturn}</span>
+                            <button onClick={() => setReturnItems(prev => ({ ...prev, [item.id]: Math.min(maxReturn, (prev[item.id] || 0) + 1) }))}
+                              className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center font-bold text-amber-700 active:bg-amber-200">+</button>
+                          </div>
+                          <button onClick={() => setReturnItems(prev => ({ ...prev, [item.id]: maxReturn }))}
+                            className="text-[10px] font-bold text-amber-600 active:text-amber-800 ml-auto">All ({maxReturn})</button>
+                          {currentReturn > 0 && <span className="text-xs font-bold text-amber-600">Rs.{(currentReturn * parseFloat(item.unit_price)).toLocaleString()}</span>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                {(() => {
+                  const totalRefund = Object.entries(returnItems).reduce((sum, [itemId, qty]) => {
+                    const item = (returnModal.items || []).find((i: any) => i.id === itemId)
+                    return sum + (item ? qty * parseFloat(item.unit_price) : 0)
+                  }, 0)
+                  if (totalRefund <= 0) return null
+                  return (
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                      <div className="flex justify-between items-center mb-4">
+                        <span className="text-sm font-bold text-slate-700">Total Refund</span>
+                        <span className="text-xl font-black text-amber-600">Rs.{totalRefund.toLocaleString()}</span>
+                      </div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Refund Method</p>
+                      <div className="space-y-2">
+                        <button onClick={() => handleReturn('advance')} disabled={returnLoading}
+                          className="w-full text-left px-4 py-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 active:bg-emerald-100 transition disabled:opacity-50">
+                          <div className="font-bold text-sm text-emerald-800">💰 Add Rs.{totalRefund.toLocaleString()} to Advance</div>
+                          <p className="text-xs text-emerald-600 mt-0.5">Customer can use it for future purchases</p>
+                        </button>
+                        <button onClick={() => handleReturn('cash')} disabled={returnLoading}
+                          className="w-full text-left px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 active:bg-slate-100 transition disabled:opacity-50">
+                          <div className="font-bold text-sm text-slate-800">💵 Cash Refund Rs.{totalRefund.toLocaleString()}</div>
+                          <p className="text-xs text-slate-500 mt-0.5">Give cash back to customer</p>
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })()}
+              </div>
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex-shrink-0">
+                <button onClick={() => setReturnModal(null)} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VOID SALE MODAL */}
+        {voidModal && (
+          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setVoidModal(null)}>
+            <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="bg-red-50 px-5 py-4 border-b border-red-100">
+                <h3 className="font-bold text-base text-red-800">Void Sale</h3>
+                <p className="text-xs text-red-600 mt-1">This will reverse the sale and restore stock</p>
+              </div>
+              <div className="px-5 py-4">
+                <div className="bg-slate-50 rounded-xl p-3 mb-4">
+                  <p className="text-sm font-bold text-slate-800">{voidModal.customerName}</p>
+                  <div className="flex justify-between mt-1">
+                    <span className="text-xs text-slate-500">Sale Total</span>
+                    <span className="text-sm font-black text-slate-800">Rs.{voidModal.total.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between mt-0.5">
+                    <span className="text-xs text-slate-500">Amount Paid</span>
+                    <span className="text-sm font-bold text-green-600">Rs.{voidModal.paid.toLocaleString()}</span>
+                  </div>
+                </div>
+                {voidModal.paid > 0 ? (
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">How to refund Rs.{voidModal.paid.toLocaleString()}?</p>
+                    <div className="space-y-2">
+                      <button onClick={() => voidSale(voidModal.saleId, 'advance')}
+                        className="w-full text-left px-4 py-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 hover:bg-emerald-100 transition">
+                        <div className="font-bold text-sm text-emerald-800">💰 Add to Customer Advance</div>
+                        <p className="text-xs text-emerald-600 mt-0.5">Rs.{voidModal.paid.toLocaleString()} will be added to their advance balance for future purchases</p>
+                      </button>
+                      <button onClick={() => voidSale(voidModal.saleId, 'cash')}
+                        className="w-full text-left px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-slate-100 transition">
+                        <div className="font-bold text-sm text-slate-800">💵 Cash Refund</div>
+                        <p className="text-xs text-slate-500 mt-0.5">Record as cash refund — give Rs.{voidModal.paid.toLocaleString()} back to customer</p>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-3">No payments to refund. Stock will be restored.</p>
+                    <button onClick={() => voidSale(voidModal.saleId, 'cash')}
+                      className="w-full bg-red-500 hover:bg-red-600 text-white font-bold text-sm py-3 rounded-xl transition">Void Sale</button>
+                  </div>
+                )}
+              </div>
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100">
+                <button onClick={() => setVoidModal(null)} className="w-full text-sm font-semibold text-slate-500 py-2 hover:text-slate-700">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* SETTINGS */}
         {tab === 'settings' && (<div>

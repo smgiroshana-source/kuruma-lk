@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   if (customerId) {
     const { data: custSales } = await admin
       .from('sales')
-      .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, total), payments:payments(id, amount, payment_method, cheque_number, created_at)')
+      .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, cheque_number, created_at)')
       .eq('vendor_id', vendor.id)
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false })
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
   let query = admin
     .from('sales')
-    .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, total), customer:customers(id, name, phone)')
+    .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, cheque_number), customer:customers(id, name, phone)')
     .eq('vendor_id', vendor.id)
     .order('created_at', { ascending: false })
 
@@ -91,8 +91,18 @@ export async function GET(req: NextRequest) {
   // Payment method breakdown
   const methodMap: Record<string, number> = {}
   activeSales.forEach((s: any) => {
-    const method = s.payment_method || 'cash'
-    methodMap[method] = (methodMap[method] || 0) + parseFloat(s.total || 0)
+    if (s.payments && s.payments.length > 0) {
+      s.payments.forEach((p: any) => {
+        const method = p.payment_method || 'cash'
+        methodMap[method] = (methodMap[method] || 0) + parseFloat(p.amount || 0)
+      })
+    } else {
+      const method = s.payment_method || 'cash'
+      methodMap[method] = (methodMap[method] || 0) + parseFloat(s.paid_amount || 0)
+    }
+    if (parseFloat(s.balance_due || 0) > 0) {
+      methodMap['credit'] = (methodMap['credit'] || 0) + parseFloat(s.balance_due || 0)
+    }
   })
   const paymentBreakdown = Object.entries(methodMap).map(([method, amount]) => ({ method, amount })).sort((a, b) => b.amount - a.amount)
 
@@ -325,19 +335,151 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'void_sale') {
-    const { saleId } = body
-    const { data: sale } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
+    const { saleId, refundMethod } = body
+    // refundMethod: 'advance' (credit to customer) | 'cash' (cash back, just record it)
+    const { data: sale } = await admin.from('sales').select('*, items:sale_items(*), payments:payments(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!sale) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (sale.payment_status === 'voided') return NextResponse.json({ error: 'Already voided' }, { status: 400 })
 
+    // 1. Restore stock for each item
     for (const item of (sale.items || [])) {
       if (item.product_id) {
         const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
-        if (product) { await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id) }
+        if (product) await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id)
       }
     }
 
-    await admin.from('sales').update({ payment_status: 'voided', balance_due: 0 }).eq('id', saleId)
-    return NextResponse.json({ success: true, message: 'Sale voided, stock restored' })
+    // 2. Calculate what was paid
+    const payments = sale.payments || []
+    const cashPaid = payments.filter((p: any) => ['cash','cheque','bank','card'].includes(p.payment_method)).reduce((s: number, p: any) => s + parseFloat(p.amount || 0), 0)
+    const advanceUsed = payments.filter((p: any) => p.payment_method === 'advance').reduce((s: number, p: any) => s + parseFloat(p.amount || 0), 0)
+    const balanceDue = parseFloat(sale.balance_due || 0)
+
+    // 3. Handle customer balance adjustments
+    if (sale.customer_id) {
+      const { data: customer } = await admin.from('customers').select('advance_balance').eq('id', sale.customer_id).single()
+      if (customer) {
+        let newAdvance = parseFloat(customer.advance_balance || 0)
+
+        // Restore advance that was used for this sale
+        if (advanceUsed > 0) newAdvance += advanceUsed
+
+        // If cash was paid, either refund to advance or just record cash back
+        if (cashPaid > 0 && refundMethod === 'advance') {
+          newAdvance += cashPaid
+        }
+
+        await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', sale.customer_id)
+
+        // If sale had outstanding balance (credit), reduce it — already handled by voiding the sale
+      }
+    }
+
+    // 4. Mark sale as voided
+    await admin.from('sales').update({
+      payment_status: 'voided',
+      balance_due: 0,
+      notes: (sale.notes || '') + '\nVOIDED: ' + new Date().toISOString() + (refundMethod === 'advance' ? ' | Refund to advance' : ' | Cash refund')
+    }).eq('id', saleId)
+
+    const messages = ['Sale voided, stock restored']
+    if (advanceUsed > 0) messages.push(`Rs.${advanceUsed.toLocaleString()} advance restored`)
+    if (cashPaid > 0 && refundMethod === 'advance') messages.push(`Rs.${cashPaid.toLocaleString()} added to advance`)
+    if (cashPaid > 0 && refundMethod !== 'advance') messages.push(`Rs.${cashPaid.toLocaleString()} cash to refund`)
+    if (balanceDue > 0) messages.push(`Rs.${balanceDue.toLocaleString()} outstanding cleared`)
+
+    return NextResponse.json({ success: true, message: messages.join('. '), advanceRestored: advanceUsed, cashRefund: refundMethod !== 'advance' ? cashPaid : 0, creditedToAdvance: (refundMethod === 'advance' ? cashPaid : 0) + advanceUsed })
+  }
+
+  // ─── RETURN ITEMS (partial or full) ───
+  if (action === 'return_items') {
+    const { saleId, returnItems, refundMethod } = body
+    // returnItems: [{ saleItemId, quantity }]
+    // refundMethod: 'advance' | 'cash'
+    if (!saleId || !returnItems || !Array.isArray(returnItems) || returnItems.length === 0)
+      return NextResponse.json({ error: 'No items to return' }, { status: 400 })
+
+    const { data: sale } = await admin
+      .from('sales')
+      .select('*, items:sale_items(*), payments:payments(*)')
+      .eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!sale) return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
+    if (sale.payment_status === 'voided') return NextResponse.json({ error: 'Sale is already voided' }, { status: 400 })
+
+    let totalRefund = 0
+    const returnedDetails: string[] = []
+
+    // 1. Process each return item
+    for (const ri of returnItems) {
+      const saleItem = (sale.items || []).find((si: any) => si.id === ri.saleItemId)
+      if (!saleItem) continue
+      const returnQty = Math.min(ri.quantity, saleItem.quantity - (saleItem.returned_quantity || 0))
+      if (returnQty <= 0) continue
+
+      const refundAmount = returnQty * parseFloat(saleItem.unit_price)
+      totalRefund += refundAmount
+
+      // Restore stock
+      if (saleItem.product_id) {
+        const { data: product } = await admin.from('products').select('quantity').eq('id', saleItem.product_id).single()
+        if (product) await admin.from('products').update({ quantity: product.quantity + returnQty }).eq('id', saleItem.product_id)
+      }
+
+      // Update sale item returned quantity
+      await admin.from('sale_items').update({
+        returned_quantity: (saleItem.returned_quantity || 0) + returnQty
+      }).eq('id', saleItem.id)
+
+      returnedDetails.push(saleItem.product_name + ' x' + returnQty)
+    }
+
+    if (totalRefund <= 0)
+      return NextResponse.json({ error: 'Nothing to return' }, { status: 400 })
+
+    // 2. Update sale totals
+    const newPaidAmount = Math.max(0, parseFloat(sale.paid_amount || 0) - totalRefund)
+    const newTotal = Math.max(0, parseFloat(sale.total) - totalRefund)
+    const newSubtotal = Math.max(0, parseFloat(sale.subtotal) - totalRefund)
+    const newBalanceDue = Math.max(0, newTotal - newPaidAmount)
+
+    // Check if all items fully returned
+    const { data: updatedItems } = await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)
+    const allReturned = (updatedItems || []).every((i: any) => (i.returned_quantity || 0) >= i.quantity)
+
+    await admin.from('sales').update({
+      total: newTotal,
+      subtotal: newSubtotal,
+      paid_amount: newPaidAmount,
+      balance_due: newBalanceDue,
+      payment_status: allReturned ? 'voided' : newBalanceDue > 0 ? 'partial' : 'paid',
+      notes: (sale.notes || '') + '\nRETURN: ' + new Date().toISOString() + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund')
+    }).eq('id', saleId)
+
+    // 3. Handle refund to customer
+    if (sale.customer_id && totalRefund > 0) {
+      if (refundMethod === 'advance') {
+        const { data: customer } = await admin.from('customers').select('advance_balance').eq('id', sale.customer_id).single()
+        if (customer) {
+          await admin.from('customers').update({
+            advance_balance: parseFloat(customer.advance_balance || 0) + totalRefund
+          }).eq('id', sale.customer_id)
+        }
+      }
+      // Record refund payment
+      await admin.from('payments').insert({
+        sale_id: saleId, vendor_id: vendor.id,
+        amount: -totalRefund,
+        payment_method: refundMethod === 'advance' ? 'advance' : 'cash',
+        notes: 'RETURN: ' + returnedDetails.join(', ')
+      })
+    }
+
+    return NextResponse.json({
+      success: true,
+      refundAmount: totalRefund,
+      allReturned,
+      message: 'Returned: ' + returnedDetails.join(', ') + '. Refund: Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' added to advance' : ' cash back')
+    })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
