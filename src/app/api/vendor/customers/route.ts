@@ -74,8 +74,10 @@ export async function POST(req: NextRequest) {
     if (!name?.trim()) return NextResponse.json({ error: 'Customer name required' }, { status: 400 })
 
     const { data: customer, error } = await admin.from('customers').insert({
-      vendor_id: vendor.id, name: name.trim(), phone: phone || null,
-      whatsapp: whatsapp || phone || null, email: email || null,
+      vendor_id: vendor.id, name: name.trim(),
+      phone: phone ? phone.replace(/\D/g, '').replace(/^94/, '0').slice(0, 10) : null,
+      whatsapp: (whatsapp || phone) ? (whatsapp || phone).replace(/\D/g, '').replace(/^94/, '0').slice(0, 10) : null,
+      email: email || null,
       address: address || null, notes: notes || null,
     }).select().single()
 

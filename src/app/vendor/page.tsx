@@ -1,4 +1,5 @@
 'use client'
+import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constants'
 
 import { useState, useEffect, useRef } from 'react'
 
@@ -87,6 +88,7 @@ ${termsHtml}
 }
 
 function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
+  const waPhone = toWhatsAppNumber(phone)
   const items = (sale.items || []).map((i: any) => `• ${i.product_sku || ''} ${i.product_name} x${i.quantity} = Rs.${parseFloat(i.total).toLocaleString()}`).join('%0A')
   const payments = (sale.payments || []).map((p: any) => `  ${(p.payment_method || 'cash').toUpperCase()}: Rs.${parseFloat(p.amount).toLocaleString()}`).join('%0A')
   let msg = `*Invoice: ${sale.invoice_no}*%0A${vendor?.name || 'kuruma.lk'}%0A${formatDate(sale.created_at)}%0A%0A${items}%0A%0ASubtotal: Rs.${parseFloat(sale.subtotal).toLocaleString()}`
@@ -95,7 +97,7 @@ function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
   if (payments) msg += `%0A%0APayments:%0A${payments}`
   if (parseFloat(sale.balance_due) > 0) msg += `%0A%0A⚠️ *BALANCE DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}*`
   msg += `%0A%0AThank you! - ${vendor?.name || 'kuruma.lk'}`
-  window.open(`https://wa.me/${phone.replace(/[^0-9+]/g, '')}?text=${msg}`, '_blank')
+  window.open(`https://wa.me/${waPhone}?text=${msg}`, '_blank')
 }
 
 export default function VendorDashboard() {
@@ -141,6 +143,8 @@ export default function VendorDashboard() {
   const [salesPeriod, setSalesPeriod] = useState('today')
   const [salesLoading, setSalesLoading] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [settingsPhoneError, setSettingsPhoneError] = useState('')
+  const [posPhoneError, setPosPhoneError] = useState('')
   const [exportFrom, setExportFrom] = useState('')
   const [exportTo, setExportTo] = useState('')
   const [exportLoading, setExportLoading] = useState(false)
@@ -763,8 +767,9 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
 
   function sendWhatsAppCreditReport(customer: any, sales: any[], vendorInfo: any) {
     const totalDue = sales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
-    const phone = customer.whatsapp || customer.phone
-    if (!phone) { showToast('No phone number for this customer'); return }
+    const rawPhone = customer.whatsapp || customer.phone
+    if (!rawPhone) { showToast('No phone number for this customer'); return }
+    const phone = toWhatsAppNumber(rawPhone)
 
     let msg = `*CREDIT STATEMENT*%0A${vendorInfo?.name || 'kuruma.lk'}%0ADate: ${new Date().toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })}%0A%0ADear ${customer.name},%0A%0AHere is your outstanding balance:%0A`
     sales.forEach((s: any) => {
@@ -776,7 +781,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
     if (parseFloat(customer.advance_balance || 0) > 0) msg += `Advance Balance: Rs.${parseFloat(customer.advance_balance || 0).toLocaleString()}%0A`
     msg += `%0APlease settle at your earliest convenience.%0AThank you! - ${vendorInfo?.name || 'kuruma.lk'}`
 
-    window.open(`https://wa.me/${phone.replace(/[^0-9+]/g, '')}?text=${msg}`, '_blank')
+    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
   }
 
   // ─── REPORT GENERATORS ───
@@ -2333,16 +2338,28 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Address</label>
                   <input type="text" defaultValue={vendor?.address || ''} id="settings-address" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Phone</label>
-                    <input type="text" defaultValue={vendor?.phone || ''} id="settings-phone" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                  <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">WhatsApp</label>
-                    <input type="text" defaultValue={vendor?.whatsapp || ''} id="settings-whatsapp" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Phone</label>
+                    <input type="tel" defaultValue={vendor?.phone || ''} id="settings-phone" maxLength={10} placeholder="0771234567"
+                      onChange={() => setSettingsPhoneError('')}
+                      onBlur={e => { const d = e.target.value.replace(/\D/g,''); setSettingsPhoneError(d && (d.length !== 10 || !d.startsWith('0')) ? 'Must be 10 digits starting with 0' : '') }}
+                      className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${settingsPhoneError ? 'border-red-400' : 'border-slate-200'}`} />
+                    {settingsPhoneError && <p className="text-red-500 text-[10px] mt-1 font-medium">{settingsPhoneError}</p>}
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">WhatsApp</label>
+                    <input type="tel" defaultValue={vendor?.whatsapp || ''} id="settings-whatsapp" maxLength={10} placeholder="0771234567"
+                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                  </div>
                 </div>
                 <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Description</label>
                   <textarea defaultValue={vendor?.description || ''} id="settings-description" rows={3} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" /></div>
                 <button onClick={() => {
                   const v = (id: string) => (document.getElementById(id) as HTMLInputElement)?.value || ''
-                  updateShopInfo({ name: v('settings-name'), location: v('settings-location'), address: v('settings-address'), phone: v('settings-phone'), whatsapp: v('settings-whatsapp'), description: v('settings-description') })
+                  const ph = v('settings-phone').replace(/\D/g,'')
+                  if (ph && (ph.length !== 10 || !ph.startsWith('0'))) { setSettingsPhoneError('Must be 10 digits starting with 0 (e.g. 0771234567)'); return }
+                  setSettingsPhoneError('')
+                  updateShopInfo({ name: v('settings-name'), location: v('settings-location'), address: v('settings-address'), phone: formatPhoneSL(v('settings-phone')), whatsapp: formatPhoneSL(v('settings-whatsapp')), description: v('settings-description') })
                 }} className="bg-orange-500 active:bg-orange-600 text-white text-sm font-bold px-5 py-2.5 rounded-lg w-full sm:w-auto">Save Shop Info</button>
               </div>
             </div>

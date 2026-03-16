@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
 
   let query = admin
     .from('sales')
-    .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total), customer:customers(id, name, phone)')
+    .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
     .eq('vendor_id', vendor.id)
     .order('created_at', { ascending: false })
 
