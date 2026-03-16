@@ -39,9 +39,11 @@ export async function POST(req: NextRequest) {
     const { data: product, error } = await admin.from('products').insert({
       vendor_id: vendor.id, sku, name: pd.name, description: pd.description || '',
       category: pd.category || 'Other', make: pd.make || null, model: pd.model || null,
-      year: pd.year || null, condition: pd.condition || 'Good',
-      price: pd.price ? parseInt(pd.price) : null, show_price: pd.show_price !== false,
-      quantity: parseInt(pd.quantity) || 1, is_active: true,
+      model_code: pd.model_code || null, year: pd.year || null, condition: pd.condition || 'Reconditioned',
+      side: pd.side || null, color: pd.color || null, oem_code: pd.oem_code || null,
+      price: pd.price ? parseInt(pd.price) : null, cost: pd.cost ? parseInt(pd.cost) : null,
+      show_price: pd.show_price !== false, quantity: parseInt(pd.quantity) || 1,
+      added_date: pd.added_date || null, is_active: true,
     }).select().single()
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
     return NextResponse.json({ success: true, product, message: 'Product created (ID: ' + sku + ')' })
@@ -93,11 +95,14 @@ export async function POST(req: NextRequest) {
         vendor_id: vendor.id, sku,
         name: item.name || 'Untitled Part', description: item.description || '',
         category: item.category || 'Other', make: item.make || null,
-        model: item.model || null, year: item.year || null,
-        condition: item.condition || 'Good',
+        model: item.model || null, model_code: item.model_code || null,
+        year: item.year || null, condition: item.condition || 'Reconditioned',
+        side: item.side || null, color: item.color || null, oem_code: item.oem_code || null,
         price: item.price ? parseInt(item.price) : null,
+        cost: item.cost ? parseInt(item.cost) : null,
         show_price: item.show_price !== false,
-        quantity: parseInt(item.quantity) || 1, is_active: true,
+        quantity: parseInt(item.quantity) || 1,
+        added_date: item.added_date || null, is_active: true,
       }
       if (existingMap.has(sku)) {
         if (importMode === 'update') toUpdate.push({ ...row, id: existingMap.get(sku) })

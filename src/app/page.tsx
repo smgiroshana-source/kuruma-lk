@@ -4,10 +4,11 @@ import { useState, useEffect, useRef } from 'react'
 import type { Product, Vendor } from '@/types'
 
 const CATEGORIES = [
-  'All', 'Engine Parts', 'Transmission', 'Brakes', 'Suspension',
-  'Electrical', 'Body Parts', 'Interior', 'Exhaust',
-  'Cooling System', 'Fuel System', 'Steering',
-  'Wheels & Tires', 'Lighting', 'AC & Heating', 'Other'
+  'All', 'Engine Parts', 'Transmission & Drivetrain', 'Suspension & Steering', 'Brake System',
+  'Electrical & Electronics', 'Body Parts', 'Lighting', 'Interior Parts',
+  'A/C & Radiator', 'Wheels & Tires', 'Exhaust System', 'Filters & Fluids',
+  'Accessories', 'Hybrid & EV Parts', 'Others', 'Windscreen',
+  'Beading Belts and Rubber', 'Audio & Video', 'Safety'
 ]
 
 function formatPrice(price: number | null, showPrice: boolean) {

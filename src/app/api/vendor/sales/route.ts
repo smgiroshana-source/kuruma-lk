@@ -52,19 +52,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ sales: custSales || [], customer: cust, vendor })
   }
 
+  // Support explicit from/to date range
+  const fromDate = url.searchParams.get('from')
+  const toDate = url.searchParams.get('to')
+
   let dateFilter: string | null = null
   const now = new Date()
-  if (period === 'today') { dateFilter = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString() }
-  else if (period === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); dateFilter = d.toISOString() }
-  else if (period === 'month') { const d = new Date(now); d.setMonth(d.getMonth() - 1); dateFilter = d.toISOString() }
+  if (!fromDate) {
+    if (period === 'today') { dateFilter = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString() }
+    else if (period === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); dateFilter = d.toISOString() }
+    else if (period === 'month') { const d = new Date(now); d.setMonth(d.getMonth() - 1); dateFilter = d.toISOString() }
+  }
 
   let query = admin
     .from('sales')
-    .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, cheque_number), customer:customers(id, name, phone)')
+    .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total), customer:customers(id, name, phone)')
     .eq('vendor_id', vendor.id)
     .order('created_at', { ascending: false })
 
-  if (dateFilter) query = query.gte('created_at', dateFilter)
+  if (fromDate) query = query.gte('created_at', new Date(fromDate).toISOString())
+  if (toDate) { const end = new Date(toDate); end.setDate(end.getDate() + 1); query = query.lt('created_at', end.toISOString()) }
+  if (!fromDate && dateFilter) query = query.gte('created_at', dateFilter)
   const { data: sales } = await query.limit(500)
 
   const allSales = sales || []

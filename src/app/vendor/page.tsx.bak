@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef } from 'react'
 
 type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'settings'
-const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Others','Windscreen','Beading Belts and Rubber','Audio & Video','Safety']
-const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
+const CATEGORIES = ['Engine Parts','Transmission','Brakes','Suspension','Electrical','Body Parts','Interior','Exhaust','Cooling System','Fuel System','Steering','Wheels & Tires','Lighting','AC & Heating','Other']
+const CONDITIONS = ['Excellent','Good','Fair','Salvage']
 const PAY_METHODS = ['cash','cheque','bank','card']
 const PAY_LABELS: Record<string, string> = { cash:'Cash', cheque:'Cheque', bank:'Bank Transfer', card:'Card', advance:'Advance', credit:'Credit' }
 
@@ -29,30 +29,8 @@ function parseCSV(text: string): Record<string, string>[] {
   return lines.slice(1).map(line => { const vals: string[] = []; let cur = '', inQ = false; for (const ch of line) { if (ch === '"') inQ = !inQ; else if (ch === ',' && !inQ) { vals.push(cur.trim()); cur = '' } else cur += ch }; vals.push(cur.trim()); const obj: Record<string, string> = {}; headers.forEach((h, i) => obj[h] = vals[i] || ''); return obj }).filter(r => r.name || r.product_name || r.part_name)
 }
 function mapCSVRow(row: Record<string, string>) {
-  const partId = row.stock_no || row.id || row.part_id || row.sku || row.partid || row.part_no || ''
-  const showPriceRaw = (row.show_price || row.show_price_ || 'YES').trim().toUpperCase()
-  const showPrice = showPriceRaw === 'YES' || showPriceRaw === 'TRUE' || showPriceRaw === '1'
-  const cleanNum = (v: string) => (v || '').replace(/,/g, '').trim()
-  return {
-    partId: partId.trim(),
-    addedDate: row.added_date || row.date || '',
-    name: row.part_name || row.name || row.product_name || '',
-    description: row.part_description || row.description || row.desc || '',
-    category: row.category || 'Other',
-    make: row.make || row.vehicle_make || row.brand || '',
-    model: row.model || row.vehicle_model || '',
-    modelCode: row.model_code || '',
-    year: row.year || row.vehicle_year || '',
-    condition: row.condition || 'Reconditioned',
-    side: row.side || '',
-    color: row.color || '',
-    oemCode: row.oem_code || '',
-    cost: cleanNum(row.cost),
-    price: cleanNum(row.price || row.unit_price || ''),
-    quantity: row.quantity || row.qty || row.stock || '1',
-    show_price: showPrice,
-    hasImage: false, imageCount: 0, imageFiles: [] as File[], autoId: false
-  }
+  const partId = row.id || row.part_id || row.sku || row.partid || row.part_no || ''
+  return { partId: partId.trim(), name: row.name || row.product_name || row.part_name || '', description: row.description || row.desc || '', category: row.category || 'Other', make: row.make || row.vehicle_make || row.brand || '', model: row.model || row.vehicle_model || '', year: row.year || row.vehicle_year || '', condition: row.condition || 'Good', price: row.price || row.unit_price || '', quantity: row.quantity || row.qty || row.stock || '1', show_price: (row.show_price || 'true').toLowerCase() !== 'false', hasImage: false, imageCount: 0, imageFiles: [] as File[], autoId: false }
 }
 async function extractZipImages(file: File): Promise<Map<string, File[]>> {
   const JSZip = (await import('jszip')).default; const zip = await JSZip.loadAsync(file); const map = new Map<string, File[]>()
@@ -107,7 +85,7 @@ export default function VendorDashboard() {
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [productSearch, setProductSearch] = useState('')
 
-  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', year:'', condition:'Reconditioned', price:'', quantity:'1', show_price:true })
+  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', year:'', condition:'Good', price:'', quantity:'1', show_price:true })
   const [productImages, setProductImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [addLoading, setAddLoading] = useState(false)
@@ -140,10 +118,6 @@ export default function VendorDashboard() {
   const [salesData, setSalesData] = useState<any>(null)
   const [salesPeriod, setSalesPeriod] = useState('today')
   const [salesLoading, setSalesLoading] = useState(false)
-  const [showExportModal, setShowExportModal] = useState(false)
-  const [exportFrom, setExportFrom] = useState('')
-  const [exportTo, setExportTo] = useState('')
-  const [exportLoading, setExportLoading] = useState(false)
   const [expandedSale, setExpandedSale] = useState<string | null>(null)
   const [salesView, setSalesView] = useState('overview')
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10))
@@ -491,7 +465,7 @@ export default function VendorDashboard() {
 
       const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         action: 'bulk_create', mode,
-        products: importData.map(row => ({ sku: row.partId, added_date: row.addedDate || '', name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, model_code: row.modelCode || null, year: row.year, condition: row.condition, side: row.side || null, color: row.color || null, oem_code: row.oemCode || null, cost: row.cost ? parseInt(row.cost) : null, price: row.price, quantity: row.quantity, show_price: row.show_price }))
+        products: importData.map(row => ({ sku: row.partId, name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, year: row.year, condition: row.condition, price: row.price, quantity: row.quantity, show_price: row.show_price }))
       }) })
       const j = await r.json()
 
@@ -989,83 +963,6 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
     window.open(`https://wa.me/?text=${msg}`, '_blank')
   }
 
-  // ── Export Sales CSV ────────────────────────────────────────────────────
-  async function handleExportCSV(mode: 'summary' | 'items') {
-    if (!exportFrom || !exportTo) { showToast('Please select both dates'); return }
-    setExportLoading(true)
-    try {
-      const r = await fetch(`/api/vendor/sales?from=${exportFrom}&to=${exportTo}`)
-      const j = await r.json()
-      const sales = (j.sales || []).filter((s: any) => s.payment_status !== 'voided')
-      if (!sales.length) { showToast('No sales in that date range'); setExportLoading(false); return }
-
-      const esc = (v: any) => {
-        const s = String(v ?? '').replace(/"/g, '""')
-        return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s
-      }
-      const rows: string[][] = []
-
-      if (mode === 'summary') {
-        rows.push(['Invoice No','Date','Customer Name','Customer Phone','Subtotal (Rs.)','Discount (Rs.)','Total (Rs.)','Paid (Rs.)','Balance Due (Rs.)','Payment Status','Payment Method','Items','Notes'])
-        for (const s of sales) {
-          const itemsSummary = (s.items || []).map((i: any) => `${i.product_name} x${i.quantity}`).join(' | ')
-          rows.push([
-            s.invoice_no,
-            new Date(s.created_at).toLocaleDateString('en-GB'),
-            s.customer?.name || s.customer_name || 'Walk-in',
-            s.customer?.phone || s.customer_phone || '',
-            s.subtotal ?? s.total,
-            s.discount || 0,
-            s.total,
-            s.paid_amount,
-            s.balance_due,
-            s.payment_status,
-            s.payment_method,
-            itemsSummary,
-            s.notes || '',
-          ].map(esc))
-        }
-      } else {
-        rows.push(['Invoice No','Date','Customer Name','Customer Phone','SKU','Part Name','Qty','Unit Price (Rs.)','Cost (Rs.)','Profit (Rs.)','Line Total (Rs.)','Invoice Total (Rs.)','Paid (Rs.)','Balance Due (Rs.)','Payment Status'])
-        for (const s of sales) {
-          for (const item of (s.items || [])) {
-            const cost = item.unit_cost != null && item.unit_cost > 0 ? item.unit_cost : null
-            const profit = cost != null ? (item.unit_price - cost) * item.quantity : ''
-            rows.push([
-              s.invoice_no,
-              new Date(s.created_at).toLocaleDateString('en-GB'),
-              s.customer?.name || s.customer_name || 'Walk-in',
-              s.customer?.phone || s.customer_phone || '',
-              item.product_sku || '',
-              item.product_name,
-              item.quantity,
-              item.unit_price,
-              cost ?? '',
-              profit,
-              item.total,
-              s.total,
-              s.paid_amount,
-              s.balance_due,
-              s.payment_status,
-            ].map(esc))
-          }
-        }
-      }
-
-      const csv = rows.map(r => r.join(',')).join('\n')
-      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `kuruma-sales-${mode}-${exportFrom}-to-${exportTo}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
-      showToast(`Exported ${sales.length} sales ✓`)
-      setShowExportModal(false)
-    } catch { showToast('Export failed') }
-    setExportLoading(false)
-  }
-
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>
   if (!data) return null
   const { vendor, products, stats } = data
@@ -1195,7 +1092,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
               <div className="flex items-center gap-2 mb-3"><span className="bg-orange-100 text-orange-600 text-[10px] font-black px-2.5 py-1 rounded-full">STEP 1</span><h3 className="font-bold text-sm">Download CSV Template</h3></div>
               <p className="text-xs text-slate-500 mb-3">Download the template, fill in your product details in Excel or Google Sheets, then save as CSV.</p>
               <button onClick={() => {
-                const csv = 'Added Date,stock no,Part name,Part Description,Category,Make,Model,Model Code,Condition,Side,Color,OEM Code,Quantity,Cost,Price,show price\n12-Mar-2026,BRK-001,Front Brake Pads Set,OEM quality brake pads,Brake System,Toyota,Corolla,ZRE172,Reconditioned,Front,Black,,10,,4500,YES\n12-Mar-2026,ENG-002,Timing Belt Kit,Complete kit with tensioner,Engine Parts,Honda,Civic,FK7,New,,,A4567,5,8000,12500,YES\n12-Mar-2026,SUS-003,Front Shock Absorber LH,Gas-filled absorber,Suspension & Steering,Nissan,X-Trail,NT32,Reconditioned,Left,,12340,8,,8900,NO'
+                const csv = 'part_id,name,description,category,make,model,year,condition,price,quantity,show_price\nBRK-001,Front Brake Pads Set,OEM quality brake pads,Brakes,Toyota,Corolla,2018,Good,4500,10,true\nENG-002,Timing Belt Kit,Complete kit with tensioner,Engine Parts,Honda,Civic,2020,Excellent,12500,5,true\nSUS-003,Front Shock Absorber,Gas-filled left side,Suspension,Nissan,X-Trail,2019,Good,8900,8,true'
                 const blob = new Blob([csv], { type: 'text/csv' })
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a'); a.href = url; a.download = 'kuruma-bulk-template.csv'; a.click()
@@ -1209,10 +1106,9 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 </table>
               </div>
               <div className="mt-2 text-[10px] text-slate-400">
-                <p><strong>Columns:</strong> Added Date, stock no, Part name, Part Description, Category, Make, Model, Model Code, Condition, Side, Color, OEM Code, Quantity, Cost, Price, show price</p>
-                <p className="mt-1"><strong>show price:</strong> YES or NO</p>
-                <p><strong>Categories:</strong> {CATEGORIES.join(', ')}</p>
-                <p><strong>Conditions:</strong> New-Genuine, New-Other, Reconditioned, Damaged</p>
+                <p><strong>Columns:</strong> part_id, name, description, category, make, model, year, condition, price, quantity, show_price</p>
+                <p className="mt-1"><strong>Categories:</strong> {CATEGORIES.join(', ')}</p>
+                <p><strong>Conditions:</strong> Excellent, Good, Fair, Salvage</p>
               </div>
             </div>
 
@@ -1286,21 +1182,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 <button onClick={handleBulkImport} disabled={bulkLoading} className="bg-orange-500 text-white text-sm font-bold px-5 py-1.5 rounded-lg disabled:opacity-50 hover:bg-orange-600">{bulkLoading ? 'Importing...' : '🚀 Import All'}</button>
               </div>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50"><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Stock No</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Part Name</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Category</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Make / Model</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Model Code</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Condition</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Side</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Color</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">OEM Code</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Cost</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Price</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Qty</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Show</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Images</th><th className="px-3 py-2"></th></tr></thead><tbody>{bulkData.map((r, i) => (<tr key={i} className={'border-t ' + (!r.hasImage ? 'bg-amber-50/50' : '')}><td className="px-3 py-2"><span className="font-mono text-xs px-2 py-0.5 rounded font-bold bg-slate-100">{r.partId}</span></td>
-<td className="px-3 py-2"><input value={r.name} onChange={e => updateBulkRow(i,'name',e.target.value)} className="w-36 px-2 py-1 border border-slate-200 rounded text-xs" /></td>
-<td className="px-3 py-2"><select value={r.category} onChange={e => updateBulkRow(i,'category',e.target.value)} className="px-2 py-1 border border-slate-200 rounded text-xs">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></td>
-<td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">{[r.make, r.model].filter(Boolean).join(' ') || '-'}</td>
-<td className="px-3 py-2"><input value={r.modelCode || ''} onChange={e => updateBulkRow(i,'modelCode',e.target.value)} className="w-20 px-2 py-1 border border-slate-200 rounded text-xs font-mono" placeholder="—" /></td>
-<td className="px-3 py-2 text-xs text-slate-500">{r.condition || '-'}</td>
-<td className="px-3 py-2 text-xs text-slate-500">{r.side || '—'}</td>
-<td className="px-3 py-2 text-xs text-slate-500">{r.color || '—'}</td>
-<td className="px-3 py-2"><input value={r.oemCode || ''} onChange={e => updateBulkRow(i,'oemCode',e.target.value)} className="w-24 px-2 py-1 border border-slate-200 rounded text-xs font-mono" placeholder="—" /></td>
-<td className="px-3 py-2"><input type="text" inputMode="numeric" value={r.cost || ''} onChange={e => updateBulkRow(i,'cost',e.target.value)} className="w-20 px-2 py-1 border border-slate-200 rounded text-xs" placeholder="—" /></td>
-<td className="px-3 py-2"><input type="text" inputMode="numeric" value={r.price} onChange={e => updateBulkRow(i,'price',e.target.value)} className="w-20 px-2 py-1 border border-slate-200 rounded text-xs" /></td>
-<td className="px-3 py-2"><input type="number" value={r.quantity} onChange={e => updateBulkRow(i,'quantity',e.target.value)} className="w-14 px-2 py-1 border border-slate-200 rounded text-xs" /></td>
-<td className="px-3 py-2"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${r.show_price ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>{r.show_price ? 'YES' : 'NO'}</span></td>
-<td className="px-3 py-2">{r.hasImage ? <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">✓ {r.imageCount}</span> : <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">No images</span>}</td>
-<td className="px-3 py-2"><button onClick={() => removeBulkRow(i)} className="text-red-400 hover:text-red-600 text-xs font-bold">✕</button></td></tr>))}</tbody></table></div></div>
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50"><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Part ID</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Name</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Category</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Make</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Price</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Qty</th><th className="px-3 py-2 text-xs font-bold text-slate-500 text-left">Images</th><th className="px-3 py-2"></th></tr></thead><tbody>{bulkData.map((r, i) => (<tr key={i} className={'border-t ' + (!r.hasImage ? 'bg-amber-50/50' : '')}><td className="px-3 py-2"><span className="font-mono text-xs px-2 py-0.5 rounded font-bold bg-slate-100">{r.partId}</span></td><td className="px-3 py-2"><input value={r.name} onChange={e => updateBulkRow(i,'name',e.target.value)} className="w-full px-2 py-1 border border-slate-200 rounded text-xs" /></td><td className="px-3 py-2"><select value={r.category} onChange={e => updateBulkRow(i,'category',e.target.value)} className="px-2 py-1 border border-slate-200 rounded text-xs">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></td><td className="px-3 py-2 text-xs text-slate-500">{r.make || '-'}</td><td className="px-3 py-2"><input type="number" value={r.price} onChange={e => updateBulkRow(i,'price',e.target.value)} className="w-20 px-2 py-1 border border-slate-200 rounded text-xs" /></td><td className="px-3 py-2"><input type="number" value={r.quantity} onChange={e => updateBulkRow(i,'quantity',e.target.value)} className="w-14 px-2 py-1 border border-slate-200 rounded text-xs" /></td><td className="px-3 py-2">{r.hasImage ? <span className="text-[10px] font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">✓ {r.imageCount}</span> : <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">No images</span>}</td><td className="px-3 py-2"><button onClick={() => removeBulkRow(i)} className="text-red-400 hover:text-red-600 text-xs font-bold">✕</button></td></tr>))}</tbody></table></div></div>
           </div>)}
 
             {/* Feature 2: Import Progress Bar */}
@@ -1480,44 +1362,12 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
         {tab === 'sales' && (<div>
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <h1 className="text-2xl font-black">📊 Sales & Analytics</h1>
-            <div className="flex gap-2 items-center flex-wrap">
-              <button onClick={() => { const today = new Date().toISOString().slice(0,10); setExportFrom(today); setExportTo(today); setShowExportModal(true) }} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">⬇ Export CSV</button>
             <div className="flex gap-1 bg-white rounded-lg border border-slate-200 p-1">
               {[{v:'today',l:'Today'},{v:'week',l:'Week'},{v:'month',l:'Month'},{v:'all',l:'All'}].map(p => (
                 <button key={p.v} onClick={() => setSalesPeriod(p.v)} className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${salesPeriod === p.v ? 'bg-orange-500 text-white' : 'text-slate-500 active:bg-slate-100'}`}>{p.l}</button>
               ))}
             </div>
-            </div>
           </div>
-
-          {/* ── Export Modal ── */}
-          {showExportModal && (
-            <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setShowExportModal(false)}>
-              <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
-                <h3 className="text-lg font-black text-slate-900 mb-1">Export Sales</h3>
-                <p className="text-xs text-slate-400 mb-4">Select a date range to export</p>
-                <div className="space-y-3 mb-5">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">From Date</label>
-                    <input type="date" value={exportFrom} onChange={e => setExportFrom(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1">To Date</label>
-                    <input type="date" value={exportTo} onChange={e => setExportTo(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <button onClick={() => handleExportCSV('summary')} disabled={exportLoading || !exportFrom || !exportTo} className="w-full bg-slate-800 text-white font-bold text-sm py-2.5 rounded-xl disabled:opacity-50 hover:bg-slate-700">
-                    {exportLoading ? 'Exporting…' : '⬇ Invoice Summary CSV'}
-                  </button>
-                  <button onClick={() => handleExportCSV('items')} disabled={exportLoading || !exportFrom || !exportTo} className="w-full bg-emerald-600 text-white font-bold text-sm py-2.5 rounded-xl disabled:opacity-50 hover:bg-emerald-700">
-                    {exportLoading ? 'Exporting…' : '⬇ Line Items CSV (with Profit)'}
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-3 text-center">Voided invoices are excluded from export</p>
-              </div>
-            </div>
-          )}
 
           {salesLoading ? <div className="text-center py-12"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" /></div> : salesData ? (<div>
 
