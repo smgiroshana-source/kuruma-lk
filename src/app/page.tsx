@@ -48,7 +48,7 @@ export default function HomePage() {
   function removeFromWishlist(id: string) { const n = new Set(wishlist); n.delete(id); updateWishlist(n) }
 
   const uniqueMakes = ['All', ...Array.from(new Set(products.map(p => p.make).filter(Boolean))).sort()] as string[]
-  const uniqueConditions = ['All', 'Excellent', 'Good', 'Fair', 'Salvage']
+  const uniqueConditions = ['All', 'New-Genuine', 'New-Other', 'Reconditioned', 'Damaged']
   useEffect(() => { if (products.length > 0) { const pr = products.filter(p => p.price && p.show_price).map(p => p.price!); if (pr.length > 0) { setPriceRange([Math.min(...pr), Math.max(...pr)]); setPriceFilter([Math.min(...pr), Math.max(...pr)]) } } }, [products])
 
   const activeFilterCount = [conditionFilter !== 'All', makeFilter !== 'All', priceRange[1] > 0 && (priceFilter[0] !== priceRange[0] || priceFilter[1] !== priceRange[1])].filter(Boolean).length
@@ -121,8 +121,68 @@ export default function HomePage() {
           {isVendorView && selectedVendorObj!.description && <p className="text-[13px] bg-white rounded-[14px] px-4 py-3 mb-3.5 text-[#777] border border-[#eee] leading-relaxed">{selectedVendorObj!.description}</p>}
           {isVendorView && (<div className="relative mb-3"><svg className="absolute left-3 top-[11px] text-[#bbb]" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input type="text" placeholder={`Search in ${selectedVendorObj!.name}...`} value={search} onChange={e=>setSearch(e.target.value)} className="w-full pl-9 pr-10 py-2.5 rounded-[14px] text-sm outline-none bg-white border-[1.5px] border-[#e8e8e8] focus:border-[#ff6b35]"/>{search&&<button onClick={()=>setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#aaa]">✕</button>}</div>)}
 
-          {/* Category pills */}
-          <div className="relative mb-3"><div className="flex gap-2 overflow-x-auto pb-1.5" style={{WebkitOverflowScrolling:'touch',scrollbarWidth:'none',msOverflowStyle:'none'}}>
+          {/* ── Desktop sidebar + Mobile pills layout ── */}
+          <div className="flex gap-6">
+
+          {/* ── Desktop Left Sidebar ── */}
+          <aside className="hidden lg:flex flex-col gap-0 w-52 flex-shrink-0">
+            <div className="sticky top-20 bg-white rounded-2xl border border-[#eee] overflow-hidden shadow-sm">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-[#f5f5f5]">
+                <span className="font-black text-sm text-[#222]">Filters</span>
+                {activeFilterCount>0&&<button onClick={clearAllFilters} className="text-[11px] font-bold text-[#ff6b35]">Clear all</button>}
+              </div>
+              <div className="p-3 max-h-[calc(100vh-120px)] overflow-y-auto">
+                {/* Categories */}
+                <p className="text-[10px] font-black text-[#bbb] uppercase tracking-wider mb-2">Category</p>
+                <div className="space-y-0.5 mb-4">
+                  {CATEGORIES.map(cat=>(
+                    <button key={cat} onClick={()=>setSelectedCategory(cat)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${selectedCategory===cat?'bg-[#ff6b35] text-white':'text-[#555] hover:bg-[#fff5f0] hover:text-[#ff6b35]'}`}>
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+                {/* Condition */}
+                <p className="text-[10px] font-black text-[#bbb] uppercase tracking-wider mb-2">Condition</p>
+                <div className="space-y-0.5 mb-4">
+                  {['All','New-Genuine','New-Other','Reconditioned','Damaged'].map(c=>(
+                    <button key={c} onClick={()=>setConditionFilter(c)}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${conditionFilter===c?'bg-[#ff6b35] text-white':'text-[#555] hover:bg-[#fff5f0] hover:text-[#ff6b35]'}`}>
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                {/* Make */}
+                <p className="text-[10px] font-black text-[#bbb] uppercase tracking-wider mb-2">Make</p>
+                <select value={makeFilter} onChange={e=>{setMakeFilter(e.target.value)}}
+                  className="w-full px-2.5 py-2 rounded-lg border border-[#eee] text-xs font-semibold text-[#555] outline-none bg-white mb-4 cursor-pointer">
+                  {['All',...Array.from(new Set(products.map((p:any)=>p.make).filter(Boolean))).sort()].map((m:any)=><option key={m} value={m}>{m}</option>)}
+                </select>
+                {/* Price range */}
+                {priceRange[1]>0&&(<>
+                  <p className="text-[10px] font-black text-[#bbb] uppercase tracking-wider mb-2">Price Range</p>
+                  <div className="px-1 mb-1">
+                    <div className="flex justify-between text-[10px] text-[#aaa] mb-2">
+                      <span>Rs.{priceFilter[0].toLocaleString()}</span>
+                      <span>Rs.{priceFilter[1].toLocaleString()}</span>
+                    </div>
+                    <input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[0]}
+                      onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([Math.min(v,priceFilter[1]-100),priceFilter[1]])}}
+                      className="w-full h-1.5 accent-[#ff6b35] mb-1"/>
+                    <input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[1]}
+                      onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([priceFilter[0],Math.max(v,priceFilter[0]+100)])}}
+                      className="w-full h-1.5 accent-[#ff6b35]"/>
+                  </div>
+                </>)}
+              </div>
+            </div>
+          </aside>
+
+          {/* ── Right column: mobile pills + sort + grid ── */}
+          <div className="flex-1 min-w-0">
+
+          {/* Category pills — mobile only */}
+          <div className="relative mb-3 lg:hidden"><div className="flex gap-2 overflow-x-auto pb-1.5" style={{WebkitOverflowScrolling:'touch',scrollbarWidth:'none',msOverflowStyle:'none'}}>
             {CATEGORIES.map(cat=>(<button key={cat} onClick={()=>setSelectedCategory(cat)} className={`whitespace-nowrap px-4 py-[9px] rounded-full text-xs font-semibold transition-all duration-200 flex-shrink-0 ${selectedCategory===cat?'bg-[#ff6b35] text-white shadow-[0_4px_12px_rgba(255,107,53,0.3)]':'bg-white text-[#777] border-[1.5px] border-[#e8e8e8] active:border-[#ff6b35] active:bg-[#fff5f0]'}`}>{cat}</button>))}
           </div><div className="absolute right-0 top-0 bottom-1.5 w-12 bg-gradient-to-l from-[#f5f5f5] to-transparent pointer-events-none"/></div>
 
@@ -157,7 +217,7 @@ export default function HomePage() {
           {/* Product Grid */}
           {loading ? (<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">{[...Array(8)].map((_,i)=>(<div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]"><div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse"/><div className="p-3 space-y-2.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse"/><div className="h-4 bg-[#f0f0f0] rounded animate-pulse"/><div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3"/></div></div>))}</div>
           ) : filteredProducts.length===0 ? (<div className="text-center py-20"><div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🔍</div><p className="font-bold text-[17px] text-[#333]">No parts found</p><p className="text-sm text-[#aaa] mt-1.5">Try adjusting your search or filters</p>{(search||selectedCategory!=='All'||activeFilterCount>0)&&<button onClick={clearAllFilters} className="mt-5 text-sm font-bold px-6 py-2.5 rounded-xl text-white shadow-[0_4px_12px_rgba(255,107,53,0.25)]" style={{background:'linear-gradient(135deg,#ff6b35,#ff8f65)'}}>Clear all filters</button>}{isVendorView&&<button onClick={clearVendor} className="mt-3 block mx-auto text-sm font-bold text-[#ff6b35] underline">Browse all shops</button>}</div>
-          ) : (<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          ) : (<div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-3">
             {filteredProducts.map(product => {
               const imageUrl = getProductImage(product); const imageCount = product.images?.length||0; const isWished = wishlist.has(product.id)
               return (<div key={product.id} className="bg-white rounded-2xl overflow-hidden relative group transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] border border-[#eee]">
@@ -184,6 +244,8 @@ export default function HomePage() {
               </div>)
             })}
           </div>)}
+        </div>{/* end right column */}
+          </div>{/* end sidebar flex */}
         </div>)}
 
         {/* ═══ SHOPS TAB ═══ */}

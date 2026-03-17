@@ -227,8 +227,8 @@ export async function POST(req: NextRequest) {
     const { data: existingUsers } = await admin.auth.admin.listUsers()
     let staffUser = existingUsers?.users?.find((u: any) => u.email === email)
 
+    let tempPassword = 'Staff@' + Math.random().toString(36).slice(2, 8).toUpperCase()
     if (!staffUser) {
-      const tempPassword = 'Staff' + Math.random().toString(36).slice(2, 10) + '!'
       const { data: newUser, error: createError } = await admin.auth.admin.createUser({
         email,
         password: tempPassword,
@@ -236,6 +236,9 @@ export async function POST(req: NextRequest) {
       })
       if (createError) return NextResponse.json({ error: 'Failed to create user: ' + createError.message }, { status: 400 })
       staffUser = newUser.user
+    } else {
+      // Reset password for existing user so owner can share fresh credentials
+      await admin.auth.admin.updateUserById(staffUser.id, { password: tempPassword })
     }
 
     if (!staffUser) return NextResponse.json({ error: 'Could not find/create user' }, { status: 400 })
@@ -254,7 +257,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 })
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, tempPassword })
   }
 
   if (action === 'remove_staff') {

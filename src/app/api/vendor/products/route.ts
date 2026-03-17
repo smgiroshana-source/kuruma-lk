@@ -14,7 +14,11 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  return vendor
+  if (vendor) return vendor
+  // Check if staff member
+  const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
+  if (staffLink?.vendor) return staffLink.vendor
+  return null
 }
 
 function generateSKU() {

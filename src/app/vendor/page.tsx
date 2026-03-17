@@ -109,7 +109,7 @@ export default function VendorDashboard() {
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [productSearch, setProductSearch] = useState('')
 
-  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', year:'', condition:'Reconditioned', price:'', quantity:'1', show_price:true })
+  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true })
   const [productImages, setProductImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [addLoading, setAddLoading] = useState(false)
@@ -182,6 +182,7 @@ export default function VendorDashboard() {
   const [staffList, setStaffList] = useState<any[]>([])
   const [staffLoading, setStaffLoading] = useState(false)
   const [newStaff, setNewStaff] = useState({ email: '', name: '', role: 'cashier', pin: '' })
+  const [staffTempPassword, setStaffTempPassword] = useState(null)
   const [editingCustomer, setEditingCustomer] = useState<any>(null)
   const [editCustomerLoading, setEditCustomerLoading] = useState(false)
 
@@ -232,10 +233,16 @@ export default function VendorDashboard() {
     }
   }, [tab])
 
+  const [staffRole, setStaffRole] = useState<string>('owner')
+
   async function fetchSettings() {
     try {
       const res = await fetch('/api/vendor/settings')
-      if (res.ok) { const j = await res.json(); if (j.settings) setVendorSettings({ ...vendorSettings, ...j.settings }) }
+      if (res.ok) {
+        const j = await res.json()
+        if (j.settings) setVendorSettings({ ...vendorSettings, ...j.settings })
+        if (j.role) { setStaffRole(j.role); if (j.role === 'cashier') setTab('pos') }
+      }
     } catch {}
   }
 
@@ -317,8 +324,13 @@ export default function VendorDashboard() {
     if (!newStaff.email || !newStaff.name) { showToast('Name and email required'); return }
     try {
       const res = await fetch('/api/vendor/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add_staff', ...newStaff }) })
-      if (res.ok) { showToast('Staff added!'); setNewStaff({ email: '', name: '', role: 'cashier', pin: '' }); fetchStaff() }
-      else { const j = await res.json(); showToast(j.error || 'Failed') }
+      const j = await res.json()
+      if (j.success) {
+        if (j.tempPassword) setStaffTempPassword({ name: newStaff.name, email: newStaff.email, password: j.tempPassword })
+        else showToast('Staff added!')
+        setNewStaff({ email: '', name: '', role: 'cashier', pin: '' })
+        fetchStaff()
+      } else { showToast(j.error || 'Failed') }
     } catch { showToast('Error adding staff') }
   }
 
@@ -396,7 +408,7 @@ export default function VendorDashboard() {
   }
 
   // Product handlers
-  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', year:'', condition:'Good', price:'', quantity:'1', show_price:true }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
+  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files || []); setProductImages(p => [...p, ...files]); files.forEach(f => { const r = new FileReader(); r.onload = ev => setImagePreviews(p => [...p, ev.target?.result as string]); r.readAsDataURL(f) }) }
   function removeImage(i: number) { setProductImages(p => p.filter((_, x) => x !== i)); setImagePreviews(p => p.filter((_, x) => x !== i)) }
 
@@ -946,7 +958,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
     if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
   }
 
-  function whatsAppDailyReport(salesList: any[], vendorInfo: any, reportDate: string) {
+  function whatsAppDailyReport(salesList: any[], vendorInfo: any, reportDate: string, toPhone?: string) {
     const cutoffHour = 19, cutoffMin = 30
     const filtered = salesList.filter((s: any) => {
       if (s.payment_status === 'voided') return false
@@ -1010,7 +1022,23 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
     lines.push(`— ${vendorInfo?.name || 'kuruma.lk'}`)
 
     const msg = encodeURIComponent(lines.join('\n'))
-    window.open(`https://wa.me/?text=${msg}`, '_blank')
+    const waNum = toPhone ? toPhone.replace(/\D/g, '').replace(/^0/, '94') : ''
+    window.open(`https://wa.me/${waNum}?text=${msg}`, '_blank')
+  }
+
+  // ── End of Day Report ───────────────────────────────────────────────────
+  async function sendEODReport() {
+    showToast('Fetching today\'s sales...')
+    try {
+      const r = await fetch('/api/vendor/sales?period=today')
+      const j = await r.json()
+      const sales = j.sales || []
+      const vendor = j.vendor || data?.vendor
+      if (!sales.length) { showToast('No sales today yet'); return }
+      const phone = vendor?.whatsapp || vendor?.phone
+      if (!phone) { showToast('No manager phone set'); return }
+      whatsAppDailyReport(sales, vendor, new Date().toISOString().slice(0, 10), phone)
+    } catch { showToast('Failed to fetch sales') }
   }
 
   // ── Sales Summary PDF ───────────────────────────────────────────────────
@@ -1220,7 +1248,8 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50"><div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between"><div className="flex items-center gap-3"><a href="/" className="text-xl font-black text-orange-500">kuruma.lk</a><span className="bg-purple-100 text-purple-700 text-xs font-bold px-2 py-0.5 rounded-full">VENDOR</span><span className="text-sm font-semibold text-slate-600 hidden sm:inline">{vendor.name}</span></div><div className="flex items-center gap-3"><a href="/" className="text-sm text-slate-400 hover:text-slate-600">View Store</a><button onClick={handleSignOut} className="text-sm text-red-500 hover:text-red-600 font-semibold">Log Out</button></div></div></header>
 
       <div className="bg-white border-b border-slate-200"><div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
-        {([{key:'overview' as VendorTab,l:'Overview'},{key:'products' as VendorTab,l:'Products'},{key:'add' as VendorTab,l:'+ Add'},{key:'bulk' as VendorTab,l:'Bulk'},{key:'pos' as VendorTab,l:'🧾 POS'},{key:'sales' as VendorTab,l:'📊 Sales'},{key:'credit' as VendorTab,l:'💳 Credit'},{key:'settings' as VendorTab,l:'⚙️'}]).map(t => (
+        {([{key:'overview' as VendorTab,l:'Overview'},{key:'products' as VendorTab,l:'Products'},{key:'add' as VendorTab,l:'+ Add'},{key:'bulk' as VendorTab,l:'Bulk'},{key:'pos' as VendorTab,l:'🧾 POS'},{key:'sales' as VendorTab,l:'📊 Sales'},{key:'credit' as VendorTab,l:'💳 Credit'},{key:'settings' as VendorTab,l:'⚙️'}])
+        .filter((t) => staffRole === 'cashier' ? t.key === 'pos' : true).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap ${tab === t.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>{t.l}</button>
         ))}
       </div></div>
@@ -1266,7 +1295,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
               <button onClick={deleteSelectedProducts} className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5">🗑️ Delete {selectedProducts.size} Item{selectedProducts.size > 1 ? 's' : ''}</button>
             )}
           </div>
-          {editingProduct && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setEditingProduct(null)}><div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}><h3 className="text-lg font-bold mb-4">Edit Product</h3><div className="space-y-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Part ID</label><input value={editingProduct.sku || ''} onChange={e => setEditingProduct({...editingProduct, sku: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Name</label><input value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Price</label><input type="number" value={editingProduct.price || ''} onChange={e => setEditingProduct({...editingProduct, price: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Qty</label><input type="number" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="grid grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Make</label><input value={editingProduct.make || ''} onChange={e => setEditingProduct({...editingProduct, make: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model</label><input value={editingProduct.model || ''} onChange={e => setEditingProduct({...editingProduct, model: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Condition</label><select value={editingProduct.condition} onChange={e => setEditingProduct({...editingProduct, condition: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Category</label><select value={editingProduct.category} onChange={e => setEditingProduct({...editingProduct, category: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
+          {editingProduct && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setEditingProduct(null)}><div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}><h3 className="text-lg font-bold mb-4">Edit Product</h3><div className="space-y-3"><div className="bg-blue-50 border border-blue-200 rounded-lg p-3"><label className="block text-xs font-bold text-blue-800 mb-1">Part ID</label><input value={editingProduct.sku || ''} onChange={e => setEditingProduct({...editingProduct, sku: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none font-mono font-bold bg-white" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Name</label><input value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Description</label><textarea value={editingProduct.description || ''} onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} rows={2} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" /></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Category</label><select value={editingProduct.category} onChange={e => setEditingProduct({...editingProduct, category: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Condition</label><select value={editingProduct.condition} onChange={e => setEditingProduct({...editingProduct, condition: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div><div className="grid grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Make</label><input value={editingProduct.make || ''} onChange={e => setEditingProduct({...editingProduct, make: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Toyota" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model</label><input value={editingProduct.model || ''} onChange={e => setEditingProduct({...editingProduct, model: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Year</label><input value={editingProduct.year || ''} onChange={e => setEditingProduct({...editingProduct, year: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="grid grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model Code</label><input value={editingProduct.model_code || ''} onChange={e => setEditingProduct({...editingProduct, model_code: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="ZRE172" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Side</label><select value={editingProduct.side || ''} onChange={e => setEditingProduct({...editingProduct, side: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none"><option value="">Any</option><option>Front</option><option>Rear</option><option>Left</option><option>Right</option><option>Front Left</option><option>Front Right</option><option>Rear Left</option><option>Rear Right</option></select></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Color</label><input value={editingProduct.color || ''} onChange={e => setEditingProduct({...editingProduct, color: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Black" /></div></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">OEM Code</label><input value={editingProduct.oem_code || ''} onChange={e => setEditingProduct({...editingProduct, oem_code: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Cost (Rs.)</label><input type="number" value={editingProduct.cost || ''} onChange={e => setEditingProduct({...editingProduct, cost: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal cost" /></div></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Price (Rs.)</label><input type="number" value={editingProduct.price || ''} onChange={e => setEditingProduct({...editingProduct, price: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Qty</label><input type="number" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3"><div><p className="text-xs font-semibold text-slate-700">Show Price Publicly</p><p className="text-[11px] text-slate-400 mt-0.5">Customers will see the price on the listing</p></div><button type="button" onClick={() => setEditingProduct({...editingProduct, show_price: !editingProduct.show_price})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (editingProduct.show_price ? 'bg-orange-500' : 'bg-slate-300')}><span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingProduct.show_price ? 'translate-x-6' : 'translate-x-1')} /></button></div>
             {/* Feature 5: Existing Images with Delete */}
             {editProductImages.length > 0 && (
               <div>
@@ -1299,7 +1328,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 showToast('Images uploaded!')
               }} className="w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100" />
             </div>
-          </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, condition: editingProduct.condition, category: editingProduct.category })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
+          </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, description: editingProduct.description, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, year: editingProduct.year, model_code: editingProduct.model_code, condition: editingProduct.condition, side: editingProduct.side, color: editingProduct.color, oem_code: editingProduct.oem_code, cost: editingProduct.cost, category: editingProduct.category, show_price: editingProduct.show_price })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
           {products.length === 0 ? <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><p className="text-4xl mb-3">📦</p><p className="text-slate-500 font-semibold">No products</p></div> : (
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
               {filteredProducts.map((p: any, i: number) => { const img = p.images?.find((x: any) => x.sort_order === 0) || p.images?.[0]; return (<tr key={p.id} className={'border-t border-slate-100 ' + (selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5">{img ? <img src={img.url} alt="" className="w-12 h-12 rounded-lg object-cover" /> : <div className="w-12 h-12 rounded-lg bg-slate-100 flex items-center justify-center text-xl">🔧</div>}</td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className="px-4 py-2.5">{p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
@@ -1316,7 +1345,10 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
             <div><label className="block text-xs font-semibold text-slate-600 mb-1">Description</label><textarea value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" /></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Category</label><select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Condition</label><select value={newProduct.condition} onChange={e => setNewProduct({...newProduct, condition: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div>
             <div className="grid grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Make</label><input value={newProduct.make} onChange={e => setNewProduct({...newProduct, make: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Toyota" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Model</label><input value={newProduct.model} onChange={e => setNewProduct({...newProduct, model: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Year</label><input value={newProduct.year} onChange={e => setNewProduct({...newProduct, year: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div>
+            <div className="grid grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Model Code</label><input value={newProduct.modelCode} onChange={e => setNewProduct({...newProduct, modelCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="ZRE172" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Side</label><select value={newProduct.side} onChange={e => setNewProduct({...newProduct, side: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none"><option value="">Any</option><option>Front</option><option>Rear</option><option>Left</option><option>Right</option><option>Front Left</option><option>Front Right</option><option>Rear Left</option><option>Rear Right</option></select></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Color</label><input value={newProduct.color} onChange={e => setNewProduct({...newProduct, color: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Black" /></div></div>
+            <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">OEM Code</label><input value={newProduct.oemCode} onChange={e => setNewProduct({...newProduct, oemCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Cost (Rs.)</label><input type="number" value={newProduct.cost} onChange={e => setNewProduct({...newProduct, cost: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal cost" /></div></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Price (Rs.)</label><input type="number" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Quantity</label><input type="number" value={newProduct.quantity} onChange={e => setNewProduct({...newProduct, quantity: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div>
+            <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3"><div><p className="text-xs font-semibold text-slate-700">Show Price Publicly</p><p className="text-[11px] text-slate-400 mt-0.5">Customers will see the price on the listing</p></div><button type="button" onClick={() => setNewProduct({...newProduct, show_price: !newProduct.show_price})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (newProduct.show_price ? 'bg-orange-500' : 'bg-slate-300')}><span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (newProduct.show_price ? 'translate-x-6' : 'translate-x-1')} /></button></div>
             <div><label className="block text-xs font-semibold text-slate-600 mb-2">Images</label><input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" /><div className="flex flex-wrap gap-3">{imagePreviews.map((p, i) => (<div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border-2 border-slate-200"><img src={p} alt="" className="w-full h-full object-cover" /><button type="button" onClick={() => removeImage(i)} className="absolute top-0.5 right-0.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs font-bold flex items-center justify-center">x</button></div>))}<button type="button" onClick={() => fileInputRef.current?.click()} className="w-20 h-20 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:border-orange-400"><span className="text-xl">+</span></button></div></div>
             <button type="submit" disabled={addLoading} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl disabled:opacity-50">{addLoading ? 'Creating...' : 'Add Product'}</button>
           </form>
@@ -1512,12 +1544,21 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                   <button onClick={() => printInvoice(posReceipt.sale, posReceipt.vendor, 'thermal', vendorSettings)} className="bg-slate-800 text-white text-sm font-bold px-5 py-2.5 rounded-xl">🖨️ Thermal</button>
                   <button onClick={() => printInvoice(posReceipt.sale, posReceipt.vendor, 'a4', vendorSettings)} className="bg-blue-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl">📄 A4</button>
                   {posReceipt.sale.customer_phone && <button onClick={() => sendWhatsAppBill(posReceipt.sale, posReceipt.vendor, posReceipt.sale.customer_phone)} className="bg-green-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl">💬 WhatsApp</button>}
+                  {data?.vendor?.whatsapp && <button onClick={sendEODReport} className="bg-purple-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl">📊 End of Day → Manager</button>}
                 </div>
               </div>
             </div>
           ) : (
             <div>
-              <h1 className="text-2xl font-black text-slate-900 mb-4">🧾 POS</h1>
+              <div className="flex items-center justify-between mb-4">
+              <h1 className="text-2xl font-black text-slate-900">🧾 POS</h1>
+              {data?.vendor?.whatsapp && (
+                <button onClick={sendEODReport}
+                  className="flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100">
+                  📊 End of Day → Manager
+                </button>
+              )}
+            </div>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-4">
                   {/* Product Search */}
@@ -2384,17 +2425,17 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 <h3 className="font-bold text-sm mb-3">Invoice Customization</h3>
                 <div className="space-y-3">
                   <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Invoice Title (blank = shop name)</label>
-                    <input type="text" value={vendorSettings.invoice_title} onChange={e => setVendorSettings({ ...vendorSettings, invoice_title: e.target.value })} placeholder={vendor?.name || 'Shop Name'} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                    <input type="text" value={vendorSettings.invoice_title || ''} onChange={e => setVendorSettings({ ...vendorSettings, invoice_title: e.target.value })} placeholder={vendor?.name || 'Shop Name'} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Tax/VAT Number</label>
-                      <input type="text" value={vendorSettings.tax_id} onChange={e => setVendorSettings({ ...vendorSettings, tax_id: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                      <input type="text" value={vendorSettings.tax_id || ''} onChange={e => setVendorSettings({ ...vendorSettings, tax_id: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                     <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Email</label>
-                      <input type="text" value={vendorSettings.email} onChange={e => setVendorSettings({ ...vendorSettings, email: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+                      <input type="text" value={vendorSettings.email || ''} onChange={e => setVendorSettings({ ...vendorSettings, email: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                   </div>
                   <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Invoice Footer</label>
-                    <textarea value={vendorSettings.invoice_footer} onChange={e => setVendorSettings({ ...vendorSettings, invoice_footer: e.target.value })} rows={2} placeholder="Thank you for your business!" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" /></div>
+                    <textarea value={vendorSettings.invoice_footer || ''} onChange={e => setVendorSettings({ ...vendorSettings, invoice_footer: e.target.value })} rows={2} placeholder="Thank you for your business!" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" /></div>
                   <div><label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Terms & Conditions (A4 only)</label>
-                    <textarea value={vendorSettings.invoice_terms} onChange={e => setVendorSettings({ ...vendorSettings, invoice_terms: e.target.value })} rows={3} placeholder="Goods once sold cannot be returned..." className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" /></div>
+                    <textarea value={vendorSettings.invoice_terms || ''} onChange={e => setVendorSettings({ ...vendorSettings, invoice_terms: e.target.value })} rows={3} placeholder="Goods once sold cannot be returned..." className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" /></div>
                   <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={vendorSettings.invoice_show_logo} onChange={e => setVendorSettings({ ...vendorSettings, invoice_show_logo: e.target.checked })} className="rounded" /><span className="text-sm text-slate-700">Show logo on invoices</span></label>
                   <button onClick={saveSettings} disabled={settingsLoading} className="bg-orange-500 active:bg-orange-600 text-white text-sm font-bold px-5 py-2.5 rounded-lg disabled:opacity-50 w-full sm:w-auto">{settingsLoading ? 'Saving...' : 'Save Invoice Settings'}</button>
                 </div>
@@ -2464,6 +2505,42 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
               <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
                 <p className="text-[10px] text-amber-700"><strong>Cashiers</strong> can only use POS. <strong>Managers</strong> get full access except settings. All actions are logged.</p>
               </div>
+
+              {staffTempPassword && (
+                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setStaffTempPassword(null)}>
+                  <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
+                    <div className="text-center mb-4">
+                      <div className="text-4xl mb-2">🔐</div>
+                      <h3 className="text-lg font-black text-slate-900">Staff Account Ready</h3>
+                      <p className="text-xs text-slate-400 mt-1">Share these login details with <strong>{staffTempPassword.name}</strong></p>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-4 space-y-3 mb-4">
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Login URL</p>
+                        <p className="text-sm font-mono font-semibold text-slate-700">kuruma.lk/login</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Email</p>
+                        <p className="text-sm font-mono font-semibold text-slate-700">{staffTempPassword.email}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Temporary Password</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-lg font-mono font-black text-orange-600 tracking-wider">{staffTempPassword.password}</p>
+                          <button onClick={() => { navigator.clipboard.writeText(staffTempPassword.password); showToast('Copied!') }} className="text-[10px] font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200">Copy</button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-4">
+                      <p className="text-[10px] text-amber-700">Save this password — it won't be shown again. Staff should change it after first login.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => { const msg = encodeURIComponent('Hi ' + staffTempPassword.name + ',\n\nYour kuruma.lk staff account is ready:\n\nLogin: https://kuruma.lk/login\nEmail: ' + staffTempPassword.email + '\nPassword: ' + staffTempPassword.password + '\n\nPlease change your password after first login.'); window.open('https://wa.me/?text=' + msg, '_blank') }} className="flex-1 bg-green-500 text-white font-bold text-sm py-2.5 rounded-xl">Send via WhatsApp</button>
+                      <button onClick={() => setStaffTempPassword(null)} className="px-4 text-slate-500 text-sm font-semibold">Done</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>)}

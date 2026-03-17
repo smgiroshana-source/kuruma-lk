@@ -8,7 +8,11 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const admin = createAdminClient()
-  const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).single()
+  let { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
+  if (!vendor) {
+    const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
+    if (staffLink?.vendor) vendor = staffLink.vendor
+  }
   if (!vendor) return NextResponse.json({ error: 'No vendor found' }, { status: 403 })
 
   const { data: products } = await admin.from('products').select('*, images:product_images(*)').eq('vendor_id', vendor.id).order('created_at', { ascending: false }).limit(10000)
