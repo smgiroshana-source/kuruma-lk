@@ -312,11 +312,11 @@ export async function POST(req: NextRequest) {
       if (resolvedCustomerId) await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
     }
 
-    // Step 6: Auto-deduct stock
+    // Step 6: Auto-deduct stock (vendor_id guard prevents cross-vendor tampering)
     for (const item of items) {
       if (item.productId) {
-        const { data: product } = await admin.from('products').select('quantity').eq('id', item.productId).single()
-        if (product) { await admin.from('products').update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq('id', item.productId) }
+        const { data: product } = await admin.from('products').select('quantity').eq('id', item.productId).eq('vendor_id', vendor.id).single()
+        if (product) { await admin.from('products').update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq('id', item.productId).eq('vendor_id', vendor.id) }
       }
     }
 
@@ -388,7 +388,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Mark sale as voided
+    // 4. Reverse any auto-settlements that were applied FROM this sale to older invoices
+    const autoSettledPayments = payments.filter((p: any) => p.payment_method === 'settlement' && p.sale_id !== sale.id)
+    // These live on the OLD sales, not this one — find them by notes referencing our invoice
+    const { data: settlementPayments } = await admin
+      .from('payments')
+      .select('id, sale_id, amount')
+      .eq('vendor_id', vendor.id)
+      .eq('payment_method', 'settlement')
+      .ilike('notes', `%from invoice ${sale.invoice_no}%`)
+    if (settlementPayments && settlementPayments.length > 0) {
+      for (const sp of settlementPayments) {
+        // Reverse the balance on the old sale
+        const { data: oldSale } = await admin.from('sales').select('paid_amount, balance_due, total').eq('id', sp.sale_id).single()
+        if (oldSale) {
+          const restoredBalance = parseFloat(oldSale.balance_due) + parseFloat(sp.amount)
+          const restoredPaid = Math.max(0, parseFloat(oldSale.paid_amount) - parseFloat(sp.amount))
+          await admin.from('sales').update({
+            paid_amount: restoredPaid,
+            balance_due: restoredBalance,
+            payment_status: restoredBalance > 0 ? (restoredPaid > 0 ? 'partial' : 'credit') : 'paid',
+          }).eq('id', sp.sale_id)
+        }
+        // Delete the settlement payment record
+        await admin.from('payments').delete().eq('id', sp.id)
+      }
+    }
+
+    // 5. Mark sale as voided
     await admin.from('sales').update({
       payment_status: 'voided',
       balance_due: 0,
@@ -479,25 +506,29 @@ export async function POST(req: NextRequest) {
       if (refundMethod === 'advance') {
         const { data: customer } = await admin.from('customers').select('advance_balance').eq('id', sale.customer_id).single()
         if (customer) {
+          // Only add the portion that was actually paid (not the portion that just cancels outstanding debt)
           await admin.from('customers').update({
-            advance_balance: parseFloat(customer.advance_balance || 0) + totalRefund
+            advance_balance: parseFloat(customer.advance_balance || 0) + paidReduction
           }).eq('id', sale.customer_id)
         }
       }
-      // Record refund payment
-      await admin.from('payments').insert({
-        sale_id: saleId, vendor_id: vendor.id,
-        amount: -totalRefund,
-        payment_method: refundMethod === 'advance' ? 'advance' : 'cash',
-        notes: 'RETURN: ' + returnedDetails.join(', ')
-      })
+      // Record refund payment (only the cash portion that actually needs to be returned)
+      if (paidReduction > 0) {
+        await admin.from('payments').insert({
+          sale_id: saleId, vendor_id: vendor.id,
+          amount: -paidReduction,
+          payment_method: refundMethod === 'advance' ? 'advance' : 'cash',
+          notes: 'RETURN: ' + returnedDetails.join(', ')
+        })
+      }
     }
 
     return NextResponse.json({
       success: true,
       refundAmount: totalRefund,
+      cashRefund: paidReduction,
       allReturned,
-      message: 'Returned: ' + returnedDetails.join(', ') + '. Refund: Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' added to advance' : ' cash back')
+      message: 'Returned: ' + returnedDetails.join(', ') + '. Total value: Rs.' + totalRefund.toLocaleString() + (paidReduction > 0 ? (refundMethod === 'advance' ? ` | Rs.${paidReduction.toLocaleString()} added to advance` : ` | Rs.${paidReduction.toLocaleString()} cash back`) : '')
     })
   }
 

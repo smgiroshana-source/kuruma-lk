@@ -42,7 +42,9 @@ export async function POST(req: NextRequest) {
   })
 
   if (vendorError) {
-    return NextResponse.json({ error: 'Account created but vendor registration failed: ' + vendorError.message }, { status: 500 })
+    // Clean up the auth user so the email can be re-used on retry
+    await admin.auth.admin.deleteUser(authData.user.id)
+    return NextResponse.json({ error: 'Registration failed: ' + vendorError.message }, { status: 500 })
   }
 
   return NextResponse.json({ success: true, message: 'Registration submitted' })

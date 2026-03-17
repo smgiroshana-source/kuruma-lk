@@ -22,5 +22,11 @@ export async function GET() {
     return NextResponse.json({ role: 'vendor', status: vendor.status })
   }
 
+  // Check if staff member
+  const { data: staffLink } = await admin.from('vendor_staff').select('id').eq('user_id', user.id).eq('active', true).single()
+  if (staffLink) {
+    return NextResponse.json({ role: 'vendor', status: 'approved' })
+  }
+
   return NextResponse.json({ role: 'none' })
 }

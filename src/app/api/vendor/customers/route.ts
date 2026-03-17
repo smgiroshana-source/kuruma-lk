@@ -202,10 +202,16 @@ export async function POST(req: NextRequest) {
       const balance = parseFloat(sale.balance_due)
       const applyAmount = Math.min(remaining, balance)
 
-      // Record payment lines split proportionally to this invoice
-      const invoiceShare = applyAmount / totalPayment
-      for (const pl of paymentLines) {
-        const plAmount = Math.round(parseFloat(pl.amount) * invoiceShare * 100) / 100
+      // Split applyAmount across payment lines proportionally, using integer-safe distribution
+      // to ensure the sum of inserted records exactly equals applyAmount
+      let remainingApply = applyAmount
+      for (let idx = 0; idx < paymentLines.length; idx++) {
+        const pl = paymentLines[idx]
+        const isLast = idx === paymentLines.length - 1
+        const plAmount = isLast
+          ? Math.round(remainingApply * 100) / 100
+          : Math.round((parseFloat(pl.amount) / totalPayment) * applyAmount * 100) / 100
+        remainingApply = Math.round((remainingApply - plAmount) * 100) / 100
         if (plAmount > 0) {
           await admin.from('payments').insert({
             sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
@@ -284,11 +290,12 @@ export async function POST(req: NextRequest) {
       paid_amount: newPaid, balance_due: newBalance, payment_status: newStatus,
     }).eq('id', saleId)
 
-    // If overpayment, add to customer advance
-    if (overpayment > 0 && customerId) {
-      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', customerId).single()
+    // If overpayment, add to customer advance — use sale's actual customer_id, not the passed one
+    const realCustomerId = sale.customer_id || customerId
+    if (overpayment > 0 && realCustomerId) {
+      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', realCustomerId).single()
       const currentAdvance = parseFloat(cust?.advance_balance || 0)
-      await admin.from('customers').update({ advance_balance: currentAdvance + overpayment }).eq('id', customerId)
+      await admin.from('customers').update({ advance_balance: currentAdvance + overpayment }).eq('id', realCustomerId)
     }
 
     let msg = `Rs.${amountApplied.toLocaleString()} recorded. ${newBalance > 0 ? 'Balance: Rs.' + newBalance.toLocaleString() : 'Fully settled!'}`

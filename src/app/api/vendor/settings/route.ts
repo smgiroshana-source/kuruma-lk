@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
         changeRequestId = existing.id
       } else {
         // Create new request
-        const { data: req, error } = await admin
+        const { data: changeReq, error } = await admin
           .from('vendor_change_requests')
           .insert({
             vendor_id: vendor.id,
@@ -180,7 +180,7 @@ export async function POST(req: NextRequest) {
           .select()
           .single()
         if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-        changeRequestId = req?.id
+        changeRequestId = changeReq?.id
       }
     }
 
