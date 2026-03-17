@@ -182,7 +182,7 @@ export default function VendorDashboard() {
   const [staffList, setStaffList] = useState<any[]>([])
   const [staffLoading, setStaffLoading] = useState(false)
   const [newStaff, setNewStaff] = useState({ email: '', name: '', role: 'cashier', pin: '' })
-  const [staffTempPassword, setStaffTempPassword] = useState(null)
+  const [staffTempPassword, setStaffTempPassword] = useState<{ name: string; email: string; password: string } | null>(null)
   const [editingCustomer, setEditingCustomer] = useState<any>(null)
   const [editCustomerLoading, setEditCustomerLoading] = useState(false)
 
