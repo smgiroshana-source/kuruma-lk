@@ -193,20 +193,7 @@ export async function POST(req: NextRequest) {
 
     const totalOutstanding = (outstandingSales || []).reduce((s: number, sale: any) => s + parseFloat(sale.balance_due), 0)
 
-    // Record all payment lines (attached to first outstanding sale for audit)
-    const firstSaleId = outstandingSales?.[0]?.id || null
-    for (const pl of paymentLines) {
-      if (parseFloat(pl.amount) > 0) {
-        await admin.from('payments').insert({
-          sale_id: firstSaleId, vendor_id: vendor.id, customer_id: customerId,
-          amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
-          cheque_number: pl.chequeNumber || null, cheque_date: pl.chequeDate || null,
-          bank_ref: pl.bankRef || null, notes: pl.notes || 'Bulk settlement',
-        })
-      }
-    }
-
-    // Apply to invoices oldest first
+    // Apply to invoices oldest first, recording payments per-invoice
     let remaining = totalPayment
     const settledInvoices: string[] = []
 
@@ -214,6 +201,20 @@ export async function POST(req: NextRequest) {
       if (remaining <= 0) break
       const balance = parseFloat(sale.balance_due)
       const applyAmount = Math.min(remaining, balance)
+
+      // Record payment lines split proportionally to this invoice
+      const invoiceShare = applyAmount / totalPayment
+      for (const pl of paymentLines) {
+        const plAmount = Math.round(parseFloat(pl.amount) * invoiceShare * 100) / 100
+        if (plAmount > 0) {
+          await admin.from('payments').insert({
+            sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
+            amount: plAmount, payment_method: pl.method || 'cash',
+            cheque_number: pl.chequeNumber || null, cheque_date: pl.chequeDate || null,
+            bank_ref: pl.bankRef || null, notes: pl.notes || 'Bulk settlement',
+          })
+        }
+      }
 
       const newPaid = parseFloat(sale.paid_amount) + applyAmount
       const newBalance = Math.max(0, balance - applyAmount)

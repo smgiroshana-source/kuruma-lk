@@ -229,7 +229,8 @@ export async function POST(req: NextRequest) {
     const saleItems = items.map((item: any) => ({
       sale_id: sale.id, product_id: item.productId, product_name: item.productName,
       product_sku: item.productSku || null, quantity: item.quantity,
-      unit_price: item.unitPrice, total: item.quantity * item.unitPrice,
+      unit_price: item.unitPrice, unit_cost: item.unitCost || null,
+      total: item.quantity * item.unitPrice,
     }))
     const { error: itemsError } = await admin.from('sale_items').insert(saleItems)
     if (itemsError) { await admin.from('sales').delete().eq('id', sale.id); return NextResponse.json({ error: itemsError.message }, { status: 400 }) }
@@ -449,10 +450,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Nothing to return' }, { status: 400 })
 
     // 2. Update sale totals
-    const newPaidAmount = Math.max(0, parseFloat(sale.paid_amount || 0) - totalRefund)
-    const newTotal = Math.max(0, parseFloat(sale.total) - totalRefund)
+    const currentPaid = parseFloat(sale.paid_amount || 0)
+    const currentTotal = parseFloat(sale.total)
+    const currentBalance = parseFloat(sale.balance_due || 0)
+    const newTotal = Math.max(0, currentTotal - totalRefund)
     const newSubtotal = Math.max(0, parseFloat(sale.subtotal) - totalRefund)
-    const newBalanceDue = Math.max(0, newTotal - newPaidAmount)
+    // Refund reduces balance first (credit), then paid_amount (cash already received)
+    const balanceReduction = Math.min(totalRefund, currentBalance)
+    const paidReduction = totalRefund - balanceReduction
+    const newBalanceDue = Math.max(0, currentBalance - balanceReduction)
+    const newPaidAmount = Math.max(0, currentPaid - paidReduction)
 
     // Check if all items fully returned
     const { data: updatedItems } = await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)

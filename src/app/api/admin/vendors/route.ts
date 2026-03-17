@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
         await admin.from('products').delete().eq('vendor_id', vendorId)
       }
 
-      // Delete sales
+      // Delete sales and their items/payments
       const { data: sales } = await admin
         .from('sales')
         .select('id')
@@ -66,8 +66,18 @@ export async function POST(request: NextRequest) {
       if (sales && sales.length > 0) {
         const saleIds = sales.map(s => s.id)
         await admin.from('sale_items').delete().in('sale_id', saleIds)
+        await admin.from('payments').delete().in('sale_id', saleIds)
         await admin.from('sales').delete().eq('vendor_id', vendorId)
       }
+
+      // Delete orphaned payments with no sale (advance payments etc.)
+      await admin.from('payments').delete().eq('vendor_id', vendorId)
+
+      // Delete customers
+      await admin.from('customers').delete().eq('vendor_id', vendorId)
+
+      // Delete vendor settings
+      await admin.from('vendor_settings').delete().eq('vendor_id', vendorId)
 
       // Delete vendor
       const { error } = await admin.from('vendors').delete().eq('id', vendorId)

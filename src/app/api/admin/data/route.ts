@@ -17,19 +17,19 @@ export async function GET() {
   const { data: vendors } = await admin
     .from('vendors')
     .select('*')
-    .order('created_at', { ascending: false }).limit(10000)
+    .order('created_at', { ascending: false }).limit(500)
 
   // Fetch ALL products with vendor info
   const { data: products } = await admin
     .from('products')
     .select('*, vendor:vendors(id, name, location, slug)')
-    .order('created_at', { ascending: false }).limit(10000)
+    .order('created_at', { ascending: false }).limit(2000)
 
-  // Fetch ALL sales
+  // Fetch recent sales (last 1000)
   const { data: sales } = await admin
     .from('sales')
     .select('*, items:sale_items(*)')
-    .order('created_at', { ascending: false }).limit(10000)
+    .order('created_at', { ascending: false }).limit(1000)
 
   // Calculate stats
   const approvedVendors = (vendors || []).filter(v => v.status === 'approved').length

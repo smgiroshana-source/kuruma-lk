@@ -166,7 +166,9 @@ export async function POST(req: NextRequest) {
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     const { data: images } = await admin.from('product_images').select('url').eq('product_id', productId)
     if (images && images.length > 0) {
-      const paths = images.map((img: any) => { const m = img.url.match(/product-images\/(.+)$/); return m ? m[1] : null }).filter(Boolean)
+      const paths = images.map((img: any) => {
+        try { const u = new URL(img.url); return u.pathname.split('/product-images/')[1] || null } catch { return null }
+      }).filter(Boolean)
       if (paths.length > 0) await admin.storage.from('product-images').remove(paths)
     }
     await admin.from('product_images').delete().eq('product_id', productId)
@@ -198,7 +200,9 @@ export async function POST(req: NextRequest) {
     for (const batch of chunk(ownedIds)) {
       const { data: images } = await admin.from('product_images').select('url').in('product_id', batch)
       if (images && images.length > 0) {
-        const paths = images.map((img: any) => { const m = img.url.match(/product-images\/(.+)$/); return m ? m[1] : null }).filter(Boolean)
+        const paths = images.map((img: any) => {
+          try { const u = new URL(img.url); return u.pathname.split('/product-images/')[1] || null } catch { return null }
+        }).filter(Boolean)
         // Storage remove also has limits — batch by 100
         for (let i = 0; i < paths.length; i += 100) {
           await admin.storage.from('product-images').remove(paths.slice(i, i + 100))
