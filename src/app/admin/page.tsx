@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 
-type AdminTab = 'overview' | 'vendors' | 'products'
+type AdminTab = 'overview' | 'vendors' | 'products' | 'keywords'
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState<AdminTab>('overview')
@@ -23,6 +23,12 @@ export default function AdminDashboard() {
   // Feature 8: Vendor change requests
   const [changeRequests, setChangeRequests] = useState<any[]>([])
   const [changeLoading, setChangeLoading] = useState(false)
+
+  // Keywords / Synonyms
+  const [synonyms, setSynonyms] = useState<any[]>([])
+  const [synonymsLoading, setSynonymsLoading] = useState(false)
+  const [editingSynonym, setEditingSynonym] = useState<any>(null)
+  const [newKeywords, setNewKeywords] = useState('')
 
   useEffect(() => {
     fetchData()
@@ -56,6 +62,37 @@ export default function AdminDashboard() {
   async function handleSignOut() {
     await fetch("/api/auth/logout", { method: "POST" })
     window.location.href = '/'
+  }
+
+  // Synonym functions
+  async function fetchSynonyms() {
+    setSynonymsLoading(true)
+    try {
+      const res = await fetch('/api/admin/synonyms')
+      if (res.ok) { const json = await res.json(); setSynonyms(json.synonyms || []) }
+    } catch {}
+    setSynonymsLoading(false)
+  }
+
+  async function synonymAction(action: string, id?: string, keywords?: string[]) {
+    setActionLoading(id || 'new')
+    try {
+      const res = await fetch('/api/admin/synonyms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id, keywords }),
+      })
+      if (res.ok) {
+        showToast(action === 'delete' ? 'Synonym group deleted' : action === 'create' ? 'Synonym group created' : 'Synonym group updated')
+        fetchSynonyms()
+        setEditingSynonym(null)
+        setNewKeywords('')
+      } else {
+        const err = await res.json()
+        showToast(err.error || 'Failed')
+      }
+    } catch { showToast('Network error') }
+    setActionLoading(null)
   }
 
   async function vendorAction(action: string, vendorId: string, updateData?: any) {
@@ -216,6 +253,7 @@ export default function AdminDashboard() {
             <span className="bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">SUPER ADMIN</span>
           </div>
           <div className="flex items-center gap-3">
+            <a href="/admin/analytics" className="text-sm text-slate-400 hover:text-slate-600">Analytics</a>
             <a href="/" className="text-sm text-slate-400 hover:text-slate-600">View Store</a>
             <button onClick={handleSignOut} className="text-sm text-red-500 hover:text-red-600 font-semibold">Log Out</button>
           </div>
@@ -224,10 +262,10 @@ export default function AdminDashboard() {
 
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 flex gap-1">
-          {(['overview', 'vendors', 'products'] as AdminTab[]).map((t) => (
+          {(['overview', 'vendors', 'products', 'keywords'] as AdminTab[]).map((t) => (
             <button
               key={t}
-              onClick={() => setTab(t)}
+              onClick={() => { setTab(t); if (t === 'keywords' && synonyms.length === 0) fetchSynonyms() }}
               className={`px-5 py-3 text-sm font-bold border-b-2 transition capitalize ${tab === t ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'
                 }`}
             >
@@ -543,6 +581,107 @@ export default function AdminDashboard() {
                 </table>
               </div>
             </div>
+          </div>
+        )}
+
+        {tab === 'keywords' && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Search Keywords / Synonyms</h2>
+                <p className="text-sm text-slate-500">Group similar words together so searching any word in a group finds products matching all words</p>
+              </div>
+            </div>
+
+            {/* Add new synonym group */}
+            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+              <h3 className="text-sm font-bold text-slate-700 mb-2">Add New Keyword Group</h3>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newKeywords}
+                  onChange={e => setNewKeywords(e.target.value)}
+                  placeholder="Enter keywords separated by commas (e.g., bumper, buffer, bumber)"
+                  className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                <button
+                  onClick={() => {
+                    const kws = newKeywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean)
+                    if (kws.length < 2) { showToast('Need at least 2 keywords'); return }
+                    synonymAction('create', undefined, kws)
+                  }}
+                  disabled={actionLoading === 'new'}
+                  className="px-4 py-2 bg-orange-500 text-white text-sm font-bold rounded-lg hover:bg-orange-600 disabled:opacity-50"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {synonymsLoading ? (
+              <div className="text-center py-8 text-slate-400">Loading...</div>
+            ) : synonyms.length === 0 ? (
+              <div className="text-center py-8 text-slate-400">No keyword groups yet</div>
+            ) : (
+              <div className="space-y-2">
+                {synonyms.map((syn: any) => (
+                  <div key={syn.id} className="bg-white rounded-xl border border-slate-200 p-4">
+                    {editingSynonym?.id === syn.id ? (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={editingSynonym.text}
+                          onChange={e => setEditingSynonym({ ...editingSynonym, text: e.target.value })}
+                          className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
+                        />
+                        <button
+                          onClick={() => {
+                            const kws = editingSynonym.text.split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean)
+                            if (kws.length < 2) { showToast('Need at least 2 keywords'); return }
+                            synonymAction('update', syn.id, kws)
+                          }}
+                          disabled={actionLoading === syn.id}
+                          className="px-3 py-2 bg-emerald-500 text-white text-sm font-bold rounded-lg hover:bg-emerald-600 disabled:opacity-50"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingSynonym(null)}
+                          className="px-3 py-2 text-sm font-bold text-slate-500 rounded-lg border border-slate-200 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap gap-1.5">
+                          {(syn.keywords || []).map((kw: string) => (
+                            <span key={kw} className="inline-block bg-orange-50 text-orange-700 text-xs font-semibold px-2.5 py-1 rounded-full border border-orange-200">
+                              {kw}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="flex gap-1 ml-3 shrink-0">
+                          <button
+                            onClick={() => setEditingSynonym({ id: syn.id, text: (syn.keywords || []).join(', ') })}
+                            className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => { if (confirm('Delete this keyword group?')) synonymAction('delete', syn.id) }}
+                            disabled={actionLoading === syn.id}
+                            className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200 disabled:opacity-50"
+                          >
+                            Del
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

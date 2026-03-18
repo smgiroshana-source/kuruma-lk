@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
+import ScrollToTop from '@/components/ScrollToTop'
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://kuruma.lk'
 
@@ -126,6 +127,7 @@ export default function RootLayout({
       <body className="bg-slate-50 text-slate-900 min-h-screen">
         <AuthProvider>
           {children}
+          <ScrollToTop />
         </AuthProvider>
       </body>
     </html>

@@ -17,8 +17,13 @@ export async function GET() {
     .eq('status', 'approved')
     .order('name')
 
+  const { data: synonyms } = await admin
+    .from('search_synonyms')
+    .select('keywords')
+
   return NextResponse.json({
     products: products || [],
     vendors: vendors || [],
+    synonyms: (synonyms || []).map(s => s.keywords),
   })
 }
