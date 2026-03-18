@@ -3,6 +3,36 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Product, Vendor } from '@/types'
 
+// Levenshtein distance between two strings
+function levenshtein(a: string, b: string): number {
+  const m = a.length, n = b.length
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) => {
+    const row = new Array(n + 1).fill(0)
+    row[0] = i
+    return row
+  })
+  for (let j = 1; j <= n; j++) dp[0][j] = j
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1])
+  return dp[m][n]
+}
+
+// Soundex phonetic encoding
+function soundex(s: string): string {
+  const str = s.toLowerCase().replace(/[^a-z]/g, '')
+  if (!str) return ''
+  const map: Record<string, string> = { b:'1',f:'1',p:'1',v:'1', c:'2',g:'2',j:'2',k:'2',q:'2',s:'2',x:'2',z:'2', d:'3',t:'3', l:'4', m:'5',n:'5', r:'6' }
+  let result = str[0].toUpperCase()
+  let prev = map[str[0]] || ''
+  for (let i = 1; i < str.length && result.length < 4; i++) {
+    const code = map[str[i]] || ''
+    if (code && code !== prev) result += code
+    prev = code || prev
+  }
+  return result.padEnd(4, '0')
+}
+
 const CATEGORIES = [
   'All', 'Engine Parts', 'Transmission & Drivetrain', 'Suspension & Steering', 'Brake System',
   'Electrical & Electronics', 'Body Parts', 'Lighting', 'Interior Parts',
@@ -31,6 +61,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [selectedVendor, setSelectedVendor] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const trackingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [wishlist, setWishlist] = useState<Set<string>>(new Set())
   const [wishlistOpen, setWishlistOpen] = useState(false)
   const [sortBy, setSortBy] = useState<string>('newest')
@@ -39,8 +70,9 @@ export default function HomePage() {
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 0])
   const [priceFilter, setPriceFilter] = useState<[number, number]>([0, 999999999])
   const [showFilters, setShowFilters] = useState(false)
+  const [synonyms, setSynonyms] = useState<string[][]>([])
 
-  useEffect(() => { (async () => { try { const r = await fetch('/api/store'); if (r.ok) { const j = await r.json(); setProducts(j.products); setVendors(j.vendors) } } catch (e) { console.error(e) } setLoading(false) })() }, [])
+  useEffect(() => { (async () => { try { const r = await fetch('/api/store'); if (r.ok) { const j = await r.json(); setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || []) } } catch (e) { console.error(e) } setLoading(false) })() }, [])
   useEffect(() => { try { const s = localStorage.getItem('kuruma_wishlist'); if (s) setWishlist(new Set(JSON.parse(s))) } catch {} }, [])
 
   function updateWishlist(n: Set<string>) { setWishlist(n); try { localStorage.setItem('kuruma_wishlist', JSON.stringify([...n])) } catch {} }
@@ -51,17 +83,117 @@ export default function HomePage() {
   const uniqueConditions = ['All', 'New-Genuine', 'New-Other', 'Reconditioned', 'Damaged']
   useEffect(() => { if (products.length > 0) { const pr = products.filter(p => p.price && p.show_price).map(p => p.price!); if (pr.length > 0) { setPriceRange([Math.min(...pr), Math.max(...pr)]); setPriceFilter([Math.min(...pr), Math.max(...pr)]) } } }, [products])
 
+  // Search tracking (fire-and-forget, debounced)
+  useEffect(() => {
+    if (loading) return
+    if (trackingTimeout.current) clearTimeout(trackingTimeout.current)
+    trackingTimeout.current = setTimeout(() => {
+      const hasQuery = search.trim().length > 0
+      const hasCategory = selectedCategory !== 'All'
+      const hasCondition = conditionFilter !== 'All'
+      const hasMake = makeFilter !== 'All'
+      if (!hasQuery && !hasCategory && !hasCondition && !hasMake) return
+      fetch('/api/analytics/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: search.trim(), category: selectedCategory, conditionFilter, makeFilter, resultCount: filteredProducts.length }),
+      }).catch(() => {})
+    }, 1500)
+    return () => { if (trackingTimeout.current) clearTimeout(trackingTimeout.current) }
+  }, [search, selectedCategory, conditionFilter, makeFilter, loading])
+
   const activeFilterCount = [conditionFilter !== 'All', makeFilter !== 'All', priceRange[1] > 0 && (priceFilter[0] !== priceRange[0] || priceFilter[1] !== priceRange[1])].filter(Boolean).length
 
-  const filteredProducts = products.filter((p) => {
-    const sl = search.toLowerCase()
+  // Build vocabulary of known words from product names + synonym keywords
+  const knownTerms = (() => {
+    const terms = new Set<string>()
+    products.forEach(p => {
+      p.name.toLowerCase().split(/\s+/).forEach(w => { if (w.length > 2) terms.add(w) })
+      // Also add multi-word product name segments (e.g., "brake pad", "timing belt")
+      const name = p.name.toLowerCase()
+      if (name.length > 2) terms.add(name)
+    })
+    synonyms.flat().forEach(kw => terms.add(kw.toLowerCase()))
+    return Array.from(terms)
+  })()
+
+  // Expand search term using synonym groups
+  function getSearchTerms(query: string): string[] {
+    if (!query) return []
+    const q = query.toLowerCase().trim()
+    const terms = new Set<string>([q])
+    for (const group of synonyms) {
+      if (group.some(kw => q.includes(kw) || kw.includes(q))) {
+        group.forEach(kw => terms.add(kw))
+      }
+    }
+    return Array.from(terms)
+  }
+
+  // Find the best fuzzy/phonetic match for a search term
+  function findCorrectedQuery(query: string): string | null {
+    if (!query || knownTerms.length === 0) return null
+    const q = query.toLowerCase().trim()
+    const qSoundex = soundex(q)
+    let bestMatch = ''
+    let bestScore = Infinity
+
+    for (const term of knownTerms) {
+      // Skip if it's an exact substring match (no correction needed)
+      if (term.includes(q) || q.includes(term)) return null
+
+      const dist = levenshtein(q, term)
+      const maxLen = Math.max(q.length, term.length)
+      // Only consider if edit distance is small relative to length
+      if (dist > Math.ceil(maxLen * 0.4)) continue
+
+      // Boost score for phonetic match
+      const phoneticBonus = soundex(term) === qSoundex ? -2 : 0
+      const score = dist + phoneticBonus
+
+      if (score < bestScore) {
+        bestScore = score
+        bestMatch = term
+      }
+    }
+
+    // Only suggest if reasonably close (max 3 edits or phonetic match)
+    if (bestMatch && bestScore <= 3) return bestMatch
+    return null
+  }
+
+  // Try direct search first, then fuzzy correction if 0 results
+  const directSearchTerms = getSearchTerms(search)
+  const directResults = products.filter((p) => {
+    const matchesSearch = !search || directSearchTerms.some(term => {
+      const t = term.toLowerCase()
+      return p.name.toLowerCase().includes(t) || (p.sku||'').toLowerCase().includes(t) || (p.make||'').toLowerCase().includes(t) || (p.model||'').toLowerCase().includes(t) || (p.vendor?.name||'').toLowerCase().includes(t)
+    })
     return (selectedCategory === 'All' || p.category === selectedCategory)
       && (!selectedVendor || p.vendor_id === selectedVendor)
-      && (!search || p.name.toLowerCase().includes(sl) || (p.sku||'').toLowerCase().includes(sl) || (p.make||'').toLowerCase().includes(sl) || (p.model||'').toLowerCase().includes(sl) || (p.vendor?.name||'').toLowerCase().includes(sl))
+      && matchesSearch
       && (conditionFilter === 'All' || p.condition === conditionFilter)
       && (makeFilter === 'All' || p.make === makeFilter)
       && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
-  }).sort((a, b) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } })
+  })
+
+  // If no results and there's a search query, try fuzzy correction
+  const correctedQuery = (search && directResults.length === 0) ? findCorrectedQuery(search.toLowerCase().trim()) : null
+  const correctedSearchTerms = correctedQuery ? getSearchTerms(correctedQuery) : []
+
+  const filteredProducts = (directResults.length > 0 || !correctedQuery) ? directResults.sort((a, b) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } })
+    : products.filter((p) => {
+      const matchesSearch = correctedSearchTerms.some(term => {
+        const t = term.toLowerCase()
+        return p.name.toLowerCase().includes(t) || (p.sku||'').toLowerCase().includes(t) || (p.make||'').toLowerCase().includes(t) || (p.model||'').toLowerCase().includes(t) || (p.vendor?.name||'').toLowerCase().includes(t)
+      })
+      return (selectedCategory === 'All' || p.category === selectedCategory)
+        && (!selectedVendor || p.vendor_id === selectedVendor)
+        && matchesSearch
+        && (conditionFilter === 'All' || p.condition === conditionFilter)
+        && (makeFilter === 'All' || p.make === makeFilter)
+        && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
+    }).sort((a, b) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } })
 
   const selectedVendorObj = selectedVendor ? vendors.find(v => v.id === selectedVendor) : null
   const isVendorView = !!(selectedVendor && selectedVendorObj)
@@ -213,6 +345,17 @@ export default function HomePage() {
             </div>
             {priceRange[1]>0&&(<div className="mt-4 pt-4 border-t border-[#f0f0f0]"><label className="text-[10px] font-bold uppercase tracking-[1.2px] text-[#bbb] mb-2.5 block">Price: <span className="text-[#ff6b35]">Rs.{priceFilter[0].toLocaleString()}</span> – <span className="text-[#ff6b35]">Rs.{priceFilter[1].toLocaleString()}</span></label><div className="flex items-center gap-3"><input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[0]} onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([Math.min(v,priceFilter[1]-100),priceFilter[1]])}} className="flex-1 h-1.5 accent-[#ff6b35]"/><input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[1]} onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([priceFilter[0],Math.max(v,priceFilter[0]+100)])}} className="flex-1 h-1.5 accent-[#ff6b35]"/></div></div>)}
           </div>)}
+
+          {/* Spell correction notice */}
+          {correctedQuery && filteredProducts.length > 0 && (
+            <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl text-sm">
+              <span className="text-blue-600">Showing results for </span>
+              <button onClick={() => setSearch(correctedQuery)} className="font-bold text-blue-700 underline">{correctedQuery}</button>
+              <span className="text-blue-400 ml-2">·</span>
+              <span className="text-blue-400 ml-2">Search instead for </span>
+              <span className="font-medium text-blue-500 line-through">{search}</span>
+            </div>
+          )}
 
           {/* Product Grid */}
           {loading ? (<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">{[...Array(8)].map((_,i)=>(<div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]"><div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse"/><div className="p-3 space-y-2.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse"/><div className="h-4 bg-[#f0f0f0] rounded animate-pulse"/><div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3"/></div></div>))}</div>
