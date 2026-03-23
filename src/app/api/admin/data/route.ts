@@ -29,11 +29,21 @@ export async function GET() {
     .select('*', { count: 'exact', head: true })
     .eq('is_active', true)
 
-  // Fetch latest products for the list (not all — just latest 100 for overview)
-  const { data: products } = await admin
-    .from('products')
-    .select('*, vendor:vendors(id, name, location, slug)')
-    .order('created_at', { ascending: false }).limit(100)
+  // Fetch all products (Supabase default limit is 1000, need to paginate for large datasets)
+  let products: any[] = []
+  let from = 0
+  const PAGE_SIZE = 1000
+  while (true) {
+    const { data } = await admin
+      .from('products')
+      .select('*, vendor:vendors(id, name, location, slug)')
+      .order('created_at', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1)
+    if (!data || data.length === 0) break
+    products = products.concat(data)
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
 
   // Fetch recent sales (last 1000)
   const { data: sales } = await admin
