@@ -39,7 +39,7 @@ function mapCSVRow(row: Record<string, string>) {
     addedDate: row.added_date || row.date || '',
     name: row.part_name || row.name || row.product_name || '',
     description: row.part_description || row.description || row.desc || '',
-    category: row.category || 'Other',
+    category: (() => { const c = (row.category || 'Other').trim(); const match = CATEGORIES.find(cat => cat.toLowerCase() === c.toLowerCase()); return match || c })(),
     make: row.make || row.vehicle_make || row.brand || '',
     model: row.model || row.vehicle_model || '',
     modelCode: row.model_code || '',
