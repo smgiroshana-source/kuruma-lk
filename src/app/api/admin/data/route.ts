@@ -19,11 +19,21 @@ export async function GET() {
     .select('*')
     .order('created_at', { ascending: false }).limit(500)
 
-  // Fetch ALL products with vendor info
+  // Get accurate product counts using count queries
+  const { count: totalProducts } = await admin
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+
+  const { count: activeProducts } = await admin
+    .from('products')
+    .select('*', { count: 'exact', head: true })
+    .eq('is_active', true)
+
+  // Fetch latest products for the list (not all — just latest 100 for overview)
   const { data: products } = await admin
     .from('products')
     .select('*, vendor:vendors(id, name, location, slug)')
-    .order('created_at', { ascending: false }).limit(2000)
+    .order('created_at', { ascending: false }).limit(100)
 
   // Fetch recent sales (last 1000)
   const { data: sales } = await admin
@@ -34,8 +44,6 @@ export async function GET() {
   // Calculate stats
   const approvedVendors = (vendors || []).filter(v => v.status === 'approved').length
   const pendingVendors = (vendors || []).filter(v => v.status === 'pending').length
-  const totalProducts = (products || []).length
-  const activeProducts = (products || []).filter(p => p.is_active).length
   const totalStockValue = (products || []).reduce((sum, p) => sum + ((p.price || 0) * (p.quantity || 0)), 0)
   const totalSales = (sales || []).reduce((sum, s) => sum + (s.total || 0), 0)
 
@@ -43,8 +51,8 @@ export async function GET() {
     stats: {
       approvedVendors,
       pendingVendors,
-      totalProducts,
-      activeProducts,
+      totalProducts: totalProducts || 0,
+      activeProducts: activeProducts || 0,
       totalStockValue,
       totalSales,
       totalSalesCount: (sales || []).length,
