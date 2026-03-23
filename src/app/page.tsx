@@ -118,24 +118,27 @@ export default function HomePage() {
   const uniqueConditions = ['All', 'New-Genuine', 'New-Other', 'Reconditioned', 'Damaged']
   useEffect(() => { if (products.length > 0) { const pr = products.filter(p => p.price && p.show_price).map(p => p.price!); if (pr.length > 0) { setPriceRange([Math.min(...pr), Math.max(...pr)]); setPriceFilter([Math.min(...pr), Math.max(...pr)]) } } }, [products])
 
-  // Default priority keywords for new users — show important/popular parts first
-  const DEFAULT_PRIORITY_KEYWORDS = [
-    'head light', 'headlight', 'head lamp', 'headlamp',
-    'tail light', 'tail lamp', 'taillight',
-    'bumper', 'buffer', 'front bumper', 'rear bumper',
-    'bonnet', 'hood',
-    'door', 'front door', 'rear door',
-    'fender', 'mudguard',
-    'radiator grill', 'grille', 'grill',
-    'side mirror', 'wing mirror',
-    'windshield', 'windscreen',
-    'boot', 'trunk',
-    'shock absorber', 'absorber',
-    'brake pad', 'disc rotor',
-    'radiator',
-    'alternator', 'starter motor',
-    'compressor',
+  // Popular part types — each group gets equal priority
+  const PRIORITY_PART_GROUPS = [
+    ['head light', 'headlight', 'head lamp', 'headlamp'],
+    ['bonnet', 'hood'],
+    ['door', 'front door', 'rear door'],
+    ['tail light', 'tail lamp', 'taillight', 'rear light'],
+    ['bumper', 'buffer', 'front bumper', 'rear bumper'],
+    ['fender', 'mudguard'],
+    ['side mirror', 'wing mirror', 'door mirror'],
+    ['windshield', 'windscreen'],
+    ['boot', 'trunk', 'boot lid'],
+    ['radiator grill', 'grille', 'grill'],
+    ['shock absorber', 'absorber'],
+    ['brake pad', 'disc rotor', 'brake disc'],
+    ['radiator'],
+    ['alternator', 'starter motor'],
+    ['compressor'],
   ]
+
+  // Popular car models in Sri Lanka
+  const PRIORITY_MODELS = ['wagon r', 'vezel', 'prius', 'aqua', 'corolla', 'civic', 'fit', 'vitz', 'axio', 'premio', 'alto', 'swift', 'every']
 
   // Track user searches in localStorage for personalized recommendations
   const [userSearchHistory, setUserSearchHistory] = useState<string[]>([])
@@ -153,11 +156,12 @@ export default function HomePage() {
     })
   }
 
-  // Smart sort: prioritize products matching user history or default priority keywords
+  // Smart sort: show variety of popular parts × popular models
   function getProductRelevanceScore(p: any): number {
     const name = p.name.toLowerCase()
-    const category = (p.category || '').toLowerCase()
-    const searchable = `${name} ${category}`
+    const model = (p.model || '').toLowerCase()
+    const make = (p.make || '').toLowerCase()
+    const searchable = `${name} ${make} ${model}`
     let score = 0
 
     // Returning user: boost products matching their search history (higher weight for recent searches)
@@ -165,18 +169,40 @@ export default function HomePage() {
       for (let i = 0; i < userSearchHistory.length; i++) {
         const term = userSearchHistory[i]
         if (searchable.includes(term) || term.split(/\s+/).every(w => searchable.includes(w))) {
-          score += Math.max(100 - i * 5, 10) // Recent searches score higher
+          score += Math.max(100 - i * 5, 10)
           break
         }
       }
     }
 
-    // Default priority keywords (for new users or as fallback)
-    for (let i = 0; i < DEFAULT_PRIORITY_KEYWORDS.length; i++) {
-      if (searchable.includes(DEFAULT_PRIORITY_KEYWORDS[i])) {
-        score += Math.max(50 - i, 5) // Earlier keywords score higher
+    // Match against priority part types (all groups get equal base score)
+    let partGroupIndex = -1
+    for (let g = 0; g < PRIORITY_PART_GROUPS.length; g++) {
+      if (PRIORITY_PART_GROUPS[g].some(kw => name.includes(kw))) {
+        partGroupIndex = g
+        score += 50 // All popular parts get same base score
         break
       }
+    }
+
+    // Boost popular car models
+    let modelIndex = -1
+    for (let m = 0; m < PRIORITY_MODELS.length; m++) {
+      if (model.includes(PRIORITY_MODELS[m]) || name.includes(PRIORITY_MODELS[m])) {
+        modelIndex = m
+        score += 30 // Popular model boost
+        break
+      }
+    }
+
+    // Extra boost if both popular part AND popular model (e.g., "Wagon R Head Light")
+    if (partGroupIndex >= 0 && modelIndex >= 0) score += 20
+
+    // Use part group + model index to interleave variety
+    // This creates a pattern: Wagon R Headlight, Vezel Bonnet, Prius Door, etc.
+    if (partGroupIndex >= 0 && modelIndex >= 0) {
+      // Spread different part types across results by using group index as sub-sort
+      score += (100 - (partGroupIndex * PRIORITY_MODELS.length + modelIndex) % 100) * 0.01
     }
 
     // Boost products with images (they look better in the grid)
