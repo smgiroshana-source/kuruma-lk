@@ -37,7 +37,7 @@ const CATEGORIES = [
   'All', 'Engine Parts', 'Transmission & Drivetrain', 'Suspension & Steering', 'Brake System',
   'Electrical & Electronics', 'Body Parts', 'Lighting', 'Interior Parts',
   'A/C & Radiator', 'Wheels & Tires', 'Exhaust System', 'Filters & Fluids',
-  'Accessories', 'Hybrid & EV Parts', 'Others', 'Windscreen',
+  'Accessories', 'Hybrid & EV Parts', 'Other', 'Windscreen',
   'Beading Belts and Rubber', 'Audio & Video', 'Safety'
 ]
 
