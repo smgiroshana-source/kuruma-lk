@@ -532,7 +532,7 @@ export default function VendorDashboard() {
       const skuToId = new Map()
       if (j.products) j.products.forEach((p: any) => skuToId.set(p.sku, p.id))
 
-      const PRODUCT_BATCH = 5 // Process 5 products' images in parallel
+      const PRODUCT_BATCH = 15 // Process 15 products' images in parallel
       const productsToUpload = importData.filter(r => r?.imageFiles?.length && skuToId.get(r.partId))
       for (let i = 0; i < productsToUpload.length; i += PRODUCT_BATCH) {
         const batch = productsToUpload.slice(i, i + PRODUCT_BATCH)
