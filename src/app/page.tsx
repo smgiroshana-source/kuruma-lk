@@ -511,12 +511,12 @@ export default function HomePage() {
 
           {/* ── Desktop Left Sidebar ── */}
           <aside className="hidden lg:flex flex-col gap-0 w-52 flex-shrink-0">
-            <div className="sticky top-20 bg-white rounded-2xl border border-[#eee] overflow-hidden shadow-sm">
+            <div className="sticky top-4 bg-white rounded-2xl border border-[#eee] overflow-hidden shadow-sm">
               <div className="flex items-center justify-between px-4 py-3 border-b border-[#f5f5f5]">
                 <span className="font-black text-sm text-[#222]">Filters</span>
                 {activeFilterCount>0&&<button onClick={clearAllFilters} className="text-[11px] font-bold text-[#ff6b35]">Clear all</button>}
               </div>
-              <div className="p-3 max-h-[calc(100vh-120px)] overflow-y-auto">
+              <div className="p-3 max-h-[calc(100vh-32px)] overflow-y-auto">
                 {/* Categories */}
                 <p className="text-[10px] font-black text-[#bbb] uppercase tracking-wider mb-2">Category</p>
                 <div className="space-y-0.5 mb-4">
