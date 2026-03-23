@@ -75,14 +75,55 @@ export default function HomePage() {
   const [priceFilter, setPriceFilter] = useState<[number, number]>([0, 999999999])
   const [showFilters, setShowFilters] = useState(false)
   const [synonyms, setSynonyms] = useState<string[][]>([])
+  const [searchResults, setSearchResults] = useState<(Product & { vendor: Vendor; images: any[] })[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const PAGE_SIZE = 50
 
   useEffect(() => { (async () => { try { const r = await fetch(`/api/store?limit=${PAGE_SIZE}`); if (r.ok) { const j = await r.json(); setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || []); setHasMore(j.hasMore || false); setTotalCount(j.totalCount || 0) } } catch (e) { console.error(e) } setLoading(false) })() }, [])
 
-  // Load more products
+  // Server-side search (debounced)
+  useEffect(() => {
+    if (searchTimeout.current) clearTimeout(searchTimeout.current)
+
+    const hasSearch = search.trim().length > 0
+    const hasCategory = selectedCategory !== 'All'
+    const hasCondition = conditionFilter !== 'All'
+    const hasMake = makeFilter !== 'All'
+
+    // If no filters active, clear search results and show paginated browse
+    if (!hasSearch && !hasCategory && !hasCondition && !hasMake && !selectedVendor) {
+      setSearchResults(null)
+      setSearching(false)
+      return
+    }
+
+    setSearching(true)
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams()
+        if (hasSearch) params.set('q', search.trim())
+        if (hasCategory) params.set('category', selectedCategory)
+        if (hasCondition) params.set('condition', conditionFilter)
+        if (hasMake) params.set('make', makeFilter)
+        if (selectedVendor) params.set('vendor', selectedVendor)
+
+        const r = await fetch(`/api/store?${params.toString()}`)
+        if (r.ok) {
+          const j = await r.json()
+          setSearchResults(j.products || [])
+        }
+      } catch {}
+      setSearching(false)
+    }, 400)
+
+    return () => { if (searchTimeout.current) clearTimeout(searchTimeout.current) }
+  }, [search, selectedCategory, conditionFilter, makeFilter, selectedVendor])
+
+  // Load more products (only for browse mode, not search)
   async function loadMore() {
-    if (loadingMore || !hasMore) return
+    if (loadingMore || !hasMore || searchResults !== null) return
     setLoadingMore(true)
     try {
       const r = await fetch(`/api/store?limit=${PAGE_SIZE}&offset=${products.length}`)
@@ -95,15 +136,15 @@ export default function HomePage() {
     setLoadingMore(false)
   }
 
-  // Infinite scroll - load more when sentinel is visible
+  // Infinite scroll - load more when sentinel is visible (browse mode only)
   useEffect(() => {
-    if (!loadMoreRef.current) return
+    if (!loadMoreRef.current || searchResults !== null) return
     const observer = new IntersectionObserver(entries => {
       if (entries[0].isIntersecting && hasMore && !loadingMore) loadMore()
     }, { rootMargin: '400px' })
     observer.observe(loadMoreRef.current)
     return () => observer.disconnect()
-  }, [hasMore, loadingMore, products.length])
+  }, [hasMore, loadingMore, products.length, searchResults])
   useEffect(() => { try { const s = localStorage.getItem('kuruma_wishlist'); if (s) setWishlist(new Set(JSON.parse(s))) } catch {} }, [])
 
   function updateWishlist(n: Set<string>) { setWishlist(n); try { localStorage.setItem('kuruma_wishlist', JSON.stringify([...n])) } catch {} }
@@ -207,38 +248,21 @@ export default function HomePage() {
     return null
   }
 
-  // Try direct search first, then fuzzy correction if 0 results
-  const searchWordGroups = getSearchWordGroups(search)
-  const directResults = products.filter((p) => {
-    const matchesSearch = !search || matchesAllWords(p, searchWordGroups)
-    return (selectedCategory === 'All' || p.category === selectedCategory)
-      && (!selectedVendor || p.vendor_id === selectedVendor)
-      && matchesSearch
-      && (conditionFilter === 'All' || p.condition === conditionFilter)
-      && (makeFilter === 'All' || p.make === makeFilter)
-      && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
-  })
+  // Use server search results when available, otherwise show paginated browse
+  const sourceProducts = searchResults !== null ? searchResults : products
 
-  // If no results and there's a search query, try fuzzy correction
-  const correctedQuery = (search && directResults.length === 0) ? findCorrectedQuery(search.toLowerCase().trim()) : null
-  const correctedWordGroups = correctedQuery ? getSearchWordGroups(correctedQuery) : []
+  // Apply price filter and sorting (price filter is client-only since it's a range slider)
+  const sortFn = (a: any, b: any) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } }
 
-  const filteredProducts = (directResults.length > 0 || !correctedQuery) ? directResults.sort((a, b) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } })
-    : products.filter((p) => {
-      const matchesSearch = matchesAllWords(p, correctedWordGroups)
-      return (selectedCategory === 'All' || p.category === selectedCategory)
-        && (!selectedVendor || p.vendor_id === selectedVendor)
-        && matchesSearch
-        && (conditionFilter === 'All' || p.condition === conditionFilter)
-        && (makeFilter === 'All' || p.make === makeFilter)
-        && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
-    }).sort((a, b) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } })
+  const filteredProducts = sourceProducts.filter(p =>
+    !p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1])
+  ).sort(sortFn)
 
   const selectedVendorObj = selectedVendor ? vendors.find(v => v.id === selectedVendor) : null
   const isVendorView = !!(selectedVendor && selectedVendorObj)
   function selectVendor(id: string) { setSelectedVendor(id); setActiveTab('products'); setSelectedCategory('All'); setSearch(''); window.scrollTo({top:0,behavior:'smooth'}) }
-  function clearVendor() { setSelectedVendor(null); setActiveTab('products') }
-  function clearAllFilters() { setSearch(''); setSelectedCategory('All'); setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0],priceRange[1]]); setSortBy('newest') }
+  function clearVendor() { setSelectedVendor(null); setActiveTab('products'); setSearchResults(null) }
+  function clearAllFilters() { setSearch(''); setSelectedCategory('All'); setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0],priceRange[1]]); setSortBy('newest'); setSearchResults(null) }
 
   const wishlistProducts = products.filter(p => wishlist.has(p.id)).sort((a,b) => new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())
   const wishlistByVendor: Record<string, {vendor:Vendor; items:typeof wishlistProducts}> = {}
@@ -385,19 +409,16 @@ export default function HomePage() {
             {priceRange[1]>0&&(<div className="mt-4 pt-4 border-t border-[#f0f0f0]"><label className="text-[10px] font-bold uppercase tracking-[1.2px] text-[#bbb] mb-2.5 block">Price: <span className="text-[#ff6b35]">Rs.{priceFilter[0].toLocaleString()}</span> – <span className="text-[#ff6b35]">Rs.{priceFilter[1].toLocaleString()}</span></label><div className="flex items-center gap-3"><input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[0]} onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([Math.min(v,priceFilter[1]-100),priceFilter[1]])}} className="flex-1 h-1.5 accent-[#ff6b35]"/><input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[1]} onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([priceFilter[0],Math.max(v,priceFilter[0]+100)])}} className="flex-1 h-1.5 accent-[#ff6b35]"/></div></div>)}
           </div>)}
 
-          {/* Spell correction notice */}
-          {correctedQuery && filteredProducts.length > 0 && (
-            <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl text-sm">
-              <span className="text-blue-600">Showing results for </span>
-              <button onClick={() => setSearch(correctedQuery)} className="font-bold text-blue-700 underline">{correctedQuery}</button>
-              <span className="text-blue-400 ml-2">·</span>
-              <span className="text-blue-400 ml-2">Search instead for </span>
-              <span className="font-medium text-blue-500 line-through">{search}</span>
+          {/* Search status */}
+          {searching && (
+            <div className="mb-3 flex items-center gap-2 text-sm text-slate-400">
+              <div className="w-4 h-4 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+              Searching all {totalCount} products...
             </div>
           )}
 
           {/* Product Grid */}
-          {loading ? (<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">{[...Array(8)].map((_,i)=>(<div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]"><div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse"/><div className="p-3 space-y-2.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse"/><div className="h-4 bg-[#f0f0f0] rounded animate-pulse"/><div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3"/></div></div>))}</div>
+          {loading ?(<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">{[...Array(8)].map((_,i)=>(<div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]"><div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse"/><div className="p-3 space-y-2.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse"/><div className="h-4 bg-[#f0f0f0] rounded animate-pulse"/><div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3"/></div></div>))}</div>
           ) : filteredProducts.length===0 ? (<div className="text-center py-20"><div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🔍</div><p className="font-bold text-[17px] text-[#333]">No parts found</p><p className="text-sm text-[#aaa] mt-1.5">Try adjusting your search or filters</p>{(search||selectedCategory!=='All'||activeFilterCount>0)&&<button onClick={clearAllFilters} className="mt-5 text-sm font-bold px-6 py-2.5 rounded-xl text-white shadow-[0_4px_12px_rgba(255,107,53,0.25)]" style={{background:'linear-gradient(135deg,#ff6b35,#ff8f65)'}}>Clear all filters</button>}{isVendorView&&<button onClick={clearVendor} className="mt-3 block mx-auto text-sm font-bold text-[#ff6b35] underline">Browse all shops</button>}</div>
           ) : (<div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-3">
             {filteredProducts.map(product => {
@@ -437,7 +458,10 @@ export default function HomePage() {
               </div>
             </div>
           )}
-          {!hasMore && products.length > 0 && !loading && (
+          {searchResults !== null && !searching && (
+            <p className="text-center text-xs text-slate-300 py-6">{filteredProducts.length} result{filteredProducts.length !== 1 ? 's' : ''} found</p>
+          )}
+          {searchResults === null && !hasMore && products.length > 0 && !loading && (
             <p className="text-center text-xs text-slate-300 py-6">Showing all {filteredProducts.length} products</p>
           )}
         </div>{/* end right column */}
