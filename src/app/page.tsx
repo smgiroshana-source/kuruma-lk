@@ -64,7 +64,7 @@ export default function HomePage() {
   const trackingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [wishlist, setWishlist] = useState<Set<string>>(new Set())
   const [wishlistOpen, setWishlistOpen] = useState(false)
-  const [sortBy, setSortBy] = useState<string>('newest')
+  const [sortBy, setSortBy] = useState<string>('recommended')
   const [conditionFilter, setConditionFilter] = useState<string>('All')
   const [makeFilter, setMakeFilter] = useState<string>('All')
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 0])
@@ -118,6 +118,76 @@ export default function HomePage() {
   const uniqueConditions = ['All', 'New-Genuine', 'New-Other', 'Reconditioned', 'Damaged']
   useEffect(() => { if (products.length > 0) { const pr = products.filter(p => p.price && p.show_price).map(p => p.price!); if (pr.length > 0) { setPriceRange([Math.min(...pr), Math.max(...pr)]); setPriceFilter([Math.min(...pr), Math.max(...pr)]) } } }, [products])
 
+  // Default priority keywords for new users — show important/popular parts first
+  const DEFAULT_PRIORITY_KEYWORDS = [
+    'head light', 'headlight', 'head lamp', 'headlamp',
+    'tail light', 'tail lamp', 'taillight',
+    'bumper', 'buffer', 'front bumper', 'rear bumper',
+    'bonnet', 'hood',
+    'door', 'front door', 'rear door',
+    'fender', 'mudguard',
+    'radiator grill', 'grille', 'grill',
+    'side mirror', 'wing mirror',
+    'windshield', 'windscreen',
+    'boot', 'trunk',
+    'shock absorber', 'absorber',
+    'brake pad', 'disc rotor',
+    'radiator',
+    'alternator', 'starter motor',
+    'compressor',
+  ]
+
+  // Track user searches in localStorage for personalized recommendations
+  const [userSearchHistory, setUserSearchHistory] = useState<string[]>([])
+  useEffect(() => {
+    try { const h = localStorage.getItem('kuruma_search_history'); if (h) setUserSearchHistory(JSON.parse(h)) } catch {}
+  }, [])
+
+  function trackUserSearch(query: string) {
+    if (!query || query.length < 2) return
+    const q = query.toLowerCase().trim()
+    setUserSearchHistory(prev => {
+      const updated = [q, ...prev.filter(s => s !== q)].slice(0, 30) // Keep last 30 searches
+      try { localStorage.setItem('kuruma_search_history', JSON.stringify(updated)) } catch {}
+      return updated
+    })
+  }
+
+  // Smart sort: prioritize products matching user history or default priority keywords
+  function getProductRelevanceScore(p: any): number {
+    const name = p.name.toLowerCase()
+    const category = (p.category || '').toLowerCase()
+    const searchable = `${name} ${category}`
+    let score = 0
+
+    // Returning user: boost products matching their search history (higher weight for recent searches)
+    if (userSearchHistory.length > 0) {
+      for (let i = 0; i < userSearchHistory.length; i++) {
+        const term = userSearchHistory[i]
+        if (searchable.includes(term) || term.split(/\s+/).every(w => searchable.includes(w))) {
+          score += Math.max(100 - i * 5, 10) // Recent searches score higher
+          break
+        }
+      }
+    }
+
+    // Default priority keywords (for new users or as fallback)
+    for (let i = 0; i < DEFAULT_PRIORITY_KEYWORDS.length; i++) {
+      if (searchable.includes(DEFAULT_PRIORITY_KEYWORDS[i])) {
+        score += Math.max(50 - i, 5) // Earlier keywords score higher
+        break
+      }
+    }
+
+    // Boost products with images (they look better in the grid)
+    if (p.imageUrl) score += 3
+
+    // Boost products with prices shown
+    if (p.price && p.show_price) score += 2
+
+    return score
+  }
+
   // Search tracking (fire-and-forget, debounced)
   useEffect(() => {
     if (loading) return
@@ -128,6 +198,7 @@ export default function HomePage() {
       const hasCondition = conditionFilter !== 'All'
       const hasMake = makeFilter !== 'All'
       if (!hasQuery && !hasCategory && !hasCondition && !hasMake) return
+      if (hasQuery) trackUserSearch(search.trim())
       fetch('/api/analytics/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -227,7 +298,22 @@ export default function HomePage() {
 
   // Client-side filtering with synonym expansion
   const searchWordGroups = getSearchWordGroups(search)
-  const sortFn = (a: any, b: any) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } }
+  const sortFn = (a: any, b: any) => {
+    switch(sortBy) {
+      case 'price-low': return (a.price||0)-(b.price||0)
+      case 'price-high': return (b.price||0)-(a.price||0)
+      case 'name-az': return a.name.localeCompare(b.name)
+      case 'name-za': return b.name.localeCompare(a.name)
+      case 'newest': return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()
+      default: {
+        // Smart/recommended sort: relevance score first, then newest
+        const scoreA = getProductRelevanceScore(a)
+        const scoreB = getProductRelevanceScore(b)
+        if (scoreA !== scoreB) return scoreB - scoreA
+        return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()
+      }
+    }
+  }
 
   const applyFilters = (p: any, matchesSearch: boolean) =>
     (selectedCategory === 'All' || p.category === selectedCategory)
@@ -379,7 +465,7 @@ export default function HomePage() {
           <div className="flex items-center gap-2 mb-3.5">
             <div className="relative flex-shrink-0">
               <select value={sortBy} onChange={e=>setSortBy(e.target.value)} className="text-xs font-semibold bg-white rounded-[10px] pl-3 pr-8 py-[9px] border-[1.5px] border-[#e8e8e8] text-[#555] outline-none appearance-none cursor-pointer">
-                <option value="newest">Newest First</option><option value="price-low">Price: Low to High</option><option value="price-high">Price: High to Low</option><option value="name-az">Name: A → Z</option><option value="name-za">Name: Z → A</option>
+                <option value="recommended">Recommended</option><option value="newest">Newest First</option><option value="price-low">Price: Low to High</option><option value="price-high">Price: High to Low</option><option value="name-az">Name: A → Z</option><option value="name-za">Name: Z → A</option>
               </select>
               <svg className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[#999]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg>
             </div>
