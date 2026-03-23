@@ -176,7 +176,7 @@ export default function HomePage() {
     }
 
     // Demote minor/accessory items — these shouldn't appear at the top
-    const DEMOTE_KEYWORDS = ['frame', 'retainer', 'bracket', 'bulb', 'hinge', 'clip', 'bolt', 'nut', 'washer', 'seal', 'gasket', 'bush', 'pin', 'cap', 'cover plate', 'garnish', 'switch', 'sensor', 'relay', 'fuse', 'connector', 'holder', 'mount', 'arm cup']
+    const DEMOTE_KEYWORDS = ['frame', 'retainer', 'bracket', 'bulb', 'hinge', 'clip', 'bolt', 'nut', 'washer', 'seal', 'gasket', 'bush', 'pin', 'cap', 'cover plate', 'garnish', 'switch', 'sensor', 'relay', 'fuse', 'connector', 'holder', 'mount', 'arm cup', 'spacer']
     const isDemoted = DEMOTE_KEYWORDS.some(kw => name.includes(kw))
     if (isDemoted) score -= 40
 
