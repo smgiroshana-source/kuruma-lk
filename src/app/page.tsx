@@ -38,7 +38,7 @@ const CATEGORIES = [
   'Electrical & Electronics', 'Body Parts', 'Lighting', 'Interior Parts',
   'A/C & Radiator', 'Wheels & Tires', 'Exhaust System', 'Filters & Fluids',
   'Accessories', 'Hybrid & EV Parts', 'Other', 'Windscreen',
-  'Beading Belts and Rubber', 'Audio & Video', 'Safety'
+  'Beading Belts & Rubber', 'Audio & Video', 'Safety'
 ]
 
 function formatPrice(price: number | null, showPrice: boolean) {
