@@ -175,13 +175,20 @@ export default function HomePage() {
       }
     }
 
+    // Demote minor/accessory items — these shouldn't appear at the top
+    const DEMOTE_KEYWORDS = ['frame', 'retainer', 'bracket', 'bulb', 'hinge', 'clip', 'bolt', 'nut', 'washer', 'seal', 'gasket', 'bush', 'pin', 'cap', 'cover plate']
+    const isDemoted = DEMOTE_KEYWORDS.some(kw => name.includes(kw))
+    if (isDemoted) score -= 40
+
     // Match against priority part types (all groups get equal base score)
     let partGroupIndex = -1
-    for (let g = 0; g < PRIORITY_PART_GROUPS.length; g++) {
-      if (PRIORITY_PART_GROUPS[g].some(kw => name.includes(kw))) {
-        partGroupIndex = g
-        score += 50 // All popular parts get same base score
-        break
+    if (!isDemoted) {
+      for (let g = 0; g < PRIORITY_PART_GROUPS.length; g++) {
+        if (PRIORITY_PART_GROUPS[g].some(kw => name.includes(kw))) {
+          partGroupIndex = g
+          score += 50 // All popular parts get same base score
+          break
+        }
       }
     }
 
