@@ -570,6 +570,62 @@ export default function VendorDashboard() {
     setTimeout(() => setBulkProgress({ current: 0, total: 0, phase: '', detail: '' }), 3000)
   }
 
+  // Retry missing images - find products with 0 images and re-upload from ZIP
+  async function retryMissingImages() {
+    if (!bulkData.length) { showToast('Load CSV & ZIP first'); return }
+    const products = data?.products || []
+    const productsWithoutImages = products.filter((p: any) => !p.images || p.images.length === 0)
+    if (!productsWithoutImages.length) { showToast('All products have images!'); return }
+
+    const productsToRetry = bulkData.filter(r => {
+      if (!r.imageFiles?.length) return false
+      return productsWithoutImages.some((p: any) => p.sku === r.partId)
+    })
+
+    if (!productsToRetry.length) { showToast('No matching images found in ZIP for products missing images'); return }
+
+    if (!confirm(`Found ${productsWithoutImages.length} products without images. ${productsToRetry.length} have matching images in the ZIP. Upload now?`)) return
+
+    setBulkLoading(true)
+    let wakeLock: any = null
+    try { wakeLock = await (navigator as any).wakeLock?.request("screen") } catch {}
+
+    const skuToId = new Map()
+    products.forEach((p: any) => skuToId.set(p.sku, p.id))
+
+    const PRODUCT_BATCH = 10
+    let imageCount = 0
+    const totalSteps = productsToRetry.length + 1
+
+    try {
+      for (let i = 0; i < productsToRetry.length; i += PRODUCT_BATCH) {
+        const batch = productsToRetry.slice(i, i + PRODUCT_BATCH)
+        setBulkProgress({
+          current: i + 1,
+          total: totalSteps,
+          phase: 'Retrying missing images...',
+          detail: `Products ${i + 1}-${Math.min(i + PRODUCT_BATCH, productsToRetry.length)} of ${productsToRetry.length}`
+        })
+
+        await Promise.all(batch.map(async (row) => {
+          const productId = skuToId.get(row.partId)
+          if (productId) {
+            await uploadImagesForProduct(productId, row.imageFiles)
+            imageCount += row.imageFiles.length
+          }
+        }))
+      }
+
+      setBulkProgress({ current: totalSteps, total: totalSteps, phase: 'Complete!', detail: '' })
+      showToast(`Uploaded ${imageCount} images for ${productsToRetry.length} products`)
+      await fetchData()
+    } catch { showToast('Retry failed') }
+
+    setBulkLoading(false)
+    try { wakeLock?.release() } catch {}
+    setTimeout(() => setBulkProgress({ current: 0, total: 0, phase: '', detail: '' }), 3000)
+  }
+
   // POS - Customer search
   async function searchCustomers(query: string) {
     if (query.length < 2) { setCustomerSuggestions([]); return }
@@ -1470,6 +1526,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
               <div className="flex gap-2">
                 <button onClick={() => { setBulkData([]); setBulkFile(''); setZipFiles([]); setZipSummary(null) }} className="text-sm text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200">Clear All</button>
                 <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-600 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200"><input type="checkbox" checked={onlyWithImages} onChange={e => setOnlyWithImages(e.target.checked)} className="w-4 h-4 accent-orange-500" />Only with images</label>
+                <button onClick={retryMissingImages} disabled={bulkLoading} className="bg-blue-500 text-white text-sm font-bold px-5 py-1.5 rounded-lg disabled:opacity-50 hover:bg-blue-600">{bulkLoading ? 'Retrying...' : '🔄 Retry Missing Images'}</button>
                 <button onClick={handleBulkImport} disabled={bulkLoading} className="bg-orange-500 text-white text-sm font-bold px-5 py-1.5 rounded-lg disabled:opacity-50 hover:bg-orange-600">{bulkLoading ? 'Importing...' : '🚀 Import All'}</button>
               </div>
             </div>
