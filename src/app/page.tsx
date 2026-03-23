@@ -363,9 +363,78 @@ export default function HomePage() {
   const correctedQuery = (search && directResults.length === 0) ? findCorrectedQuery(search.toLowerCase().trim()) : null
   const correctedWordGroups = correctedQuery ? getSearchWordGroups(correctedQuery) : []
 
-  const allFilteredProducts = (directResults.length > 0 || !correctedQuery)
+  // Diversify recommended results: no same model+partType back-to-back
+  function diversifyResults(sorted: any[]): any[] {
+    if (sortBy !== 'recommended' || search) return sorted // Only diversify default recommended view
+
+    // Get the part type group for a product
+    function getPartType(p: any): string {
+      const name = p.name.toLowerCase()
+      for (const group of PRIORITY_PART_GROUPS) {
+        if (group.some(kw => name.includes(kw))) return group[0]
+      }
+      return name.split(' ').slice(-2).join(' ') // fallback: last 2 words
+    }
+
+    function getModelKey(p: any): string {
+      return `${(p.make || '').toLowerCase()}-${(p.model || '').toLowerCase()}`
+    }
+
+    const result: any[] = []
+    const remaining = [...sorted]
+    const recentModels: string[] = [] // track last 3 models shown
+    const recentParts: string[] = [] // track last 3 part types shown
+
+    while (remaining.length > 0) {
+      // Find next item that's different from recent
+      let bestIdx = 0
+      let bestPenalty = Infinity
+
+      for (let i = 0; i < Math.min(remaining.length, 50); i++) { // Look ahead up to 50
+        const p = remaining[i]
+        const modelKey = getModelKey(p)
+        const partType = getPartType(p)
+        let penalty = 0
+
+        // Penalize if same model was shown recently
+        const modelPos = recentModels.indexOf(modelKey)
+        if (modelPos === 0) penalty += 100 // just shown
+        else if (modelPos === 1) penalty += 50
+        else if (modelPos === 2) penalty += 20
+
+        // Penalize if same part type was shown recently
+        const partPos = recentParts.indexOf(partType)
+        if (partPos === 0) penalty += 80
+        else if (partPos === 1) penalty += 40
+        else if (partPos === 2) penalty += 15
+
+        // Slight penalty for being further in the original sorted list
+        penalty += i * 0.1
+
+        if (penalty < bestPenalty) {
+          bestPenalty = penalty
+          bestIdx = i
+        }
+        if (penalty === 0) break // Perfect pick, no need to look further
+      }
+
+      const picked = remaining.splice(bestIdx, 1)[0]
+      result.push(picked)
+
+      recentModels.unshift(getModelKey(picked))
+      recentParts.unshift(getPartType(picked))
+      if (recentModels.length > 3) recentModels.pop()
+      if (recentParts.length > 3) recentParts.pop()
+    }
+
+    return result
+  }
+
+  const sortedResults = (directResults.length > 0 || !correctedQuery)
     ? directResults.sort(sortFn)
     : products.filter(p => applyFilters(p, matchesAllWords(p, correctedWordGroups))).sort(sortFn)
+
+  const allFilteredProducts = diversifyResults(sortedResults)
 
   // Only render visible portion (infinite scroll)
   const filteredProducts = allFilteredProducts.slice(0, visibleCount)
