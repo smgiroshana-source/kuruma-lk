@@ -117,17 +117,31 @@ export default function HomePage() {
     return Array.from(terms)
   })()
 
-  // Expand search term using synonym groups
-  function getSearchTerms(query: string): string[] {
+  // Expand search: split into words, expand each word via synonyms
+  // Returns array of word groups — each group is alternatives for one search word
+  // ALL word groups must match (AND), any alternative within a group can match (OR)
+  function getSearchWordGroups(query: string): string[][] {
     if (!query) return []
     const q = query.toLowerCase().trim()
-    const terms = new Set<string>([q])
-    for (const group of synonyms) {
-      if (group.some(kw => q.includes(kw) || kw.includes(q))) {
-        group.forEach(kw => terms.add(kw))
+    const words = q.split(/\s+/).filter(w => w.length > 0)
+
+    return words.map(word => {
+      const alternatives = new Set<string>([word])
+      for (const group of synonyms) {
+        if (group.some(kw => kw === word || kw.includes(word) || word.includes(kw))) {
+          group.forEach(kw => alternatives.add(kw))
+        }
       }
-    }
-    return Array.from(terms)
+      return Array.from(alternatives)
+    })
+  }
+
+  // Check if a product matches all search word groups
+  function matchesAllWords(product: Product, wordGroups: string[][]): boolean {
+    const searchable = `${product.name} ${product.sku || ''} ${product.make || ''} ${product.model || ''} ${product.vendor?.name || ''}`.toLowerCase()
+    return wordGroups.every(alternatives =>
+      alternatives.some(alt => searchable.includes(alt))
+    )
   }
 
   // Find the best fuzzy/phonetic match for a search term
@@ -163,12 +177,9 @@ export default function HomePage() {
   }
 
   // Try direct search first, then fuzzy correction if 0 results
-  const directSearchTerms = getSearchTerms(search)
+  const searchWordGroups = getSearchWordGroups(search)
   const directResults = products.filter((p) => {
-    const matchesSearch = !search || directSearchTerms.some(term => {
-      const t = term.toLowerCase()
-      return p.name.toLowerCase().includes(t) || (p.sku||'').toLowerCase().includes(t) || (p.make||'').toLowerCase().includes(t) || (p.model||'').toLowerCase().includes(t) || (p.vendor?.name||'').toLowerCase().includes(t)
-    })
+    const matchesSearch = !search || matchesAllWords(p, searchWordGroups)
     return (selectedCategory === 'All' || p.category === selectedCategory)
       && (!selectedVendor || p.vendor_id === selectedVendor)
       && matchesSearch
@@ -179,14 +190,11 @@ export default function HomePage() {
 
   // If no results and there's a search query, try fuzzy correction
   const correctedQuery = (search && directResults.length === 0) ? findCorrectedQuery(search.toLowerCase().trim()) : null
-  const correctedSearchTerms = correctedQuery ? getSearchTerms(correctedQuery) : []
+  const correctedWordGroups = correctedQuery ? getSearchWordGroups(correctedQuery) : []
 
   const filteredProducts = (directResults.length > 0 || !correctedQuery) ? directResults.sort((a, b) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } })
     : products.filter((p) => {
-      const matchesSearch = correctedSearchTerms.some(term => {
-        const t = term.toLowerCase()
-        return p.name.toLowerCase().includes(t) || (p.sku||'').toLowerCase().includes(t) || (p.make||'').toLowerCase().includes(t) || (p.model||'').toLowerCase().includes(t) || (p.vendor?.name||'').toLowerCase().includes(t)
-      })
+      const matchesSearch = matchesAllWords(p, correctedWordGroups)
       return (selectedCategory === 'All' || p.category === selectedCategory)
         && (!selectedVendor || p.vendor_id === selectedVendor)
         && matchesSearch
