@@ -368,7 +368,7 @@ export default function VendorDashboard() {
     setActionLoading(productId); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, productId, data: updateData }) }); const j = await r.json(); if (j.success) { showToast(j.message); await fetchData(); setEditingProduct(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setActionLoading(null)
   }
   async function uploadImagesForProduct(productId: string, images: File[]) {
-    const BATCH = 5 // Upload 5 images in parallel
+    const BATCH = 10 // Upload 10 images in parallel
     for (let i = 0; i < images.length; i += BATCH) {
       const batch = images.slice(i, i + BATCH)
       await Promise.all(batch.map(async (img, j) => {
@@ -532,7 +532,7 @@ export default function VendorDashboard() {
       const skuToId = new Map()
       if (j.products) j.products.forEach((p: any) => skuToId.set(p.sku, p.id))
 
-      const PRODUCT_BATCH = 3 // Process 3 products' images in parallel
+      const PRODUCT_BATCH = 5 // Process 5 products' images in parallel
       const productsToUpload = importData.filter(r => r?.imageFiles?.length && skuToId.get(r.partId))
       for (let i = 0; i < productsToUpload.length; i += PRODUCT_BATCH) {
         const batch = productsToUpload.slice(i, i + PRODUCT_BATCH)
