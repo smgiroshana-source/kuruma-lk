@@ -44,7 +44,7 @@ function mapCSVRow(row: Record<string, string>) {
     model: row.model || row.vehicle_model || '',
     modelCode: row.model_code || '',
     year: row.year || row.vehicle_year || '',
-    condition: row.condition || 'Reconditioned',
+    condition: ((row.condition || 'Reconditioned').trim() === 'Damage' ? 'Damaged' : (row.condition || 'Reconditioned').trim()),
     side: row.side || '',
     color: row.color || '',
     oemCode: row.oem_code || '',
