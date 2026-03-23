@@ -59,9 +59,13 @@ export default function HomePage() {
   const [products, setProducts] = useState<(Product & { vendor: Vendor; images: any[] })[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+  const [totalCount, setTotalCount] = useState(0)
   const [selectedVendor, setSelectedVendor] = useState<string | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const trackingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
   const [wishlist, setWishlist] = useState<Set<string>>(new Set())
   const [wishlistOpen, setWishlistOpen] = useState(false)
   const [sortBy, setSortBy] = useState<string>('newest')
@@ -72,7 +76,34 @@ export default function HomePage() {
   const [showFilters, setShowFilters] = useState(false)
   const [synonyms, setSynonyms] = useState<string[][]>([])
 
-  useEffect(() => { (async () => { try { const r = await fetch('/api/store'); if (r.ok) { const j = await r.json(); setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || []) } } catch (e) { console.error(e) } setLoading(false) })() }, [])
+  const PAGE_SIZE = 50
+
+  useEffect(() => { (async () => { try { const r = await fetch(`/api/store?limit=${PAGE_SIZE}`); if (r.ok) { const j = await r.json(); setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || []); setHasMore(j.hasMore || false); setTotalCount(j.totalCount || 0) } } catch (e) { console.error(e) } setLoading(false) })() }, [])
+
+  // Load more products
+  async function loadMore() {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const r = await fetch(`/api/store?limit=${PAGE_SIZE}&offset=${products.length}`)
+      if (r.ok) {
+        const j = await r.json()
+        setProducts(prev => [...prev, ...(j.products || [])])
+        setHasMore(j.hasMore || false)
+      }
+    } catch {}
+    setLoadingMore(false)
+  }
+
+  // Infinite scroll - load more when sentinel is visible
+  useEffect(() => {
+    if (!loadMoreRef.current) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loadingMore) loadMore()
+    }, { rootMargin: '400px' })
+    observer.observe(loadMoreRef.current)
+    return () => observer.disconnect()
+  }, [hasMore, loadingMore, products.length])
   useEffect(() => { try { const s = localStorage.getItem('kuruma_wishlist'); if (s) setWishlist(new Set(JSON.parse(s))) } catch {} }, [])
 
   function updateWishlist(n: Set<string>) { setWishlist(n); try { localStorage.setItem('kuruma_wishlist', JSON.stringify([...n])) } catch {} }
@@ -395,6 +426,20 @@ export default function HomePage() {
               </div>)
             })}
           </div>)}
+
+          {/* Infinite scroll sentinel */}
+          <div ref={loadMoreRef} />
+          {loadingMore && (
+            <div className="flex justify-center py-8">
+              <div className="flex items-center gap-3 text-sm text-slate-400">
+                <div className="w-5 h-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
+                Loading more products...
+              </div>
+            </div>
+          )}
+          {!hasMore && products.length > 0 && !loading && (
+            <p className="text-center text-xs text-slate-300 py-6">Showing all {filteredProducts.length} products</p>
+          )}
         </div>{/* end right column */}
           </div>{/* end sidebar flex */}
         </div>)}
