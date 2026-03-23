@@ -93,6 +93,10 @@ export default function RegisterPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
+        {/* Banner Image */}
+        <div className="mb-6 rounded-2xl overflow-hidden shadow-lg">
+          <img src="/register-banner.jpg" alt="Start Selling Your Auto Parts Today" className="w-full h-auto" />
+        </div>
         <div className="text-center mb-8">
           <a href="/" className="text-2xl font-black text-orange-500">kuruma.lk</a>
           <h1 className="text-xl font-black text-slate-900 mt-3">Start Selling</h1>
