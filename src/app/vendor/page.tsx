@@ -2297,9 +2297,12 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                   </div>
                 </div>
               </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={handleEditCustomer} disabled={editCustomerLoading} className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">{editCustomerLoading ? 'Saving...' : 'Save Changes'}</button>
-                <button onClick={() => { setEditingCustomer(null); setAdjustAdvanceAmount('') }} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
+              <div className="flex items-center justify-between mt-5">
+                <div className="flex gap-2">
+                  <button onClick={handleEditCustomer} disabled={editCustomerLoading} className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">{editCustomerLoading ? 'Saving...' : 'Save Changes'}</button>
+                  <button onClick={() => { setEditingCustomer(null); setAdjustAdvanceAmount('') }} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
+                </div>
+                <button onClick={async () => { if (!confirm(`Delete customer "${editingCustomer.name}"? This cannot be undone.`)) return; setEditCustomerLoading(true); try { const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', customerId: editingCustomer.id }) }); const j = await r.json(); if (j.success) { showToast('Customer deleted'); setEditingCustomer(null); fetchCreditCustomers(); if (selectedCreditCustomer?.id === editingCustomer.id) setSelectedCreditCustomer(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setEditCustomerLoading(false) }} disabled={editCustomerLoading} className="text-red-500 hover:text-red-700 text-xs font-bold px-3 py-2 rounded-lg border border-red-200 hover:bg-red-50 disabled:opacity-50">Delete Customer</button>
               </div>
             </div>
           </div>)}

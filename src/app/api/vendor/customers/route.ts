@@ -99,6 +99,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, message: 'Customer updated' })
   }
 
+  if (action === 'delete') {
+    const { customerId } = body
+    if (!customerId) return NextResponse.json({ error: 'Missing customerId' }, { status: 400 })
+    const { data: existing } = await admin.from('customers').select('vendor_id').eq('id', customerId).single()
+    if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    const { error } = await admin.from('customers').delete().eq('id', customerId)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true, message: 'Customer deleted' })
+  }
+
   // Get all outstanding sales for a customer
   if (action === 'get_outstanding') {
     const { customerId } = body
