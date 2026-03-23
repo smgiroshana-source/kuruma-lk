@@ -185,6 +185,10 @@ export default function VendorDashboard() {
   const [staffTempPassword, setStaffTempPassword] = useState<{ name: string; email: string; password: string } | null>(null)
   const [editingCustomer, setEditingCustomer] = useState<any>(null)
   const [editCustomerLoading, setEditCustomerLoading] = useState(false)
+  const [showAddCustomer, setShowAddCustomer] = useState(false)
+  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '' })
+  const [addCustomerLoading, setAddCustomerLoading] = useState(false)
+  const [adjustAdvanceAmount, setAdjustAdvanceAmount] = useState('')
 
   // Void sale modal
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
@@ -363,6 +367,62 @@ export default function VendorDashboard() {
       }
     } catch {}
     setCreditLoading(false)
+  }
+
+  async function registerCustomer() {
+    if (!newCustomer.name.trim()) { showToast('Customer name required'); return }
+    setAddCustomerLoading(true)
+    try {
+      const r = await fetch('/api/vendor/customers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create', name: newCustomer.name, phone: newCustomer.phone,
+          whatsapp: newCustomer.whatsapp || newCustomer.phone, email: newCustomer.email,
+          address: newCustomer.address, notes: newCustomer.notes,
+          advance_balance: newCustomer.advance ? parseFloat(newCustomer.advance) : 0,
+        })
+      })
+      const j = await r.json()
+      if (j.success) {
+        // If opening credit amount, create a dummy sale to represent past debt
+        if (newCustomer.credit && parseFloat(newCustomer.credit) > 0) {
+          await fetch('/api/vendor/sales', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'create_sale', customerId: j.customer.id,
+              items: [{ productId: null, productName: 'Opening Balance (Past Transactions)', productSku: 'OPENING-BAL', unitPrice: parseFloat(newCustomer.credit), quantity: 1 }],
+              payments: [], notes: 'Opening credit balance from past transactions',
+              skipStock: true,
+            })
+          })
+        }
+        showToast('Customer registered!')
+        setNewCustomer({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '' })
+        setShowAddCustomer(false)
+        fetchCreditCustomers()
+      } else showToast('Error: ' + j.error)
+    } catch { showToast('Network error') }
+    setAddCustomerLoading(false)
+  }
+
+  async function adjustAdvance(customerId: string, type: 'add' | 'refund') {
+    const amount = parseFloat(adjustAdvanceAmount)
+    if (!amount || amount <= 0) { showToast('Enter a valid amount'); return }
+    setEditCustomerLoading(true)
+    try {
+      const r = await fetch('/api/vendor/customers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: type === 'add' ? 'add_advance' : 'refund_advance', customerId, amount, paymentMethod: 'cash', notes: 'Manual adjustment' })
+      })
+      const j = await r.json()
+      if (j.success) {
+        showToast(type === 'add' ? 'Advance added!' : 'Advance refunded!')
+        setAdjustAdvanceAmount('')
+        fetchCreditCustomers()
+        if (editingCustomer) setEditingCustomer({ ...editingCustomer, advance_balance: j.advance || (editingCustomer.advance_balance + (type === 'add' ? amount : -amount)) })
+      } else showToast('Error: ' + j.error)
+    } catch { showToast('Network error') }
+    setEditCustomerLoading(false)
   }
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 4000) }
@@ -2140,7 +2200,34 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
 
         {/* CREDIT */}
         {tab === 'credit' && (<div>
-          <h1 className="text-2xl font-black text-slate-900 mb-4">💳 Credit & Customers</h1>
+          <div className="flex items-center justify-between mb-4">
+            <h1 className="text-2xl font-black text-slate-900">💳 Credit & Customers</h1>
+            <button onClick={() => setShowAddCustomer(!showAddCustomer)} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">{showAddCustomer ? 'Cancel' : '+ Add Customer'}</button>
+          </div>
+
+          {/* Register Customer Form */}
+          {showAddCustomer && (
+            <div className="bg-white rounded-xl border-2 border-orange-200 p-5 mb-4">
+              <h3 className="font-bold text-sm text-slate-800 mb-3">Register New Customer</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Name *</label><input value={newCustomer.name} onChange={e => setNewCustomer({...newCustomer, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Customer name" /></div>
+                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Phone *</label><input value={newCustomer.phone} onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="07XXXXXXXX" /></div>
+                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">WhatsApp</label><input value={newCustomer.whatsapp} onChange={e => setNewCustomer({...newCustomer, whatsapp: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Same as phone if blank" /></div>
+                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Email</label><input value={newCustomer.email} onChange={e => setNewCustomer({...newCustomer, email: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Optional" /></div>
+                <div className="col-span-2"><label className="block text-[11px] font-semibold text-slate-500 mb-1">Address</label><input value={newCustomer.address} onChange={e => setNewCustomer({...newCustomer, address: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Optional" /></div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Notes</label><input value={newCustomer.notes} onChange={e => setNewCustomer({...newCustomer, notes: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal notes" /></div>
+                <div><label className="block text-[11px] font-semibold text-emerald-600 mb-1">Opening Advance (Rs.)</label><input type="text" inputMode="numeric" value={newCustomer.advance} onChange={e => setNewCustomer({...newCustomer, advance: e.target.value.replace(/[^0-9.]/g, '')})} className="w-full px-3 py-2 rounded-lg border-2 border-emerald-200 text-sm outline-none focus:border-emerald-400 bg-emerald-50" placeholder="0" /></div>
+                <div><label className="block text-[11px] font-semibold text-red-600 mb-1">Opening Credit Owed (Rs.)</label><input type="text" inputMode="numeric" value={newCustomer.credit} onChange={e => setNewCustomer({...newCustomer, credit: e.target.value.replace(/[^0-9.]/g, '')})} className="w-full px-3 py-2 rounded-lg border-2 border-red-200 text-sm outline-none focus:border-red-400 bg-red-50" placeholder="0" /></div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button onClick={registerCustomer} disabled={addCustomerLoading} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-6 py-2 rounded-lg disabled:opacity-50">{addCustomerLoading ? 'Registering...' : 'Register Customer'}</button>
+                <button onClick={() => setShowAddCustomer(false)} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
+              </div>
+            </div>
+          )}
+
             <div className="flex items-center gap-3 mb-4 flex-wrap">
               <div className="relative flex-1 min-w-[200px]">
                 <svg className="absolute left-3 top-[10px] text-[#bbb]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -2200,10 +2287,19 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 <div><label className="block text-xs font-semibold text-slate-500 mb-1">Email</label><input type="email" value={editingCustomer.email || ''} onChange={e => setEditingCustomer({...editingCustomer, email: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="customer@email.com" /></div>
                 <div><label className="block text-xs font-semibold text-slate-500 mb-1">Address</label><textarea value={editingCustomer.address || ''} onChange={e => setEditingCustomer({...editingCustomer, address: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" placeholder="Street, City, District" /></div>
                 <div><label className="block text-xs font-semibold text-slate-500 mb-1">Notes</label><textarea value={editingCustomer.notes || ''} onChange={e => setEditingCustomer({...editingCustomer, notes: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" placeholder="Internal notes about this customer" /></div>
+                {/* Advance Balance Adjustment */}
+                <div className="border-t border-slate-200 pt-3 mt-3">
+                  <label className="block text-xs font-bold text-slate-700 mb-2">Advance Balance: <span className="text-emerald-600">Rs.{parseFloat(editingCustomer.advance_balance || 0).toLocaleString()}</span></label>
+                  <div className="flex gap-2">
+                    <input type="text" inputMode="numeric" value={adjustAdvanceAmount} onChange={e => setAdjustAdvanceAmount(e.target.value.replace(/[^0-9.]/g, ''))} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-emerald-400" placeholder="Amount (Rs.)" />
+                    <button onClick={() => adjustAdvance(editingCustomer.id, 'add')} disabled={editCustomerLoading} className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg disabled:opacity-50">+ Add</button>
+                    <button onClick={() => adjustAdvance(editingCustomer.id, 'refund')} disabled={editCustomerLoading || parseFloat(editingCustomer.advance_balance || 0) <= 0} className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg disabled:opacity-50">− Refund</button>
+                  </div>
+                </div>
               </div>
               <div className="flex gap-2 mt-5">
                 <button onClick={handleEditCustomer} disabled={editCustomerLoading} className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">{editCustomerLoading ? 'Saving...' : 'Save Changes'}</button>
-                <button onClick={() => setEditingCustomer(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
+                <button onClick={() => { setEditingCustomer(null); setAdjustAdvanceAmount('') }} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
               </div>
             </div>
           </div>)}

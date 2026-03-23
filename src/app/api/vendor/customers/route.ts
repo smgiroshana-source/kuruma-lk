@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
   const { action } = body
 
   if (action === 'create') {
-    const { name, phone, whatsapp, email, address, notes } = body
+    const { name, phone, whatsapp, email, address, notes, advance_balance } = body
     if (!name?.trim()) return NextResponse.json({ error: 'Customer name required' }, { status: 400 })
 
     const { data: customer, error } = await admin.from('customers').insert({
@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
       whatsapp: (whatsapp || phone) ? (whatsapp || phone).replace(/\D/g, '').replace(/^94/, '0').slice(0, 10) : null,
       email: email || null,
       address: address || null, notes: notes || null,
+      advance_balance: advance_balance ? parseFloat(advance_balance) : 0,
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
