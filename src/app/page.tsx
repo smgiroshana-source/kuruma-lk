@@ -181,7 +181,7 @@ export default function HomePage() {
     if (isDemoted) score -= 40
 
     // Demote damaged items
-    if ((p.condition || '').toLowerCase() === 'damaged') score -= 50
+    if ((p.condition || '').toLowerCase() === 'damaged') score -= 100
 
     // Match against priority part types (all groups get equal base score)
     let partGroupIndex = -1
@@ -511,12 +511,12 @@ export default function HomePage() {
 
           {/* ── Desktop Left Sidebar ── */}
           <aside className="hidden lg:flex flex-col gap-0 w-52 flex-shrink-0">
-            <div className="sticky top-4 bg-white rounded-2xl border border-[#eee] overflow-hidden shadow-sm">
+            <div className="sticky top-2 bg-white rounded-2xl border border-[#eee] overflow-hidden shadow-sm max-h-[calc(100vh-16px)]">
               <div className="flex items-center justify-between px-4 py-3 border-b border-[#f5f5f5]">
                 <span className="font-black text-sm text-[#222]">Filters</span>
                 {activeFilterCount>0&&<button onClick={clearAllFilters} className="text-[11px] font-bold text-[#ff6b35]">Clear all</button>}
               </div>
-              <div className="p-3 max-h-[calc(100vh-32px)] overflow-y-auto">
+              <div className="p-3 overflow-y-auto" style={{maxHeight: 'calc(100vh - 70px)'}}>
                 {/* Categories */}
                 <p className="text-[10px] font-black text-[#bbb] uppercase tracking-wider mb-2">Category</p>
                 <div className="space-y-0.5 mb-4">
