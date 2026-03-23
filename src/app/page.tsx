@@ -143,9 +143,16 @@ export default function HomePage() {
     return words.map(word => {
       const alternatives = new Set<string>([word])
       for (const group of synonyms) {
-        if (group.some(kw => kw === word || kw.includes(word) || word.includes(kw))) {
-          group.forEach(kw => alternatives.add(kw))
-        }
+        // Match if: exact match, or word is a whole word within a multi-word synonym, or synonym is a whole word within the search word
+        const matched = group.some(kw => {
+          if (kw === word) return true
+          // Multi-word synonym contains this word as a whole word (e.g., "head lamp" contains "lamp")
+          if (kw.includes(' ') && kw.split(' ').includes(word)) return true
+          // This word exactly matches a synonym keyword
+          if (!kw.includes(' ') && kw === word) return true
+          return false
+        })
+        if (matched) group.forEach(kw => alternatives.add(kw))
       }
       return Array.from(alternatives)
     })
@@ -163,21 +170,28 @@ export default function HomePage() {
   function findCorrectedQuery(query: string): string | null {
     if (!query || knownTerms.length === 0) return null
     const q = query.toLowerCase().trim()
+    if (q.length < 3) return null // Too short to correct
     const qSoundex = soundex(q)
     let bestMatch = ''
     let bestScore = Infinity
 
     for (const term of knownTerms) {
+      // Skip multi-word terms and very short terms
+      if (term.includes(' ') || term.length < 3) continue
+      // Skip if lengths are too different (likely unrelated words)
+      if (Math.abs(q.length - term.length) > 2) continue
       // Skip if it's an exact substring match (no correction needed)
       if (term.includes(q) || q.includes(term)) return null
 
       const dist = levenshtein(q, term)
-      const maxLen = Math.max(q.length, term.length)
-      // Only consider if edit distance is small relative to length
-      if (dist > Math.ceil(maxLen * 0.4)) continue
+      // Only consider if edit distance is max 2 (strict)
+      if (dist > 2) continue
+
+      // Must share first or last letter (likely same word, just misspelled)
+      if (q[0] !== term[0] && q[q.length-1] !== term[term.length-1]) continue
 
       // Boost score for phonetic match
-      const phoneticBonus = soundex(term) === qSoundex ? -2 : 0
+      const phoneticBonus = soundex(term) === qSoundex ? -1 : 0
       const score = dist + phoneticBonus
 
       if (score < bestScore) {
@@ -186,8 +200,8 @@ export default function HomePage() {
       }
     }
 
-    // Only suggest if reasonably close (max 3 edits or phonetic match)
-    if (bestMatch && bestScore <= 3) return bestMatch
+    // Only suggest if very close (max 2 edits)
+    if (bestMatch && bestScore <= 2) return bestMatch
     return null
   }
 
