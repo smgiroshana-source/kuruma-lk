@@ -74,7 +74,27 @@ export default function HomePage() {
   const [visibleCount, setVisibleCount] = useState(50)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { (async () => { try { const r = await fetch('/api/store'); if (r.ok) { const j = await r.json(); setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || []) } } catch (e) { console.error(e) } setLoading(false) })() }, [])
+  useEffect(() => { (async () => {
+    // Try cache first for instant load
+    try {
+      const cached = sessionStorage.getItem('kuruma_store')
+      if (cached) {
+        const j = JSON.parse(cached)
+        setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || [])
+        setLoading(false)
+      }
+    } catch {}
+    // Fetch fresh data (updates cache)
+    try {
+      const r = await fetch('/api/store')
+      if (r.ok) {
+        const j = await r.json()
+        setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || [])
+        try { sessionStorage.setItem('kuruma_store', JSON.stringify(j)) } catch {}
+      }
+    } catch (e) { console.error(e) }
+    setLoading(false)
+  })() }, [])
   useEffect(() => { try { const s = localStorage.getItem('kuruma_wishlist'); if (s) setWishlist(new Set(JSON.parse(s))) } catch {} }, [])
 
   // Reset visible count when filters change
