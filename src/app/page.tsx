@@ -238,7 +238,7 @@ export default function HomePage() {
             </div>
             <div className="relative pb-2.5">
               <svg className="absolute left-3.5 top-[13px] text-[#bbb]" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              <input ref={searchRef} type="text" placeholder="Search parts, vehicles, shops..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full pl-11 pr-10 py-[11px] rounded-[14px] text-sm outline-none bg-[#f7f7f7] text-[#333] transition-all duration-200 border-2 border-transparent focus:bg-white focus:border-[#ff6b35] focus:shadow-[0_0_0_4px_rgba(255,107,53,0.08)]"/>
+              <input ref={searchRef} type="text" placeholder="Search parts, vehicles, shops..." value={search} onChange={e=>setSearch(e.target.value)} className="w-full pl-11 pr-10 py-[11px] rounded-[14px] text-base sm:text-sm outline-none bg-[#f7f7f7] text-[#333] transition-all duration-200 border-2 border-transparent focus:bg-white focus:border-[#ff6b35] focus:shadow-[0_0_0_4px_rgba(255,107,53,0.08)]"/>
               {search && <button onClick={()=>{setSearch('');searchRef.current?.focus()}} className="absolute right-3 top-[11px] w-[22px] h-[22px] bg-[#eee] rounded-full flex items-center justify-center text-[11px] text-[#888] active:bg-[#ddd]">✕</button>}
             </div>
             <div className="flex">
@@ -366,7 +366,7 @@ export default function HomePage() {
               return (<div key={product.id} className="bg-white rounded-2xl overflow-hidden relative group transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] border border-[#eee]">
                 <button onClick={e=>{e.preventDefault();e.stopPropagation();toggleWishlist(product.id)}} className={`absolute top-2.5 right-2.5 z-10 w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm transition-all duration-200 ${isWished?'bg-red-500 shadow-[0_2px_12px_rgba(239,68,68,0.4)] scale-105':'bg-white/95 backdrop-blur-sm border-[1.5px] border-black/10 shadow-[0_1px_4px_rgba(0,0,0,0.08)]'}`}>{isWished?'❤️':'🤍'}</button>
                 <a href={`/product/${product.id}`} className="block">
-                  <div className="aspect-square sm:aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
+                  <div className="aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
                     {imageUrl?<img src={imageUrl} alt={product.name} loading="lazy" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
                     {imageCount>1&&<span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-md">📷 {imageCount}</span>}
                   </div>
