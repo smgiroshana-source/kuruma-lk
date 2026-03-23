@@ -176,7 +176,7 @@ export default function HomePage() {
     }
 
     // Demote minor/accessory items — these shouldn't appear at the top
-    const DEMOTE_KEYWORDS = ['frame', 'retainer', 'bracket', 'bulb', 'hinge', 'clip', 'bolt', 'nut', 'washer', 'seal', 'gasket', 'bush', 'pin', 'cap', 'cover plate']
+    const DEMOTE_KEYWORDS = ['frame', 'retainer', 'bracket', 'bulb', 'hinge', 'clip', 'bolt', 'nut', 'washer', 'seal', 'gasket', 'bush', 'pin', 'cap', 'cover plate', 'garnish', 'switch', 'sensor', 'relay', 'fuse', 'connector', 'holder', 'mount', 'arm cup']
     const isDemoted = DEMOTE_KEYWORDS.some(kw => name.includes(kw))
     if (isDemoted) score -= 40
 
@@ -373,7 +373,7 @@ export default function HomePage() {
       for (const group of PRIORITY_PART_GROUPS) {
         if (group.some(kw => name.includes(kw))) return group[0]
       }
-      return name.split(' ').slice(-2).join(' ') // fallback: last 2 words
+      return (p.category || 'other').toLowerCase()
     }
 
     function getModelKey(p: any): string {
@@ -382,40 +382,43 @@ export default function HomePage() {
 
     const result: any[] = []
     const remaining = [...sorted]
-    const recentModels: string[] = [] // track last 3 models shown
-    const recentParts: string[] = [] // track last 3 part types shown
+    const recentModels: string[] = [] // track last 5 models shown
+    const recentParts: string[] = [] // track last 5 part types shown
+    const recentCategories: string[] = [] // track last 3 categories shown
 
     while (remaining.length > 0) {
-      // Find next item that's different from recent
       let bestIdx = 0
       let bestPenalty = Infinity
 
-      for (let i = 0; i < Math.min(remaining.length, 50); i++) { // Look ahead up to 50
+      // Look ahead up to 200 items to find variety
+      for (let i = 0; i < Math.min(remaining.length, 200); i++) {
         const p = remaining[i]
         const modelKey = getModelKey(p)
         const partType = getPartType(p)
+        const category = (p.category || '').toLowerCase()
         let penalty = 0
 
-        // Penalize if same model was shown recently
+        // Penalize if same model was shown recently (track 5)
         const modelPos = recentModels.indexOf(modelKey)
-        if (modelPos === 0) penalty += 100 // just shown
-        else if (modelPos === 1) penalty += 50
-        else if (modelPos === 2) penalty += 20
+        if (modelPos >= 0) penalty += Math.max(150 - modelPos * 30, 20)
 
-        // Penalize if same part type was shown recently
+        // Penalize if same part type was shown recently (track 5)
         const partPos = recentParts.indexOf(partType)
-        if (partPos === 0) penalty += 80
-        else if (partPos === 1) penalty += 40
-        else if (partPos === 2) penalty += 15
+        if (partPos >= 0) penalty += Math.max(120 - partPos * 25, 15)
+
+        // Penalize if same category was shown recently (track 3)
+        const catPos = recentCategories.indexOf(category)
+        if (catPos === 0) penalty += 60
+        else if (catPos === 1) penalty += 25
 
         // Slight penalty for being further in the original sorted list
-        penalty += i * 0.1
+        penalty += i * 0.05
 
         if (penalty < bestPenalty) {
           bestPenalty = penalty
           bestIdx = i
         }
-        if (penalty === 0) break // Perfect pick, no need to look further
+        if (penalty === 0) break
       }
 
       const picked = remaining.splice(bestIdx, 1)[0]
@@ -423,8 +426,10 @@ export default function HomePage() {
 
       recentModels.unshift(getModelKey(picked))
       recentParts.unshift(getPartType(picked))
-      if (recentModels.length > 3) recentModels.pop()
-      if (recentParts.length > 3) recentParts.pop()
+      recentCategories.unshift((picked.category || '').toLowerCase())
+      if (recentModels.length > 5) recentModels.pop()
+      if (recentParts.length > 5) recentParts.pop()
+      if (recentCategories.length > 3) recentCategories.pop()
     }
 
     return result
