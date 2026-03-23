@@ -180,6 +180,9 @@ export default function HomePage() {
     const isDemoted = DEMOTE_KEYWORDS.some(kw => name.includes(kw))
     if (isDemoted) score -= 40
 
+    // Demote damaged items
+    if ((p.condition || '').toLowerCase() === 'damaged') score -= 50
+
     // Match against priority part types (all groups get equal base score)
     let partGroupIndex = -1
     if (!isDemoted) {
