@@ -195,15 +195,24 @@ export default function HomePage() {
   const searchWordGroups = getSearchWordGroups(search)
   const sortFn = (a: any, b: any) => { switch(sortBy) { case 'price-low': return (a.price||0)-(b.price||0); case 'price-high': return (b.price||0)-(a.price||0); case 'name-az': return a.name.localeCompare(b.name); case 'name-za': return b.name.localeCompare(a.name); default: return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime() } }
 
-  const allFilteredProducts = products.filter((p) => {
-    const matchesSearch = !search || matchesAllWords(p, searchWordGroups)
-    return (selectedCategory === 'All' || p.category === selectedCategory)
-      && (!selectedVendor || p.vendor_id === selectedVendor)
-      && matchesSearch
-      && (conditionFilter === 'All' || p.condition === conditionFilter)
-      && (makeFilter === 'All' || p.make === makeFilter)
-      && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
-  }).sort(sortFn)
+  const applyFilters = (p: any, matchesSearch: boolean) =>
+    (selectedCategory === 'All' || p.category === selectedCategory)
+    && (!selectedVendor || p.vendor_id === selectedVendor)
+    && matchesSearch
+    && (conditionFilter === 'All' || p.condition === conditionFilter)
+    && (makeFilter === 'All' || p.make === makeFilter)
+    && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
+
+  // Try direct search first
+  const directResults = products.filter(p => applyFilters(p, !search || matchesAllWords(p, searchWordGroups)))
+
+  // If 0 results and there's a search, try fuzzy/phonetic correction
+  const correctedQuery = (search && directResults.length === 0) ? findCorrectedQuery(search.toLowerCase().trim()) : null
+  const correctedWordGroups = correctedQuery ? getSearchWordGroups(correctedQuery) : []
+
+  const allFilteredProducts = (directResults.length > 0 || !correctedQuery)
+    ? directResults.sort(sortFn)
+    : products.filter(p => applyFilters(p, matchesAllWords(p, correctedWordGroups))).sort(sortFn)
 
   // Only render visible portion (infinite scroll)
   const filteredProducts = allFilteredProducts.slice(0, visibleCount)
@@ -359,6 +368,17 @@ export default function HomePage() {
             </div>
             {priceRange[1]>0&&(<div className="mt-4 pt-4 border-t border-[#f0f0f0]"><label className="text-[10px] font-bold uppercase tracking-[1.2px] text-[#bbb] mb-2.5 block">Price: <span className="text-[#ff6b35]">Rs.{priceFilter[0].toLocaleString()}</span> – <span className="text-[#ff6b35]">Rs.{priceFilter[1].toLocaleString()}</span></label><div className="flex items-center gap-3"><input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[0]} onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([Math.min(v,priceFilter[1]-100),priceFilter[1]])}} className="flex-1 h-1.5 accent-[#ff6b35]"/><input type="range" min={priceRange[0]} max={priceRange[1]} step={100} value={priceFilter[1]} onChange={e=>{const v=parseInt(e.target.value);setPriceFilter([priceFilter[0],Math.max(v,priceFilter[0]+100)])}} className="flex-1 h-1.5 accent-[#ff6b35]"/></div></div>)}
           </div>)}
+
+          {/* Spell correction notice */}
+          {correctedQuery && allFilteredProducts.length > 0 && (
+            <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl text-sm">
+              <span className="text-blue-600">Showing results for </span>
+              <button onClick={() => setSearch(correctedQuery)} className="font-bold text-blue-700 underline">{correctedQuery}</button>
+              <span className="text-blue-400 ml-2">·</span>
+              <span className="text-blue-400 ml-2">Search instead for </span>
+              <span className="font-medium text-blue-500 line-through">{search}</span>
+            </div>
+          )}
 
           {/* Product Grid */}
           {loading ?(<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">{[...Array(8)].map((_,i)=>(<div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]"><div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse"/><div className="p-3 space-y-2.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse"/><div className="h-4 bg-[#f0f0f0] rounded animate-pulse"/><div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3"/></div></div>))}</div>
