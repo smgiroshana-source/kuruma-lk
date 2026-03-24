@@ -52,11 +52,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Check 2: Is this a Shop Owner?
-      const { data: vendor } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('user_id', user.id)
-        .single()
+      // Try client-side first, fallback to API if RLS blocks
+      let vendor = null
+      try {
+        const { data } = await supabase
+          .from('vendors')
+          .select('*')
+          .eq('user_id', user.id)
+          .single()
+        vendor = data
+      } catch {}
+
+      // If client query returned nothing, try via API (bypasses RLS)
+      if (!vendor) {
+        try {
+          const res = await fetch('/api/auth/check-vendor')
+          if (res.ok) {
+            const json = await res.json()
+            vendor = json.vendor
+          }
+        } catch {}
+      }
 
       if (vendor && vendor.status === 'approved') {
         setState({ user, role: 'vendor', vendor, isAdmin: false, loading: false })
