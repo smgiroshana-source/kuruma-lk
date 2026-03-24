@@ -5,7 +5,7 @@ export async function POST(req: NextRequest) {
   const { email, password } = await req.json()
 
   // Create response first so we can set cookies on it
-  let response = NextResponse.json({ success: false })
+  let response: any = NextResponse.json({ success: false })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
