@@ -66,15 +66,25 @@ export async function POST(req: NextRequest) {
 
   // Create final response with the auth cookies preserved
   const finalResponse = NextResponse.json(jsonResponse)
-  // Copy all cookies from the supabase response
+  // Copy all Supabase auth cookies
   response.cookies.getAll().forEach(cookie => {
     finalResponse.cookies.set(cookie.name, cookie.value, {
       path: '/',
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 365, // 1 year
+      maxAge: 60 * 60 * 24 * 365,
     })
+  })
+
+  // Set kuruma_role cookie (non-httpOnly so client JS can read it instantly)
+  const role = isAdmin ? 'admin' : 'vendor'
+  finalResponse.cookies.set('kuruma_role', role, {
+    path: '/',
+    httpOnly: false,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 365,
   })
 
   return finalResponse
