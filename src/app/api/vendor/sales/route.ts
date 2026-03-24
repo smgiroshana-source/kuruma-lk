@@ -87,7 +87,7 @@ export async function GET(req: NextRequest) {
     .from('sales')
     .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
     .eq('vendor_id', vendor.id)
-    .order('invoice_no', { ascending: false })
+    .order('created_at', { ascending: false })
 
   if (fromDate) query = query.gte('created_at', new Date(fromDate).toISOString())
   if (toDate) { const end = new Date(toDate); end.setDate(end.getDate() + 1); query = query.lt('created_at', end.toISOString()) }

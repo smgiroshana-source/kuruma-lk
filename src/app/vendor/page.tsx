@@ -2078,6 +2078,10 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       if (!invoice.includes(sq) && !items.includes(sq) && !name.includes(sq)) return false
                     }
                     return true
+                  }).sort((a: any, b: any) => {
+                    const numA = parseInt((a.invoice_no || '').replace(/\D/g, '') || '0')
+                    const numB = parseInt((b.invoice_no || '').replace(/\D/g, '') || '0')
+                    return numB - numA
                   })
                   const activeFilterCount = [salesFilterFrom, salesFilterTo, salesFilterCustomer, salesFilterVehicle].filter(Boolean).length
                   return (
