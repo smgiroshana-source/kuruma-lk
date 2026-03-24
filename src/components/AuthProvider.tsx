@@ -37,53 +37,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function detect() {
       try {
-        // Use getSession first (reads from storage, no network call)
-        // Then verify with getUser if session exists
-        const { data: { session } } = await supabase.auth.getSession()
-        const user = session?.user || null
-
-        if (!user) {
-          setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
-          return
-        }
-
-        const email = user.email || ''
-
-        // Check 1: Is this the Super Admin?
-        if (ADMIN_EMAILS.includes(email)) {
-          setState({ user, role: 'admin', vendor: null, isAdmin: true, loading: false })
-          return
-        }
-
-        // Check 2: Is this a Shop Owner?
-        let vendor = null
-        try {
-          const { data } = await supabase
-            .from('vendors')
-            .select('*')
-            .eq('user_id', user.id)
-            .single()
-          vendor = data
-        } catch {}
-
-        // If client query returned nothing, try via API (bypasses RLS)
-        if (!vendor) {
-          try {
-            const res = await fetch('/api/auth/check-vendor')
-            if (res.ok) {
-              const json = await res.json()
-              vendor = json.vendor
+        // Use server-side API check — most reliable, works with cookies
+        const res = await fetch('/api/auth/check-vendor')
+        if (res.ok) {
+          const json = await res.json()
+          if (json.user) {
+            const email = json.user.email || ''
+            if (ADMIN_EMAILS.includes(email)) {
+              setState({ user: json.user, role: 'admin', vendor: null, isAdmin: true, loading: false })
+              return
             }
-          } catch {}
+            if (json.vendor && json.vendor.status === 'approved') {
+              setState({ user: json.user, role: 'vendor', vendor: json.vendor, isAdmin: false, loading: false })
+              return
+            }
+            setState({ user: json.user, role: 'customer', vendor: json.vendor, isAdmin: false, loading: false })
+            return
+          }
         }
-
-        if (vendor && vendor.status === 'approved') {
-          setState({ user, role: 'vendor', vendor, isAdmin: false, loading: false })
-        } else {
-          setState({ user, role: 'customer', vendor, isAdmin: false, loading: false })
-        }
+        setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
       } catch {
-        // If anything fails, still set loading to false
         setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
       }
     }

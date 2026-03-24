@@ -5,7 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 export async function GET() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ vendor: null })
+  if (!user) return NextResponse.json({ user: null, vendor: null })
 
   const admin = createAdminClient()
   const { data: vendor } = await admin
@@ -14,5 +14,8 @@ export async function GET() {
     .eq('user_id', user.id)
     .single()
 
-  return NextResponse.json({ vendor: vendor || null })
+  return NextResponse.json({
+    user: { id: user.id, email: user.email },
+    vendor: vendor || null,
+  })
 }
