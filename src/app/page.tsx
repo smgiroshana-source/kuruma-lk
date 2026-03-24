@@ -82,7 +82,7 @@ function getProductImage(product: any): string | null {
 }
 
 export default function HomePage() {
-  const { user, role, vendor, isAdmin, signOut } = useAuth()
+  const { user, role, vendor, isAdmin, loading: authLoading, signOut } = useAuth()
   const [activeTab, setActiveTab] = useState<'products' | 'shops'>('products')
   const [search, setSearch] = useState('')
   const [searchDisplay, setSearchDisplay] = useState('')
@@ -517,7 +517,9 @@ export default function HomePage() {
             <div className="flex items-center justify-between py-2.5">
               <div className="flex items-center gap-0.5"><span className="text-2xl font-black tracking-tight text-[#ff6b35]">kuruma</span><span className="text-2xl font-black tracking-tight text-[#222]">.lk</span></div>
               <div className="flex gap-2 items-center">
-                {user && (role === 'vendor' || isAdmin) ? (<>
+                {authLoading ? (
+                  <div className="w-24 h-8" />
+                ) : user && (role === 'vendor' || isAdmin) ? (<>
                   <a href={isAdmin ? '/admin' : '/vendor'} className="text-xs font-semibold px-3.5 py-2 rounded-[10px] bg-white text-[#555] border-[1.5px] border-[#e5e5e5] active:bg-[#f5f5f5]">{isAdmin ? 'Admin' : 'Vendor'}</a>
                   <button onClick={() => signOut()} className="text-xs font-bold px-4 py-2 rounded-[10px] text-red-500 border-[1.5px] border-red-200 active:bg-red-50">Log Out</button>
                 </>) : (<>
