@@ -15,13 +15,27 @@ async function getVendor() {
   return null
 }
 
-function generateInvoiceNo(vendorName: string) {
+async function generateInvoiceNo(vendorId: string, vendorName: string) {
+  const admin = createAdminClient()
   const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
-  const date = new Date()
-  const d = String(date.getDate()).padStart(2, '0')
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const rand = String(Math.floor(Math.random() * 9999)).padStart(4, '0')
-  return `${prefix}-${d}${m}-${rand}`
+
+  // Get last invoice for this vendor to determine next number
+  const { data: lastSale } = await admin
+    .from('sales')
+    .select('invoice_no')
+    .eq('vendor_id', vendorId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  let nextNum = 1
+  if (lastSale?.invoice_no) {
+    // Extract number from last invoice (format: PREFIX-NNNNN)
+    const match = lastSale.invoice_no.match(/-(\d+)$/)
+    if (match) nextNum = parseInt(match[1]) + 1
+  }
+
+  return `${prefix}-${String(nextNum).padStart(5, '0')}`
 }
 
 export async function GET(req: NextRequest) {
@@ -160,7 +174,7 @@ export async function POST(req: NextRequest) {
   const { action } = body
 
   if (action === 'create_sale') {
-    const { customerId, customerName, customerPhone, items, discount, payments: paymentLines, notes, useAdvance, applyToOutstanding } = body
+    const { customerId, customerName, customerPhone, items, discount, payments: paymentLines, notes, useAdvance, applyToOutstanding, saleDate } = body
 
     if (!items || items.length === 0) return NextResponse.json({ error: 'No items in sale' }, { status: 400 })
 
@@ -181,7 +195,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const invoiceNo = generateInvoiceNo(vendor.name)
+    const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
     const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0)
     const total = Math.max(0, subtotal - (discount || 0))
 
@@ -215,13 +229,16 @@ export async function POST(req: NextRequest) {
       : (advanceUsedForBill > 0 ? 'advance' : billBalance > 0 ? 'credit' : 'cash')
 
     // Create sale
-    const { data: sale, error: saleError } = await admin.from('sales').insert({
+    const saleRecord: any = {
       vendor_id: vendor.id, customer_id: resolvedCustomerId,
       invoice_no: invoiceNo, customer_name: customerName || 'Walk-in Customer',
       customer_phone: customerPhone || null, subtotal, discount: discount || 0,
       total, paid_amount: paidForThisBill, balance_due: billBalance,
       payment_method: primaryMethod, payment_status: paymentStatus, notes: notes || null,
-    }).select().single()
+    }
+    if (saleDate) saleRecord.created_at = new Date(saleDate).toISOString()
+
+    const { data: sale, error: saleError } = await admin.from('sales').insert(saleRecord).select().single()
 
     if (saleError) return NextResponse.json({ error: saleError.message }, { status: 400 })
 

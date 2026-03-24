@@ -60,7 +60,7 @@ async function extractZipImages(file: File): Promise<Map<string, File[]>> {
   for (const [path, entry] of Object.entries(zip.files)) { if (entry.dir || path.startsWith('__MACOSX') || path.includes('/._') || path.startsWith('.')) continue; const ext = path.split('.').pop()?.toLowerCase() || ''; if (!['jpg','jpeg','png','gif','webp','bmp'].includes(ext)) continue; const parts = path.split('/').filter(p => p.length > 0); if (parts.length < 2) continue; const folder = parts[parts.length - 2]; const blob = await entry.async('blob'); const f = new File([blob], parts[parts.length - 1], { type: 'image/' + (ext === 'jpg' ? 'jpeg' : ext) }); if (!map.has(folder)) map.set(folder, []); map.get(folder)!.push(f) }
   return map
 }
-function formatDate(d: string) { return new Date(d).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+function formatDate(d: string) { return new Date(d).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' }) }
 function formatDateShort(d: string) { return new Date(d).toLocaleDateString('en-LK', { day: '2-digit', month: 'short' }) }
 
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
@@ -134,6 +134,7 @@ export default function VendorDashboard() {
   const [posDiscount, setPosDiscount] = useState('')
   const [posPayments, setPosPayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
   const [posNotes, setPosNotes] = useState('')
+  const [posDate, setPosDate] = useState(new Date().toISOString().split('T')[0])
   const [posLoading, setPosLoading] = useState(false)
   const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean }>({})
   const [posReceipt, setPosReceipt] = useState<any>(null)
@@ -778,10 +779,10 @@ export default function VendorDashboard() {
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         action: 'create_sale', customerId: posCustomer.id, customerName: posCustomer.name || 'Walk-in Customer', customerPhone: posCustomer.phone,
         items: posCart.map(i => ({ productId: i.productId, productName: i.productName, productSku: i.productSku, quantity: i.quantity, unitPrice: i.unitPrice })),
-        discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0), notes: posNotes || null, useAdvance,
+        discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0), notes: posNotes || null, useAdvance, saleDate: posDate,
       }) })
       const j = await r.json()
-      if (j.success) { setPosReceipt({ sale: j.sale, vendor: data?.vendor, advanceUsed: j.advanceUsed, appliedToOutstanding: j.appliedToOutstanding, settledInvoices: j.settledInvoices, newAdvance: j.newAdvance }); showToast(j.message); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]); setPosNotes(''); setUseAdvance(false); await fetchData() }
+      if (j.success) { setPosReceipt({ sale: j.sale, vendor: data?.vendor, advanceUsed: j.advanceUsed, appliedToOutstanding: j.appliedToOutstanding, settledInvoices: j.settledInvoices, newAdvance: j.newAdvance }); showToast(j.message); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]); setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setUseAdvance(false); await fetchData() }
       else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
     setPosLoading(false)
@@ -1821,6 +1822,12 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       </div>
                     </div>
                     <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <label className="block text-[10px] font-bold text-slate-400 mb-1">DATE</label>
+                        <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                      </div>
+                    </div>
                     <textarea value={posNotes} onChange={e => setPosNotes(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" placeholder="Notes" />
                   </div>
 
