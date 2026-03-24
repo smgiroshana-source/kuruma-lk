@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
   // Create final response with the auth cookies preserved
   const finalResponse = NextResponse.json(jsonResponse)
   // Copy all Supabase auth cookies
-  response.cookies.getAll().forEach(cookie => {
+  response.cookies.getAll().forEach((cookie: any) => {
     finalResponse.cookies.set(cookie.name, cookie.value, {
       path: '/',
       httpOnly: true,
