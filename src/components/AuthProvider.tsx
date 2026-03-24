@@ -36,48 +36,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function detect() {
-      const { data: { user } } = await supabase.auth.getUser()
-
-      if (!user) {
-        setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
-        return
-      }
-
-      const email = user.email || ''
-
-      // Check 1: Is this the Super Admin?
-      if (ADMIN_EMAILS.includes(email)) {
-        setState({ user, role: 'admin', vendor: null, isAdmin: true, loading: false })
-        return
-      }
-
-      // Check 2: Is this a Shop Owner?
-      // Try client-side first, fallback to API if RLS blocks
-      let vendor = null
       try {
-        const { data } = await supabase
-          .from('vendors')
-          .select('*')
-          .eq('user_id', user.id)
-          .single()
-        vendor = data
-      } catch {}
+        const { data: { user } } = await supabase.auth.getUser()
 
-      // If client query returned nothing, try via API (bypasses RLS)
-      if (!vendor) {
+        if (!user) {
+          setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
+          return
+        }
+
+        const email = user.email || ''
+
+        // Check 1: Is this the Super Admin?
+        if (ADMIN_EMAILS.includes(email)) {
+          setState({ user, role: 'admin', vendor: null, isAdmin: true, loading: false })
+          return
+        }
+
+        // Check 2: Is this a Shop Owner?
+        let vendor = null
         try {
-          const res = await fetch('/api/auth/check-vendor')
-          if (res.ok) {
-            const json = await res.json()
-            vendor = json.vendor
-          }
+          const { data } = await supabase
+            .from('vendors')
+            .select('*')
+            .eq('user_id', user.id)
+            .single()
+          vendor = data
         } catch {}
-      }
 
-      if (vendor && vendor.status === 'approved') {
-        setState({ user, role: 'vendor', vendor, isAdmin: false, loading: false })
-      } else {
-        setState({ user, role: 'customer', vendor, isAdmin: false, loading: false })
+        // If client query returned nothing, try via API (bypasses RLS)
+        if (!vendor) {
+          try {
+            const res = await fetch('/api/auth/check-vendor')
+            if (res.ok) {
+              const json = await res.json()
+              vendor = json.vendor
+            }
+          } catch {}
+        }
+
+        if (vendor && vendor.status === 'approved') {
+          setState({ user, role: 'vendor', vendor, isAdmin: false, loading: false })
+        } else {
+          setState({ user, role: 'customer', vendor, isAdmin: false, loading: false })
+        }
+      } catch {
+        // If anything fails, still set loading to false
+        setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
       }
     }
 
