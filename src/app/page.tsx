@@ -1,7 +1,35 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import type { Product, Vendor } from '@/types'
+
+// Isolated search input — typing here does NOT re-render the parent (5500 products)
+const SearchInput = memo(function SearchInput({ onSearch, onClear, value }: { onSearch: (q: string) => void; onClear: () => void; value: string }) {
+  const [text, setText] = useState(value)
+  const ref = useRef<HTMLInputElement>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
+
+  // Sync from parent (when parent clears search)
+  useEffect(() => { setText(value) }, [value])
+
+  function handleChange(val: string) {
+    setText(val)
+    if (!isMobile) {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (!val) { onSearch(''); return }
+      debounceRef.current = setTimeout(() => onSearch(val), 500)
+    }
+  }
+
+  return (
+    <div className="relative pb-2.5">
+      <svg className="absolute left-3.5 top-[13px] text-[#bbb]" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input ref={ref} type="search" enterKeyHint="search" placeholder="Search parts, vehicles, shops..." value={text} onChange={e => handleChange(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { onSearch(text); ref.current?.blur() } }} className="w-full pl-11 pr-10 py-[11px] rounded-[14px] text-[16px] sm:text-sm outline-none bg-[#f7f7f7] text-[#333] transition-all duration-200 border-2 border-transparent focus:bg-white focus:border-[#ff6b35] focus:shadow-[0_0_0_4px_rgba(255,107,53,0.08)]"/>
+      {text && <button onClick={() => { setText(''); onClear(); ref.current?.focus() }} className="absolute right-3 top-[9px] w-[26px] h-[26px] bg-[#ddd] rounded-full flex items-center justify-center text-[13px] text-[#666] font-bold active:bg-[#ccc]">✕</button>}
+    </div>
+  )
+})
 
 // Levenshtein distance between two strings
 function levenshtein(a: string, b: string): number {
@@ -54,15 +82,13 @@ function getProductImage(product: any): string | null {
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<'products' | 'shops'>('products')
-  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const searchDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [searchDisplay, setSearchDisplay] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [products, setProducts] = useState<(Product & { vendor: Vendor; images: any[] })[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedVendor, setSelectedVendor] = useState<string | null>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
   const trackingTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [wishlist, setWishlist] = useState<Set<string>>(new Set())
   const [wishlistOpen, setWishlistOpen] = useState(false)
@@ -76,16 +102,8 @@ export default function HomePage() {
   const [visibleCount, setVisibleCount] = useState(50)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
-  // On desktop: debounce search after 500ms of no typing
-  // On mobile: only search when Enter/Search button is pressed (handled in onKeyDown)
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
-  useEffect(() => {
-    if (isMobile) return // Mobile: don't auto-search while typing
-    if (searchDebounce.current) clearTimeout(searchDebounce.current)
-    if (!searchInput && search) { setSearch(''); return } // Instant clear
-    searchDebounce.current = setTimeout(() => setSearch(searchInput), 500)
-    return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current) }
-  }, [searchInput])
+  const handleSearch = useCallback((q: string) => { setSearch(q); setSearchDisplay(q) }, [])
+  const handleSearchClear = useCallback(() => { setSearch(''); setSearchDisplay('') }, [])
 
   useEffect(() => { (async () => {
     // Try cache first for instant load
@@ -463,9 +481,9 @@ export default function HomePage() {
 
   const selectedVendorObj = selectedVendor ? vendors.find(v => v.id === selectedVendor) : null
   const isVendorView = !!(selectedVendor && selectedVendorObj)
-  function selectVendor(id: string) { setSelectedVendor(id); setActiveTab('products'); setSelectedCategory('All'); setSearchInput(''); setSearch(''); window.scrollTo({top:0,behavior:'smooth'}) }
+  function selectVendor(id: string) { setSelectedVendor(id); setActiveTab('products'); setSelectedCategory('All'); setSearchDisplay(''); setSearch(''); window.scrollTo({top:0,behavior:'smooth'}) }
   function clearVendor() { setSelectedVendor(null); setActiveTab('products') }
-  function clearAllFilters() { setSearchInput(''); setSearch(''); setSelectedCategory('All'); setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0],priceRange[1]]); setSortBy('newest') }
+  function clearAllFilters() { setSearchDisplay(''); setSearch(''); setSelectedCategory('All'); setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0],priceRange[1]]); setSortBy('newest') }
 
   const wishlistProducts = products.filter(p => wishlist.has(p.id)).sort((a,b) => new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())
   const wishlistByVendor: Record<string, {vendor:Vendor; items:typeof wishlistProducts}> = {}
@@ -502,11 +520,7 @@ export default function HomePage() {
                 <a href="/register" className="text-xs font-bold px-4 py-2 rounded-[10px] text-white flex items-center gap-1 shadow-[0_2px_8px_rgba(255,107,53,0.3)]" style={{background:'linear-gradient(135deg,#ff6b35,#ff8f65)'}}><span className="hidden sm:inline">Start Selling</span><span className="sm:hidden">Sell</span></a>
               </div>
             </div>
-            <div className="relative pb-2.5">
-              <svg className="absolute left-3.5 top-[13px] text-[#bbb]" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-              <input ref={searchRef} type="search" enterKeyHint="search" placeholder="Search parts, vehicles, shops..." value={searchInput} onChange={e=>setSearchInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){setSearch(searchInput);searchRef.current?.blur()}}} className="w-full pl-11 pr-10 py-[11px] rounded-[14px] text-base sm:text-sm outline-none bg-[#f7f7f7] text-[#333] transition-all duration-200 border-2 border-transparent focus:bg-white focus:border-[#ff6b35] focus:shadow-[0_0_0_4px_rgba(255,107,53,0.08)]"/>
-              {searchInput && <button onClick={()=>{setSearchInput('');setSearch('');searchRef.current?.focus()}} className="absolute right-3 top-[11px] w-[22px] h-[22px] bg-[#eee] rounded-full flex items-center justify-center text-[11px] text-[#888] active:bg-[#ddd]">✕</button>}
-            </div>
+            <SearchInput onSearch={handleSearch} onClear={handleSearchClear} value={searchDisplay} />
             <div className="flex">
               {[{key:'products' as const,label:'Products'},{key:'shops' as const,label:`Shops (${vendors.length})`}].map(t=>(<button key={t.key} onClick={()=>{setActiveTab(t.key);setSelectedVendor(null)}} className={`flex-1 py-3 text-center text-[13px] font-bold transition-colors border-b-[2.5px] ${activeTab===t.key?'border-[#ff6b35] text-[#ff6b35]':'border-transparent text-[#aaa] active:text-[#666]'}`}>{t.label}</button>))}
             </div>
@@ -517,7 +531,7 @@ export default function HomePage() {
       <main className="max-w-7xl mx-auto px-3 sm:px-5 py-4">
         {(activeTab==='products'||isVendorView) && (<div>
           {isVendorView && selectedVendorObj!.description && <p className="text-[13px] bg-white rounded-[14px] px-4 py-3 mb-3.5 text-[#777] border border-[#eee] leading-relaxed">{selectedVendorObj!.description}</p>}
-          {isVendorView && (<div className="relative mb-3"><svg className="absolute left-3 top-[11px] text-[#bbb]" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><input type="search" enterKeyHint="search" placeholder={`Search in ${selectedVendorObj!.name}...`} value={searchInput} onChange={e=>setSearchInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){setSearch(searchInput);(e.target as HTMLInputElement).blur()}}} className="w-full pl-9 pr-10 py-2.5 rounded-[14px] text-sm outline-none bg-white border-[1.5px] border-[#e8e8e8] focus:border-[#ff6b35]"/>{searchInput&&<button onClick={()=>{setSearchInput('');setSearch('')}} className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#aaa]">✕</button>}</div>)}
+          {isVendorView && <SearchInput onSearch={handleSearch} onClear={handleSearchClear} value={searchDisplay} />}
 
           {/* ── Desktop sidebar + Mobile pills layout ── */}
           <div className="flex gap-6">
@@ -616,7 +630,7 @@ export default function HomePage() {
           {correctedQuery && allFilteredProducts.length > 0 && (
             <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl text-sm">
               <span className="text-blue-600">Showing results for </span>
-              <button onClick={() => { setSearchInput(correctedQuery); setSearch(correctedQuery) }} className="font-bold text-blue-700 underline">{correctedQuery}</button>
+              <button onClick={() => { setSearchDisplay(correctedQuery); setSearch(correctedQuery) }} className="font-bold text-blue-700 underline">{correctedQuery}</button>
               <span className="text-blue-400 ml-2">·</span>
               <span className="text-blue-400 ml-2">Search instead for </span>
               <span className="font-medium text-blue-500 line-through">{search}</span>
