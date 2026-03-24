@@ -129,6 +129,7 @@ export default function RootLayout({
           {children}
           <ScrollToTop />
         </AuthProvider>
+        <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{})}` }} />
       </body>
     </html>
   )
