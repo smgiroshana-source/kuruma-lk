@@ -37,7 +37,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function detect() {
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        // Use getSession first (reads from storage, no network call)
+        // Then verify with getUser if session exists
+        const { data: { session } } = await supabase.auth.getSession()
+        const user = session?.user || null
 
         if (!user) {
           setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
