@@ -137,7 +137,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!loadMoreRef.current) return
     const observer = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) setVisibleCount(prev => prev + 50)
+      if (entries[0].isIntersecting) setVisibleCount(prev => Math.min(prev + 50, 300))
     }, { rootMargin: '400px' })
     observer.observe(loadMoreRef.current)
     return () => observer.disconnect()
@@ -147,7 +147,7 @@ export default function HomePage() {
   function toggleWishlist(id: string) { const n = new Set(wishlist); n.has(id) ? n.delete(id) : n.add(id); updateWishlist(n) }
   function removeFromWishlist(id: string) { const n = new Set(wishlist); n.delete(id); updateWishlist(n) }
 
-  const uniqueMakes = ['All', ...Array.from(new Set(products.map(p => p.make).filter(Boolean))).sort()] as string[]
+  const uniqueMakes = useMemo(() => ['All', ...Array.from(new Set(products.map(p => p.make).filter(Boolean))).sort()] as string[], [products])
   const uniqueConditions = ['All', 'New-Genuine', 'New-Other', 'Reconditioned', 'Damaged']
   useEffect(() => { if (products.length > 0) { const pr = products.filter(p => p.price && p.show_price).map(p => p.price!); if (pr.length > 0) { setPriceRange([Math.min(...pr), Math.max(...pr)]); setPriceFilter([Math.min(...pr), Math.max(...pr)]) } } }, [products])
 
@@ -280,17 +280,16 @@ export default function HomePage() {
   const activeFilterCount = [conditionFilter !== 'All', makeFilter !== 'All', priceRange[1] > 0 && (priceFilter[0] !== priceRange[0] || priceFilter[1] !== priceRange[1])].filter(Boolean).length
 
   // Build vocabulary of known words from product names + synonym keywords
-  const knownTerms = (() => {
+  const knownTerms = useMemo(() => {
     const terms = new Set<string>()
     products.forEach(p => {
       p.name.toLowerCase().split(/\s+/).forEach(w => { if (w.length > 2) terms.add(w) })
-      // Also add multi-word product name segments (e.g., "brake pad", "timing belt")
       const name = p.name.toLowerCase()
       if (name.length > 2) terms.add(name)
     })
     synonyms.flat().forEach(kw => terms.add(kw.toLowerCase()))
     return Array.from(terms)
-  })()
+  }, [products, synonyms])
 
   // Expand search: split into words, expand each word via synonyms
   // Returns array of word groups — each group is alternatives for one search word
@@ -366,7 +365,7 @@ export default function HomePage() {
   }
 
   // Client-side filtering with synonym expansion
-  const searchWordGroups = getSearchWordGroups(search)
+  const searchWordGroups = useMemo(() => getSearchWordGroups(search), [search, synonyms])
   const sortFn = (a: any, b: any) => {
     switch(sortBy) {
       case 'price-low': return (a.price||0)-(b.price||0)
@@ -392,18 +391,17 @@ export default function HomePage() {
     && (makeFilter === 'All' || p.make === makeFilter)
     && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
 
-  // Try direct search first
-  const directResults = products.filter(p => applyFilters(p, !search || matchesAllWords(p, searchWordGroups)))
+  // Try direct search first (memoized)
+  const directResults = useMemo(() => products.filter(p => applyFilters(p, !search || matchesAllWords(p, searchWordGroups))), [products, search, searchWordGroups, selectedCategory, selectedVendor, conditionFilter, makeFilter, priceFilter])
 
   // If 0 results and there's a search, try fuzzy/phonetic correction
-  const correctedQuery = (search && directResults.length === 0) ? findCorrectedQuery(search.toLowerCase().trim()) : null
-  const correctedWordGroups = correctedQuery ? getSearchWordGroups(correctedQuery) : []
+  const correctedQuery = useMemo(() => (search && directResults.length === 0) ? findCorrectedQuery(search.toLowerCase().trim()) : null, [search, directResults.length, knownTerms])
+  const correctedWordGroups = useMemo(() => correctedQuery ? getSearchWordGroups(correctedQuery) : [], [correctedQuery, synonyms])
 
-  // Diversify recommended results: no same model+partType back-to-back
+  // Diversify recommended results: only diversify first 200, append rest as-is
   function diversifyResults(sorted: any[]): any[] {
-    if (sortBy !== 'recommended' || search) return sorted // Only diversify default recommended view
+    if (sortBy !== 'recommended' || search) return sorted
 
-    // Get the part type group for a product
     function getPartType(p: any): string {
       const name = p.name.toLowerCase()
       for (const group of PRIORITY_PART_GROUPS) {
@@ -416,44 +414,41 @@ export default function HomePage() {
       return `${(p.make || '').toLowerCase()}-${(p.model || '').toLowerCase()}`
     }
 
+    // Only diversify first 200 items (visible portion), rest stays sorted
+    const DIVERSIFY_COUNT = 200
+    const toDiversify = sorted.slice(0, DIVERSIFY_COUNT)
+    const rest = sorted.slice(DIVERSIFY_COUNT)
+
     const result: any[] = []
-    const remaining = [...sorted]
-    const recentModels: string[] = [] // track last 5 models shown
-    const recentParts: string[] = [] // track last 5 part types shown
-    const recentCategories: string[] = [] // track last 3 categories shown
+    const remaining = [...toDiversify]
+    const recentModels: string[] = []
+    const recentParts: string[] = []
+    const recentCategories: string[] = []
 
     while (remaining.length > 0) {
       let bestIdx = 0
       let bestPenalty = Infinity
 
-      // Look ahead up to 200 items to find variety
-      for (let i = 0; i < Math.min(remaining.length, 200); i++) {
+      for (let i = 0; i < Math.min(remaining.length, 50); i++) {
         const p = remaining[i]
         const modelKey = getModelKey(p)
         const partType = getPartType(p)
         const category = (p.category || '').toLowerCase()
         let penalty = 0
 
-        // Penalize if same model was shown recently (track 5)
         const modelPos = recentModels.indexOf(modelKey)
         if (modelPos >= 0) penalty += Math.max(150 - modelPos * 30, 20)
 
-        // Penalize if same part type was shown recently (track 5)
         const partPos = recentParts.indexOf(partType)
         if (partPos >= 0) penalty += Math.max(120 - partPos * 25, 15)
 
-        // Penalize if same category was shown recently (track 3)
         const catPos = recentCategories.indexOf(category)
         if (catPos === 0) penalty += 60
         else if (catPos === 1) penalty += 25
 
-        // Slight penalty for being further in the original sorted list
         penalty += i * 0.05
 
-        if (penalty < bestPenalty) {
-          bestPenalty = penalty
-          bestIdx = i
-        }
+        if (penalty < bestPenalty) { bestPenalty = penalty; bestIdx = i }
         if (penalty === 0) break
       }
 
@@ -468,14 +463,15 @@ export default function HomePage() {
       if (recentCategories.length > 3) recentCategories.pop()
     }
 
-    return result
+    return [...result, ...rest]
   }
 
-  const sortedResults = (directResults.length > 0 || !correctedQuery)
-    ? directResults.sort(sortFn)
-    : products.filter(p => applyFilters(p, matchesAllWords(p, correctedWordGroups))).sort(sortFn)
-
-  const allFilteredProducts = diversifyResults(sortedResults)
+  const allFilteredProducts = useMemo(() => {
+    const sorted = (directResults.length > 0 || !correctedQuery)
+      ? [...directResults].sort(sortFn)
+      : products.filter(p => applyFilters(p, matchesAllWords(p, correctedWordGroups))).sort(sortFn)
+    return diversifyResults(sorted)
+  }, [directResults, correctedQuery, correctedWordGroups, sortBy, products])
 
   // Only render visible portion (infinite scroll)
   const filteredProducts = allFilteredProducts.slice(0, visibleCount)
@@ -487,9 +483,12 @@ export default function HomePage() {
   function clearVendor() { setSelectedVendor(null); setActiveTab('products') }
   function clearAllFilters() { setSearchDisplay(''); setSearch(''); setSelectedCategory('All'); setConditionFilter('All'); setMakeFilter('All'); setPriceFilter([priceRange[0],priceRange[1]]); setSortBy('newest') }
 
-  const wishlistProducts = products.filter(p => wishlist.has(p.id)).sort((a,b) => new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime())
-  const wishlistByVendor: Record<string, {vendor:Vendor; items:typeof wishlistProducts}> = {}
-  wishlistProducts.forEach(p => { if(p.vendor) { if(!wishlistByVendor[p.vendor_id]) wishlistByVendor[p.vendor_id]={vendor:p.vendor,items:[]}; wishlistByVendor[p.vendor_id].items.push(p) } })
+  const wishlistProducts = useMemo(() => products.filter(p => wishlist.has(p.id)).sort((a,b) => new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()), [products, wishlist])
+  const wishlistByVendor = useMemo(() => {
+    const result: Record<string, {vendor:Vendor; items:typeof wishlistProducts}> = {}
+    wishlistProducts.forEach(p => { if(p.vendor) { if(!result[p.vendor_id]) result[p.vendor_id]={vendor:p.vendor,items:[]}; result[p.vendor_id].items.push(p) } })
+    return result
+  }, [wishlistProducts])
 
   return (
     <div className="min-h-screen bg-[#f5f5f5] overflow-x-hidden">
@@ -675,14 +674,21 @@ export default function HomePage() {
             })}
           </div>)}
 
-          {/* Infinite scroll sentinel */}
-          <div ref={loadMoreRef} />
-          {hasMoreToShow && (
+          {/* Infinite scroll sentinel (auto-loads up to 300) */}
+          {visibleCount < 300 && <div ref={loadMoreRef} />}
+          {hasMoreToShow && visibleCount < 300 && (
             <div className="flex justify-center py-6">
               <div className="flex items-center gap-3 text-sm text-slate-400">
                 <div className="w-5 h-5 border-2 border-orange-400 border-t-transparent rounded-full animate-spin" />
                 Loading more...
               </div>
+            </div>
+          )}
+          {hasMoreToShow && visibleCount >= 300 && (
+            <div className="flex justify-center py-6">
+              <button onClick={() => setVisibleCount(prev => prev + 100)} className="px-6 py-3 bg-orange-500 text-white text-sm font-bold rounded-xl hover:bg-orange-600 shadow-md">
+                Load More ({allFilteredProducts.length - visibleCount} remaining)
+              </button>
             </div>
           )}
           {!hasMoreToShow && allFilteredProducts.length > 0 && !loading && (

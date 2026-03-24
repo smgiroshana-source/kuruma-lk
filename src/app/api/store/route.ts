@@ -31,9 +31,14 @@ export async function GET() {
       : [],
   }))
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     products,
     vendors: vendorsRes.data || [],
     synonyms: (synonymsRes.data || []).map(s => s.keywords),
   })
+
+  // Cache for 60 seconds, serve stale while revalidating for up to 5 minutes
+  response.headers.set('Cache-Control', 's-maxage=60, stale-while-revalidate=300')
+
+  return response
 }
