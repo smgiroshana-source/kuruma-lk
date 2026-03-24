@@ -153,6 +153,11 @@ export default function VendorDashboard() {
   const [exportLoading, setExportLoading] = useState(false)
   const [expandedSale, setExpandedSale] = useState<string | null>(null)
   const [salesSearch, setSalesSearch] = useState('')
+  const [salesFilterFrom, setSalesFilterFrom] = useState('')
+  const [salesFilterTo, setSalesFilterTo] = useState('')
+  const [salesFilterCustomer, setSalesFilterCustomer] = useState('')
+  const [salesFilterVehicle, setSalesFilterVehicle] = useState('')
+  const [showSalesFilter, setShowSalesFilter] = useState(false)
   const [salesView, setSalesView] = useState('overview')
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10))
   const [reportFrom, setReportFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
@@ -2040,20 +2045,65 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
 
                 {/* ─── TRANSACTIONS ─── */}
                 {salesSubTab === 'transactions' && (() => {
-                  const sq = salesSearch.toLowerCase().trim()
-                  const filteredSales = sq ? salesData.sales.filter((sale: any) => {
-                    const name = (sale.customer?.name || sale.customer_name || '').toLowerCase()
-                    const phone = (sale.customer_phone || sale.customer?.phone || '').toLowerCase()
-                    const invoice = (sale.invoice_no || '').toLowerCase()
-                    const vehicle = (sale.vehicle_no || '').toLowerCase()
-                    const items = (sale.items || []).map((i: any) => `${i.product_sku || ''} ${i.product_name || ''}`).join(' ').toLowerCase()
-                    return name.includes(sq) || phone.includes(sq) || invoice.includes(sq) || vehicle.includes(sq) || items.includes(sq)
-                  }) : salesData.sales
+                  const hasFilters = salesFilterFrom || salesFilterTo || salesFilterCustomer || salesFilterVehicle || salesSearch
+                  const filteredSales = salesData.sales.filter((sale: any) => {
+                    // Date range filter
+                    if (salesFilterFrom) {
+                      const saleDate = sale.created_at?.slice(0, 10) || ''
+                      if (saleDate < salesFilterFrom) return false
+                    }
+                    if (salesFilterTo) {
+                      const saleDate = sale.created_at?.slice(0, 10) || ''
+                      if (saleDate > salesFilterTo) return false
+                    }
+                    // Customer name filter
+                    if (salesFilterCustomer) {
+                      const name = (sale.customer?.name || sale.customer_name || '').toLowerCase()
+                      const phone = (sale.customer_phone || sale.customer?.phone || '').toLowerCase()
+                      if (!name.includes(salesFilterCustomer.toLowerCase()) && !phone.includes(salesFilterCustomer.toLowerCase())) return false
+                    }
+                    // Vehicle number filter
+                    if (salesFilterVehicle) {
+                      const vehicle = (sale.vehicle_no || '').toLowerCase()
+                      if (!vehicle.includes(salesFilterVehicle.toLowerCase().replace(/[-\s]/g, ''))) return false
+                    }
+                    // General search (invoice, product name/sku)
+                    if (salesSearch) {
+                      const sq = salesSearch.toLowerCase()
+                      const invoice = (sale.invoice_no || '').toLowerCase()
+                      const items = (sale.items || []).map((i: any) => `${i.product_sku || ''} ${i.product_name || ''}`).join(' ').toLowerCase()
+                      const name = (sale.customer?.name || sale.customer_name || '').toLowerCase()
+                      if (!invoice.includes(sq) && !items.includes(sq) && !name.includes(sq)) return false
+                    }
+                    return true
+                  })
+                  const activeFilterCount = [salesFilterFrom, salesFilterTo, salesFilterCustomer, salesFilterVehicle].filter(Boolean).length
                   return (
                   <div>
-                    <input type="text" value={salesSearch} onChange={e => setSalesSearch(e.target.value)} placeholder="Search by customer, invoice, vehicle no, product..." className="w-full px-4 py-2.5 mb-3 rounded-xl border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                    {/* Search + Filter toggle */}
+                    <div className="flex gap-2 mb-2">
+                      <input type="text" value={salesSearch} onChange={e => setSalesSearch(e.target.value)} placeholder="Search invoice, product, customer..." className="flex-1 px-4 py-2 rounded-xl border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                      <button onClick={() => setShowSalesFilter(!showSalesFilter)} className={'px-3 py-2 rounded-xl border-2 text-sm font-bold transition ' + (showSalesFilter || activeFilterCount > 0 ? 'border-orange-400 bg-orange-50 text-orange-600' : 'border-slate-200 text-slate-500')}>
+                        ☰ Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+                      </button>
+                    </div>
+                    {/* Filter panel */}
+                    {showSalesFilter && (
+                      <div className="bg-white rounded-xl border border-slate-200 p-3 mb-3 space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div><label className="block text-[10px] font-bold text-slate-400 mb-0.5">FROM</label><input type="date" value={salesFilterFrom} onChange={e => setSalesFilterFrom(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:border-orange-400" /></div>
+                          <div><label className="block text-[10px] font-bold text-slate-400 mb-0.5">TO</label><input type="date" value={salesFilterTo} onChange={e => setSalesFilterTo(e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:border-orange-400" /></div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div><label className="block text-[10px] font-bold text-slate-400 mb-0.5">CUSTOMER</label><input type="text" value={salesFilterCustomer} onChange={e => setSalesFilterCustomer(e.target.value)} placeholder="Name or phone" className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:border-orange-400" /></div>
+                          <div><label className="block text-[10px] font-bold text-slate-400 mb-0.5">VEHICLE NO</label><input type="text" value={salesFilterVehicle} onChange={e => setSalesFilterVehicle(e.target.value.toUpperCase())} placeholder="ABC-1234" className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:border-orange-400 uppercase font-mono" /></div>
+                        </div>
+                        {hasFilters && <button onClick={() => { setSalesFilterFrom(''); setSalesFilterTo(''); setSalesFilterCustomer(''); setSalesFilterVehicle(''); setSalesSearch('') }} className="text-[11px] font-bold text-red-500 px-2 py-1">✕ Clear all filters</button>}
+                        <p className="text-[10px] text-slate-400">{filteredSales.length} of {salesData.sales.length} sales</p>
+                      </div>
+                    )}
                     <div className="space-y-2">{filteredSales.length === 0 ? (
-                    <div className="text-center py-12"><p className="text-4xl opacity-30">📋</p><p className="text-sm text-slate-400 mt-2 font-semibold">{sq ? 'No matching sales' : 'No sales in this period'}</p></div>
+                    <div className="text-center py-12"><p className="text-4xl opacity-30">📋</p><p className="text-sm text-slate-400 mt-2 font-semibold">{hasFilters ? 'No matching sales' : 'No sales in this period'}</p></div>
                   ) : filteredSales.map((sale: any) => (
                     <div key={sale.id} className={'bg-white rounded-xl border overflow-hidden ' + (sale.payment_status === 'voided' ? 'opacity-50' : '')}>
                       <button onClick={() => setExpandedSale(expandedSale === sale.id ? null : sale.id)} className="w-full px-3 sm:px-4 py-3 flex items-center justify-between text-left active:bg-slate-50">
