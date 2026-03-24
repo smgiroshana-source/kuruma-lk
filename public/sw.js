@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kuruma-v1'
+const CACHE_NAME = 'kuruma-v2'
 const STATIC_ASSETS = ['/', '/manifest.json']
 
 // Install — cache app shell
@@ -42,8 +42,13 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // Static assets & pages: cache-first, fallback to network
+  // Static assets: network-first for JS/CSS (they have hashes), cache images
   if (url.origin === self.location.origin) {
+    // Don't cache Next.js JS/CSS bundles or HTML pages — always fetch fresh
+    if (url.pathname.startsWith('/_next/') || url.pathname.endsWith('.html') || !url.pathname.includes('.')) {
+      return // Let browser handle normally
+    }
+    // Cache images and other static assets
     event.respondWith(
       caches.match(event.request).then((cached) => {
         if (cached) return cached
