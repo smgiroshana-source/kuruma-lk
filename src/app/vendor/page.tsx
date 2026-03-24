@@ -1815,7 +1815,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
 
                   {/* Vehicle & Date */}
                   <div className="flex gap-2">
-                    <input type="text" value={posVehicleNo} onChange={e => setPosVehicleNo(e.target.value.toUpperCase().replace(/[^A-Z0-9-\s]/g, ''))} placeholder="Vehicle No" maxLength={10} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 font-mono font-bold tracking-wider" />
+                    <input type="text" value={posVehicleNo} onChange={e => { let v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = v.match(/^([A-Z]{2,4})(\d{1,4})$/); if (m) v = m[1] + '-' + m[2]; setPosVehicleNo(v) }} placeholder="ABC-1234" maxLength={9} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 font-mono font-bold tracking-wider" />
                     <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                   </div>
 
