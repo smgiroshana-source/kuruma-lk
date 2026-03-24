@@ -19,23 +19,24 @@ async function generateInvoiceNo(vendorId: string, vendorName: string) {
   const admin = createAdminClient()
   const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
 
-  // Get last invoice for this vendor to determine next number
-  const { data: lastSale } = await admin
+  // Find the highest invoice number across ALL sales for this vendor
+  const { data: allSales } = await admin
     .from('sales')
     .select('invoice_no')
     .eq('vendor_id', vendorId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single()
 
-  let nextNum = 1
-  if (lastSale?.invoice_no) {
-    // Extract number from last invoice (format: PREFIX-NNNNN)
-    const match = lastSale.invoice_no.match(/-(\d+)$/)
-    if (match) nextNum = parseInt(match[1]) + 1
+  let maxNum = 0
+  if (allSales) {
+    for (const sale of allSales) {
+      const match = (sale.invoice_no || '').match(/-(\d+)$/)
+      if (match) {
+        const num = parseInt(match[1])
+        if (num > maxNum) maxNum = num
+      }
+    }
   }
 
-  return `${prefix}-${String(nextNum).padStart(5, '0')}`
+  return `${prefix}-${String(maxNum + 1).padStart(5, '0')}`
 }
 
 export async function GET(req: NextRequest) {
