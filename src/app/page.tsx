@@ -76,10 +76,14 @@ export default function HomePage() {
   const [visibleCount, setVisibleCount] = useState(50)
   const loadMoreRef = useRef<HTMLDivElement>(null)
 
-  // Debounce search input - only update the actual search filter after 250ms of no typing
+  // On desktop: debounce search after 500ms of no typing
+  // On mobile: only search when Enter/Search button is pressed (handled in onKeyDown)
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   useEffect(() => {
+    if (isMobile) return // Mobile: don't auto-search while typing
     if (searchDebounce.current) clearTimeout(searchDebounce.current)
-    searchDebounce.current = setTimeout(() => setSearch(searchInput), 250)
+    if (!searchInput && search) { setSearch(''); return } // Instant clear
+    searchDebounce.current = setTimeout(() => setSearch(searchInput), 500)
     return () => { if (searchDebounce.current) clearTimeout(searchDebounce.current) }
   }, [searchInput])
 
