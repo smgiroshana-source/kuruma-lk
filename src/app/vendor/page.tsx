@@ -152,6 +152,7 @@ export default function VendorDashboard() {
   const [exportTo, setExportTo] = useState('')
   const [exportLoading, setExportLoading] = useState(false)
   const [expandedSale, setExpandedSale] = useState<string | null>(null)
+  const [salesSearch, setSalesSearch] = useState('')
   const [salesView, setSalesView] = useState('overview')
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10))
   const [reportFrom, setReportFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
@@ -2038,17 +2039,29 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 </div>)}
 
                 {/* ─── TRANSACTIONS ─── */}
-                {salesSubTab === 'transactions' && (
-                  <div className="space-y-2">{salesData.sales.length === 0 ? (
-                    <div className="text-center py-12"><p className="text-4xl opacity-30">📋</p><p className="text-sm text-slate-400 mt-2 font-semibold">No sales in this period</p></div>
-                  ) : salesData.sales.map((sale: any) => (
+                {salesSubTab === 'transactions' && (() => {
+                  const sq = salesSearch.toLowerCase().trim()
+                  const filteredSales = sq ? salesData.sales.filter((sale: any) => {
+                    const name = (sale.customer?.name || sale.customer_name || '').toLowerCase()
+                    const phone = (sale.customer_phone || sale.customer?.phone || '').toLowerCase()
+                    const invoice = (sale.invoice_no || '').toLowerCase()
+                    const vehicle = (sale.vehicle_no || '').toLowerCase()
+                    const items = (sale.items || []).map((i: any) => `${i.product_sku || ''} ${i.product_name || ''}`).join(' ').toLowerCase()
+                    return name.includes(sq) || phone.includes(sq) || invoice.includes(sq) || vehicle.includes(sq) || items.includes(sq)
+                  }) : salesData.sales
+                  return (
+                  <div>
+                    <input type="text" value={salesSearch} onChange={e => setSalesSearch(e.target.value)} placeholder="Search by customer, invoice, vehicle no, product..." className="w-full px-4 py-2.5 mb-3 rounded-xl border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                    <div className="space-y-2">{filteredSales.length === 0 ? (
+                    <div className="text-center py-12"><p className="text-4xl opacity-30">📋</p><p className="text-sm text-slate-400 mt-2 font-semibold">{sq ? 'No matching sales' : 'No sales in this period'}</p></div>
+                  ) : filteredSales.map((sale: any) => (
                     <div key={sale.id} className={'bg-white rounded-xl border overflow-hidden ' + (sale.payment_status === 'voided' ? 'opacity-50' : '')}>
                       <button onClick={() => setExpandedSale(expandedSale === sale.id ? null : sale.id)} className="w-full px-3 sm:px-4 py-3 flex items-center justify-between text-left active:bg-slate-50">
                         <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                           <span className="font-mono text-[10px] sm:text-xs font-bold bg-slate-100 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded flex-shrink-0">{sale.invoice_no}</span>
                           <div className="min-w-0">
                             <span className="font-semibold text-xs sm:text-sm truncate block">{sale.customer?.name || sale.customer_name}</span>
-                            <span className="text-[10px] text-slate-400">{formatDateShort(sale.created_at)}</span>
+                            <span className="text-[10px] text-slate-400">{formatDateShort(sale.created_at)}{sale.vehicle_no ? ` · ${sale.vehicle_no}` : ''}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
@@ -2074,8 +2087,8 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                         </div>
                       </div>)}
                     </div>
-                  ))}</div>
-                )}
+                  ))}</div></div>)
+                })()}
 
                 {/* ─── CUSTOMERS ─── */}
                 {salesSubTab === 'customers' && (
