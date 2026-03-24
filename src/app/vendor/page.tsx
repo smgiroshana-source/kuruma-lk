@@ -2102,42 +2102,66 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                         <p className="text-[10px] text-slate-400">{filteredSales.length} of {salesData.sales.length} sales</p>
                       </div>
                     )}
-                    <div className="space-y-2">{filteredSales.length === 0 ? (
+                    {filteredSales.length === 0 ? (
                     <div className="text-center py-12"><p className="text-4xl opacity-30">📋</p><p className="text-sm text-slate-400 mt-2 font-semibold">{hasFilters ? 'No matching sales' : 'No sales in this period'}</p></div>
-                  ) : filteredSales.map((sale: any) => (
-                    <div key={sale.id} className={'bg-white rounded-xl border overflow-hidden ' + (sale.payment_status === 'voided' ? 'opacity-50' : '')}>
-                      <button onClick={() => setExpandedSale(expandedSale === sale.id ? null : sale.id)} className="w-full px-3 sm:px-4 py-3 flex items-center justify-between text-left active:bg-slate-50">
-                        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                          <span className="font-mono text-[10px] sm:text-xs font-bold bg-slate-100 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded flex-shrink-0">{sale.invoice_no}</span>
-                          <div className="min-w-0">
-                            <span className="font-semibold text-xs sm:text-sm truncate block">{sale.customer?.name || sale.customer_name}</span>
-                            <span className="text-[10px] text-slate-400">{formatDateShort(sale.created_at)}{sale.vehicle_no ? ` · ${sale.vehicle_no}` : ''}</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-                          <span className={'text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-full ' + (sale.payment_status === 'voided' ? 'bg-red-100 text-red-600' : sale.payment_status === 'paid' ? 'bg-green-100 text-green-600' : sale.payment_status === 'partial' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600')}>{sale.payment_status === 'voided' ? 'VOID' : sale.payment_status.toUpperCase()}</span>
-                          <span className="font-black text-orange-600 text-xs sm:text-sm">Rs.{parseFloat(sale.total).toLocaleString()}</span>
-                          <span className="text-slate-400 text-xs">{expandedSale === sale.id ? '▲' : '▼'}</span>
-                        </div>
-                      </button>
-                      {expandedSale === sale.id && (<div className="px-3 sm:px-4 pb-3 border-t border-slate-100">
-                        <table className="w-full text-xs mt-2"><tbody>{(sale.items || []).map((i: any) => { const returned = (i.returned_quantity || 0) >= i.quantity; const partialReturn = i.returned_quantity > 0 && i.returned_quantity < i.quantity; return (<tr key={i.id} className={'border-b border-slate-50 ' + (returned ? 'opacity-40' : '')}><td className="py-1.5"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span><span className={returned ? 'line-through' : ''}>{i.product_name}</span>{returned && <span className="ml-1.5 text-[9px] font-bold text-red-400 bg-red-50 px-1.5 py-0.5 rounded">RETURNED</span>}{partialReturn && <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded">{i.returned_quantity} returned</span>}</td><td className="py-1.5 text-right text-slate-500">x{i.quantity}</td><td className={'py-1.5 text-right font-semibold ' + (returned ? 'line-through text-slate-300' : '')}>{returned ? '' : 'Rs.'}{returned ? '' : parseFloat(i.total).toLocaleString()}{returned && <span className="text-red-400">Rs.{parseFloat(i.total).toLocaleString()}</span>}</td></tr>)})}</tbody></table>
-                        {parseFloat(sale.balance_due) > 0 && <p className="text-xs font-bold text-red-600 mt-2">Balance Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p>}
-                        <div className="flex gap-2 mt-3 flex-wrap">
-                          <div className="relative">
-                            <button onClick={() => { const el = document.getElementById('print-menu-' + sale.id); if (el) el.classList.toggle('hidden') }} className="text-[11px] font-semibold text-slate-600 px-3 py-1.5 rounded border border-slate-200 active:bg-slate-50">🖨️ Print ▾</button>
-                            <div id={'print-menu-' + sale.id} className="hidden absolute left-0 bottom-full mb-1 bg-white rounded-lg border border-slate-200 shadow-lg z-20 overflow-hidden min-w-[140px]">
-                              <button onClick={() => { printInvoice(sale, salesData.vendor, 'thermal', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 border-b border-slate-100">🖨️ Thermal</button>
-                              <button onClick={() => { printInvoice(sale, salesData.vendor, 'a4', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border-b border-slate-100">📄 A4 Print</button>
-                              {(sale.customer_phone || sale.customer?.phone) && <button onClick={() => { sendWhatsAppBill(sale, salesData.vendor, sale.customer_phone || sale.customer?.phone); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-green-600 hover:bg-green-50">💬 WhatsApp</button>}
-                            </div>
-                          </div>
-                          {sale.payment_status !== 'voided' && <button onClick={() => { setReturnModal(sale); setReturnItems({}) }} className="text-[11px] font-semibold text-amber-600 px-3 py-1.5 rounded border border-amber-200 active:bg-amber-50">↩ Return</button>}
-                          {sale.customer_id && <button onClick={() => { setCustomerHistoryId(sale.customer_id); setCustomerHistoryName(sale.customer?.name || sale.customer_name) }} className="text-[11px] font-semibold text-purple-600 px-3 py-1.5 rounded border border-purple-200 active:bg-purple-50">👤 History</button>}
-                        </div>
-                      </div>)}
+                  ) : (
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead><tr className="bg-slate-50 text-left">
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400">DATE</th>
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400">INVOICE</th>
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400">ITEMS</th>
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400">VEHICLE</th>
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400">CUSTOMER</th>
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400 text-right">TOTAL</th>
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400">STATUS</th>
+                            <th className="px-3 py-2.5 text-[10px] font-bold text-slate-400"></th>
+                          </tr></thead>
+                          <tbody>
+                            {filteredSales.map((sale: any) => {
+                              const isExpanded = expandedSale === sale.id
+                              return (<>
+                                <tr key={sale.id} onClick={() => setExpandedSale(isExpanded ? null : sale.id)} className={'border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition ' + (sale.payment_status === 'voided' ? 'opacity-50' : '') + (isExpanded ? ' bg-orange-50/50' : '')}>
+                                  <td className="px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatDateShort(sale.created_at)}</td>
+                                  <td className="px-3 py-2.5"><span className="font-mono text-[10px] font-bold bg-slate-100 px-1.5 py-0.5 rounded">{sale.invoice_no}</span></td>
+                                  <td className="px-3 py-2.5 text-xs max-w-[300px]">
+                                    {(sale.items || []).map((i: any) => (
+                                      <div key={i.id} className="truncate"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span>{i.product_name} <span className="text-slate-400">x{i.quantity}</span></div>
+                                    )).slice(0, 2)}
+                                    {(sale.items || []).length > 2 && <span className="text-[10px] text-slate-400">+{(sale.items || []).length - 2} more</span>}
+                                  </td>
+                                  <td className="px-3 py-2.5 text-xs font-mono font-semibold text-slate-600">{sale.vehicle_no || '—'}</td>
+                                  <td className="px-3 py-2.5 text-xs font-semibold whitespace-nowrap">{sale.customer?.name || sale.customer_name}</td>
+                                  <td className="px-3 py-2.5 text-right font-bold text-orange-600 whitespace-nowrap">Rs.{parseFloat(sale.total).toLocaleString()}</td>
+                                  <td className="px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + (sale.payment_status === 'voided' ? 'bg-red-100 text-red-600' : sale.payment_status === 'paid' ? 'bg-green-100 text-green-600' : sale.payment_status === 'partial' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600')}>{sale.payment_status === 'voided' ? 'VOID' : sale.payment_status.toUpperCase()}</span></td>
+                                  <td className="px-3 py-2.5 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</td>
+                                </tr>
+                                {isExpanded && (
+                                  <tr key={sale.id + '-detail'}><td colSpan={8} className="px-3 pb-3 bg-slate-50/50 border-t border-slate-100">
+                                    <table className="w-full text-xs mt-2"><tbody>{(sale.items || []).map((i: any) => { const returned = (i.returned_quantity || 0) >= i.quantity; const partialReturn = i.returned_quantity > 0 && i.returned_quantity < i.quantity; return (<tr key={i.id} className={'border-b border-slate-100 ' + (returned ? 'opacity-40' : '')}><td className="py-1.5"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span><span className={returned ? 'line-through' : ''}>{i.product_name}</span>{returned && <span className="ml-1.5 text-[9px] font-bold text-red-400 bg-red-50 px-1.5 py-0.5 rounded">RETURNED</span>}{partialReturn && <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded">{i.returned_quantity} returned</span>}</td><td className="py-1.5 text-right text-slate-500">x{i.quantity}</td><td className="py-1.5 text-right font-semibold">Rs.{parseFloat(i.unit_price).toLocaleString()}</td><td className={'py-1.5 text-right font-semibold ' + (returned ? 'line-through text-slate-300' : '')}>Rs.{parseFloat(i.total).toLocaleString()}</td></tr>)})}</tbody></table>
+                                    {parseFloat(sale.balance_due) > 0 && <p className="text-xs font-bold text-red-600 mt-2">Balance Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p>}
+                                    <div className="flex gap-2 mt-3 flex-wrap">
+                                      <div className="relative">
+                                        <button onClick={e => { e.stopPropagation(); const el = document.getElementById('print-menu-' + sale.id); if (el) el.classList.toggle('hidden') }} className="text-[11px] font-semibold text-slate-600 px-3 py-1.5 rounded border border-slate-200 active:bg-slate-50">🖨️ Print ▾</button>
+                                        <div id={'print-menu-' + sale.id} className="hidden absolute left-0 bottom-full mb-1 bg-white rounded-lg border border-slate-200 shadow-lg z-20 overflow-hidden min-w-[140px]">
+                                          <button onClick={() => { printInvoice(sale, salesData.vendor, 'thermal', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 border-b border-slate-100">🖨️ Thermal</button>
+                                          <button onClick={() => { printInvoice(sale, salesData.vendor, 'a4', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border-b border-slate-100">📄 A4 Print</button>
+                                          {(sale.customer_phone || sale.customer?.phone) && <button onClick={() => { sendWhatsAppBill(sale, salesData.vendor, sale.customer_phone || sale.customer?.phone); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-green-600 hover:bg-green-50">💬 WhatsApp</button>}
+                                        </div>
+                                      </div>
+                                      {sale.payment_status !== 'voided' && <button onClick={e => { e.stopPropagation(); setReturnModal(sale); setReturnItems({}) }} className="text-[11px] font-semibold text-amber-600 px-3 py-1.5 rounded border border-amber-200 active:bg-amber-50">↩ Return</button>}
+                                      {sale.customer_id && <button onClick={e => { e.stopPropagation(); setCustomerHistoryId(sale.customer_id); setCustomerHistoryName(sale.customer?.name || sale.customer_name) }} className="text-[11px] font-semibold text-purple-600 px-3 py-1.5 rounded border border-purple-200 active:bg-purple-50">👤 History</button>}
+                                    </div>
+                                  </td></tr>
+                                )}
+                              </>)
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                  ))}</div></div>)
+                  )}</div>)
                 })()}
 
                 {/* ─── CUSTOMERS ─── */}
