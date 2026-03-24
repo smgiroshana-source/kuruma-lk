@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
   const { action } = body
 
   if (action === 'create_sale') {
-    const { customerId, customerName, customerPhone, items, discount, payments: paymentLines, notes, useAdvance, applyToOutstanding, saleDate } = body
+    const { customerId, customerName, customerPhone, items, discount, payments: paymentLines, notes, useAdvance, applyToOutstanding, saleDate, vehicleNo } = body
 
     if (!items || items.length === 0) return NextResponse.json({ error: 'No items in sale' }, { status: 400 })
 
@@ -234,7 +234,7 @@ export async function POST(req: NextRequest) {
       invoice_no: invoiceNo, customer_name: customerName || 'Walk-in Customer',
       customer_phone: customerPhone || null, subtotal, discount: discount || 0,
       total, paid_amount: paidForThisBill, balance_due: billBalance,
-      payment_method: primaryMethod, payment_status: paymentStatus, notes: notes || null,
+      payment_method: primaryMethod, payment_status: paymentStatus, notes: notes || null, vehicle_no: vehicleNo || null,
     }
     if (saleDate) saleRecord.created_at = new Date(saleDate).toISOString()
 
