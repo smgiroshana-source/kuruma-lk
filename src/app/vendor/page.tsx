@@ -1420,7 +1420,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
       <div className="bg-white border-b border-slate-200"><div className="max-w-7xl mx-auto px-4 flex gap-1 overflow-x-auto">
         {([{key:'overview' as VendorTab,l:'Overview'},{key:'products' as VendorTab,l:'Products'},{key:'add' as VendorTab,l:'+ Add'},{key:'bulk' as VendorTab,l:'Bulk'},{key:'pos' as VendorTab,l:'🧾 POS'},{key:'sales' as VendorTab,l:'📊 Sales'},{key:'credit' as VendorTab,l:'💳 Credit'},{key:'settings' as VendorTab,l:'⚙️'}])
         .filter((t) => staffRole === 'cashier' ? t.key === 'pos' : true).map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap ${tab === t.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>{t.l}</button>
+          <button key={t.key} onClick={() => setTab(t.key)} className={`px-4 py-4 sm:py-3 text-sm font-bold border-b-2 transition whitespace-nowrap min-w-[44px] ${tab === t.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>{t.l}</button>
         ))}
       </div></div>
 
