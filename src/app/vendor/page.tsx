@@ -1799,6 +1799,18 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                     )}
                   </div>
 
+                  {/* Vehicle & Date */}
+                  <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">VEHICLE NO</label>
+                      <input type="text" value={posVehicleNo} onChange={e => setPosVehicleNo(e.target.value.toUpperCase().replace(/[^A-Z0-9-\s]/g, ''))} placeholder="ABC-1234" maxLength={10} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 font-mono font-bold tracking-wider" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 mb-1">DATE</label>
+                      <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                    </div>
+                  </div>
+
                   {/* Payments */}
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
                     <h3 className="font-bold text-slate-800 text-sm">Payment</h3>
@@ -1823,16 +1835,6 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       </div>
                     </div>
                     <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
-                    <div className="flex gap-2">
-                      <div className="flex-1">
-                        <label className="block text-[10px] font-bold text-slate-400 mb-1">DATE</label>
-                        <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                      </div>
-                      <div className="flex-1">
-                        <label className="block text-[10px] font-bold text-slate-400 mb-1">VEHICLE NO</label>
-                        <input type="text" value={posVehicleNo} onChange={e => setPosVehicleNo(e.target.value.toUpperCase().replace(/[^A-Z0-9-\s]/g, ''))} placeholder="ABC-1234" maxLength={10} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 font-mono font-bold tracking-wider" />
-                      </div>
-                    </div>
                     <textarea value={posNotes} onChange={e => setPosNotes(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" placeholder="Notes" />
                   </div>
 
