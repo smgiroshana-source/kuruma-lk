@@ -1800,20 +1800,14 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                   </div>
 
                   {/* Vehicle & Date */}
-                  <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 mb-1">VEHICLE NO</label>
-                      <input type="text" value={posVehicleNo} onChange={e => setPosVehicleNo(e.target.value.toUpperCase().replace(/[^A-Z0-9-\s]/g, ''))} placeholder="ABC-1234" maxLength={10} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 font-mono font-bold tracking-wider" />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 mb-1">DATE</label>
-                      <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                    </div>
+                  <div className="flex gap-2">
+                    <input type="text" value={posVehicleNo} onChange={e => setPosVehicleNo(e.target.value.toUpperCase().replace(/[^A-Z0-9-\s]/g, ''))} placeholder="Vehicle No" maxLength={10} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 font-mono font-bold tracking-wider" />
+                    <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                   </div>
 
                   {/* Payments */}
-                  <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-                    <h3 className="font-bold text-slate-800 text-sm">Payment</h3>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
+                    <h3 className="font-bold text-slate-800 text-xs">Payment</h3>
                     <div className="space-y-2">
                       {posPayments.map((line, i) => (
                         <div key={`pos-pay-${i}`} className="flex gap-2 items-start flex-wrap">
@@ -1835,15 +1829,12 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       </div>
                     </div>
                     <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
-                    <textarea value={posNotes} onChange={e => setPosNotes(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" placeholder="Notes" />
                   </div>
 
                   {/* Total */}
-                  <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-5 text-white">
-                    <div className="flex justify-between text-sm mb-1"><span className="text-slate-300">Subtotal</span><span>Rs.{posSubtotal.toLocaleString()}</span></div>
+                  <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-4 text-white">
                     {posDiscountAmt > 0 && <div className="flex justify-between text-sm mb-1"><span className="text-red-300">Discount</span><span>-Rs.{posDiscountAmt.toLocaleString()}</span></div>}
-                    <div className="flex justify-between text-2xl font-black mt-2 pt-2 border-t border-slate-600"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
-                    <div className="flex justify-between text-sm mt-2"><span className="text-green-300">Cash/Cheque/Bank</span><span className="text-green-300">Rs.{posPaidAmount.toLocaleString()}</span></div>
+                    <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
                     {posAdvanceApplied > 0 && <div className="flex justify-between text-sm"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
                     {posOverpayment > 0 && posCustomer.outstanding > 0 && (
                       <div className="mt-2 pt-2 border-t border-slate-600">
