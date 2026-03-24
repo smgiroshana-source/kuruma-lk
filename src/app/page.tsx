@@ -366,7 +366,16 @@ export default function HomePage() {
 
   // Client-side filtering with synonym expansion
   const searchWordGroups = useMemo(() => getSearchWordGroups(search), [search, synonyms])
-  const sortFn = (a: any, b: any) => {
+
+  // Cache relevance scores so they're computed once per product, not on every sort comparison
+  const scoreCache = useMemo(() => {
+    if (sortBy !== 'recommended') return new Map<string, number>()
+    const cache = new Map<string, number>()
+    products.forEach(p => cache.set(p.id, getProductRelevanceScore(p)))
+    return cache
+  }, [products, sortBy, userSearchHistory])
+
+  const sortFn = useCallback((a: any, b: any) => {
     switch(sortBy) {
       case 'price-low': return (a.price||0)-(b.price||0)
       case 'price-high': return (b.price||0)-(a.price||0)
@@ -374,22 +383,22 @@ export default function HomePage() {
       case 'name-za': return b.name.localeCompare(a.name)
       case 'newest': return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()
       default: {
-        // Smart/recommended sort: relevance score first, then newest
-        const scoreA = getProductRelevanceScore(a)
-        const scoreB = getProductRelevanceScore(b)
+        const scoreA = scoreCache.get(a.id) || 0
+        const scoreB = scoreCache.get(b.id) || 0
         if (scoreA !== scoreB) return scoreB - scoreA
         return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()
       }
     }
-  }
+  }, [sortBy, scoreCache])
 
-  const applyFilters = (p: any, matchesSearch: boolean) =>
+  const applyFilters = useCallback((p: any, matchesSearch: boolean) =>
     (selectedCategory === 'All' || p.category === selectedCategory)
     && (!selectedVendor || p.vendor_id === selectedVendor)
     && matchesSearch
     && (conditionFilter === 'All' || p.condition === conditionFilter)
     && (makeFilter === 'All' || p.make === makeFilter)
     && (!p.show_price || !p.price || ((p.price||0) >= priceFilter[0] && (p.price||0) <= priceFilter[1]))
+  , [selectedCategory, selectedVendor, conditionFilter, makeFilter, priceFilter])
 
   // Try direct search first (memoized)
   const directResults = useMemo(() => products.filter(p => applyFilters(p, !search || matchesAllWords(p, searchWordGroups))), [products, search, searchWordGroups, selectedCategory, selectedVendor, conditionFilter, makeFilter, priceFilter])
