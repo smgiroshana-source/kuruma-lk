@@ -687,7 +687,7 @@ export default function HomePage() {
 
         {/* ═══ SHOPS TAB ═══ */}
         {activeTab==='shops'&&!isVendorView&&(()=>{
-          const fv = vendors.filter(v=>{if(!search)return true;const s=search.toLowerCase();return v.name.toLowerCase().includes(s)||(v.location||'').toLowerCase().includes(s)})
+          const fv = vendors.filter(v=>{if(!search)return true;const s=search.toLowerCase();if(v.name.toLowerCase().includes(s)||(v.location||'').toLowerCase().includes(s))return true;return products.some(p=>p.vendor_id===v.id&&(p.name.toLowerCase().includes(s)||(p.make||'').toLowerCase().includes(s)||(p.model||'').toLowerCase().includes(s)||(p.sku||'').toLowerCase().includes(s)))})
           return fv.length===0?(<div className="text-center py-20"><div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🏪</div><p className="font-bold text-[17px] text-[#333]">No shops found</p></div>
           ):(<div className="space-y-3 sm:space-y-0 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:gap-3">
             {fv.map(vendor=>{const vp=products.filter(p=>p.vendor_id===vendor.id);const vc=[...new Set(vp.map(p=>p.category))].slice(0,4);return(
