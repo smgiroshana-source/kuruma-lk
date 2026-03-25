@@ -42,7 +42,7 @@ function deleteCookie(name: string) {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Initialize from cookie for instant display (no flash)
+  // Initialize from cookie for hint, but mark as loading until API confirms
   const cachedRole = getCookie('kuruma_role') as Role | null
 
   const [state, setState] = useState<Omit<AuthContextType, 'signOut'>>({
@@ -50,7 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     role: cachedRole || 'customer',
     vendor: null,
     isAdmin: cachedRole === 'admin',
-    loading: false, // Not loading — we have the cached role
+    loading: !!cachedRole, // If cookie exists, wait for API to confirm before showing buttons
   })
   const supabase = createClient()
 
