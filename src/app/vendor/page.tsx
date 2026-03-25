@@ -983,6 +983,8 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
     const cutoffHour = 19, cutoffMin = 30
     const filtered = salesList.filter((s: any) => {
       if (s.payment_status === 'voided') return false
+      // Exclude opening balance entries — not real sales
+      if ((s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')) return false
       const d = new Date(s.created_at)
       const saleDate = d.getHours() > cutoffHour || (d.getHours() === cutoffHour && d.getMinutes() >= cutoffMin)
         ? new Date(d.getTime() + 86400000).toISOString().slice(0, 10)
@@ -1051,7 +1053,7 @@ ${filtered.map((s: any) => '<tr><td><strong>' + s.invoice_no + '</strong></td><t
   }
 
   function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any) {
-    const filtered = salesList.filter((s: any) => s.payment_status !== 'voided')
+    const filtered = salesList.filter((s: any) => s.payment_status !== 'voided' && !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL'))
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
@@ -1143,6 +1145,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
     const cutoffHour = 19, cutoffMin = 30
     const filtered = salesList.filter((s: any) => {
       if (s.payment_status === 'voided') return false
+      if ((s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')) return false
       const d = new Date(s.created_at)
       const saleDate = d.getHours() > cutoffHour || (d.getHours() === cutoffHour && d.getMinutes() >= cutoffMin)
         ? new Date(d.getTime() + 86400000).toISOString().slice(0, 10)
