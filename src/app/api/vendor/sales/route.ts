@@ -96,17 +96,21 @@ export async function GET(req: NextRequest) {
 
   const allSales = sales || []
   const activeSales = allSales.filter((s: any) => s.payment_status !== 'voided')
-  const totalRevenue = activeSales.reduce((sum: number, s: any) => sum + parseFloat(s.total || 0), 0)
-  const totalPaid = activeSales.reduce((sum: number, s: any) => sum + parseFloat(s.paid_amount || 0), 0)
-  const totalCredit = activeSales.reduce((sum: number, s: any) => sum + parseFloat(s.balance_due || 0), 0)
-  const totalSales = activeSales.length
-  const totalItems = activeSales.reduce((sum: number, s: any) => sum + (s.items?.reduce((is: number, i: any) => is + i.quantity, 0) || 0), 0)
-  const totalDiscount = activeSales.reduce((sum: number, s: any) => sum + parseFloat(s.discount || 0), 0)
+  // Exclude opening balance entries from sales stats (they're past transaction records, not actual sales)
+  const isOpeningBalance = (s: any) => (s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
+  const realSales = activeSales.filter((s: any) => !isOpeningBalance(s))
+  const totalRevenue = realSales.reduce((sum: number, s: any) => sum + parseFloat(s.total || 0), 0)
+  const totalPaid = realSales.reduce((sum: number, s: any) => sum + parseFloat(s.paid_amount || 0), 0)
+  const totalCredit = realSales.reduce((sum: number, s: any) => sum + parseFloat(s.balance_due || 0), 0)
+  const totalSales = realSales.length
+  const totalItems = realSales.reduce((sum: number, s: any) => sum + (s.items?.reduce((is: number, i: any) => is + i.quantity, 0) || 0), 0)
+  const totalDiscount = realSales.reduce((sum: number, s: any) => sum + parseFloat(s.discount || 0), 0)
 
   // Top selling products
   const productMap: Record<string, { name: string; sku: string; qty: number; revenue: number }> = {}
-  activeSales.forEach((s: any) => {
+  realSales.forEach((s: any) => {
     (s.items || []).forEach((i: any) => {
+      if (i.product_sku === 'OPENING-BAL') return
       const key = i.product_sku || i.product_name
       if (!productMap[key]) productMap[key] = { name: i.product_name, sku: i.product_sku || '', qty: 0, revenue: 0 }
       productMap[key].qty += i.quantity

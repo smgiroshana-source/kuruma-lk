@@ -1229,7 +1229,8 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
     try {
       const r = await fetch(`/api/vendor/sales?from=${exportFrom}&to=${exportTo}`)
       const j = await r.json()
-      const sales = (j.sales || []).filter((s: any) => s.payment_status !== 'voided')
+      const allSales = (j.sales || []).filter((s: any) => s.payment_status !== 'voided')
+      const sales = allSales.filter((s: any) => !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL'))
       if (!sales.length) { showToast('No sales in that date range'); setExportLoading(false); return }
 
       const vendor = j.vendor || data?.vendor
