@@ -1212,16 +1212,17 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
 
   // ── End of Day Report ───────────────────────────────────────────────────
   async function sendEODReport() {
+    const today = new Date().toISOString().slice(0, 10)
     showToast('Fetching today\'s sales...')
     try {
-      const r = await fetch('/api/vendor/sales?period=today')
+      const r = await fetch(`/api/vendor/sales?from=${today}&to=${today}`)
       const j = await r.json()
       const sales = j.sales || []
       const vendor = j.vendor || data?.vendor
       if (!sales.length) { showToast('No sales today yet'); return }
       const phone = vendor?.whatsapp || vendor?.phone
       if (!phone) { showToast('No manager phone set'); return }
-      whatsAppDailyReport(sales, vendor, new Date().toISOString().slice(0, 10), phone)
+      whatsAppDailyReport(sales, vendor, today, phone)
     } catch { showToast('Failed to fetch sales') }
   }
 
@@ -2210,8 +2211,14 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       <p className="text-xs text-slate-400 mb-3">Business day: 7:30 PM previous day to 7:30 PM selected day</p>
                       <div className="flex items-end gap-3 flex-wrap">
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <button onClick={() => generateDailyReport(salesData?.sales || [], data?.vendor, reportDate, vendorSettings)} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
-                        <button onClick={() => whatsAppDailyReport(salesData?.sales || [], data?.vendor, reportDate)} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp Summary</button>
+                        <button onClick={async () => {
+                          showToast('Fetching sales...')
+                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings) } catch { showToast('Failed') }
+                        }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                        <button onClick={async () => {
+                          showToast('Fetching sales...')
+                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); whatsAppDailyReport(j.sales || [], data?.vendor, reportDate) } catch { showToast('Failed') }
+                        }} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp Summary</button>
                       </div>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-5">
@@ -2220,7 +2227,10 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       <div className="flex items-end gap-3 flex-wrap">
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label><input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label><input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <button onClick={() => { const allSales = (salesData?.sales || []).filter((s: any) => { const d = s.created_at.slice(0, 10); return d >= reportFrom && d <= reportTo }); generatePeriodReport(allSales, data?.vendor, reportFrom, reportTo, vendorSettings) }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                        <button onClick={async () => {
+                          showToast('Fetching sales...')
+                          try { const r = await fetch(`/api/vendor/sales?from=${reportFrom}&to=${reportTo}`); const j = await r.json(); generatePeriodReport(j.sales || [], data?.vendor, reportFrom, reportTo, vendorSettings) } catch { showToast('Failed') }
+                        }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
                       </div>
                       <div className="flex gap-2 mt-3">
                         {[{l:"This Week",f:7},{l:"This Month",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(new Date().toISOString().slice(0, 10)) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
@@ -2231,31 +2241,6 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
               </>)
 
 
-                {salesSubTab === "reports" && (
-                  <div className="space-y-4">
-                    <div className="bg-white rounded-xl border border-slate-200 p-5">
-                      <h3 className="font-bold text-sm text-slate-800 mb-3">📅 Daily Report</h3>
-                      <p className="text-xs text-slate-400 mb-3">Business day: 7:30 PM previous day to 7:30 PM selected day</p>
-                      <div className="flex items-end gap-3 flex-wrap">
-                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <button onClick={() => generateDailyReport(salesData?.sales || [], data?.vendor, reportDate, vendorSettings)} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
-                        <button onClick={() => whatsAppDailyReport(salesData?.sales || [], data?.vendor, reportDate)} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp Summary</button>
-                      </div>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-5">
-                      <h3 className="font-bold text-sm text-slate-800 mb-3">📆 Period Report</h3>
-                      <p className="text-xs text-slate-400 mb-3">Includes customer-wise credit details</p>
-                      <div className="flex items-end gap-3 flex-wrap">
-                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label><input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label><input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <button onClick={() => { const allSales = (salesData?.sales || []).filter((s: any) => { const d = s.created_at.slice(0, 10); return d >= reportFrom && d <= reportTo }); generatePeriodReport(allSales, data?.vendor, reportFrom, reportTo, vendorSettings) }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
-                      </div>
-                      <div className="flex gap-2 mt-3">
-                        {[{l:"This Week",f:7},{l:"This Month",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(new Date().toISOString().slice(0, 10)) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
-                      </div>
-                    </div>
-                  </div>
-                )}
             })()}
 
           </div>) : null}
