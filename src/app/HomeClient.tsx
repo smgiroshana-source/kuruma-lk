@@ -171,8 +171,10 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
 
   // Track user searches in localStorage for personalized recommendations
   const [userSearchHistory, setUserSearchHistory] = useState<string[]>([])
+  const [hydrated, setHydrated] = useState(false)
   useEffect(() => {
     try { const h = localStorage.getItem('kuruma_search_history'); if (h) setUserSearchHistory(JSON.parse(h)) } catch {}
+    setHydrated(true)
   }, [])
 
   function trackUserSearch(query: string) {
@@ -193,8 +195,8 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
     const searchable = `${name} ${make} ${model}`
     let score = 0
 
-    // Returning user: boost products matching their search history (higher weight for recent searches)
-    if (userSearchHistory.length > 0) {
+    // Returning user: boost products matching their search history (only after hydration to avoid SSR/client mismatch)
+    if (hydrated && userSearchHistory.length > 0) {
       for (let i = 0; i < userSearchHistory.length; i++) {
         const term = userSearchHistory[i]
         if (searchable.includes(term) || term.split(/\s+/).every(w => searchable.includes(w))) {
@@ -369,7 +371,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
     const cache = new Map<string, number>()
     products.forEach(p => cache.set(p.id, getProductRelevanceScore(p)))
     return cache
-  }, [products, sortBy, userSearchHistory])
+  }, [products, sortBy, userSearchHistory, hydrated])
 
   const sortFn = useCallback((a: any, b: any) => {
     switch(sortBy) {
@@ -382,7 +384,10 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
         const scoreA = scoreCache.get(a.id) || 0
         const scoreB = scoreCache.get(b.id) || 0
         if (scoreA !== scoreB) return scoreB - scoreA
-        return new Date(b.created_at||0).getTime()-new Date(a.created_at||0).getTime()
+        const timeA = new Date(a.created_at||0).getTime()
+        const timeB = new Date(b.created_at||0).getTime()
+        if (timeA !== timeB) return timeB - timeA
+        return a.id.localeCompare(b.id) // Stable tie-breaker
       }
     }
   }, [sortBy, scoreCache])
