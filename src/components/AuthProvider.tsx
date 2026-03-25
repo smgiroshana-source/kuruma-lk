@@ -87,14 +87,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     detect()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => detect())
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        deleteCookie('kuruma_role')
+        setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
+        return
+      }
+      detect()
+    })
     return () => subscription.unsubscribe()
   }, [])
 
   async function signOut() {
-    await supabase.auth.signOut()
     deleteCookie('kuruma_role')
     setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
+    await supabase.auth.signOut()
+    // Force clear again in case onAuthStateChange re-triggers detect
+    deleteCookie('kuruma_role')
   }
 
   return (
