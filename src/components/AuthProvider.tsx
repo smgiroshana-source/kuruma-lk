@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { ADMIN_EMAILS } from '@/lib/constants'
 
@@ -33,36 +33,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading: true,
   })
   const supabase = createClient()
+  const signingOut = useRef(false)
 
   useEffect(() => {
     async function detect() {
-      const { data: { session } } = await supabase.auth.getSession()
-      const user = session?.user
+      // Don't re-detect if we're in the middle of signing out
+      if (signingOut.current) return
 
-      if (!user) {
-        setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
-        return
-      }
-
-      const email = user.email || ''
-
-      if (ADMIN_EMAILS.includes(email)) {
-        setState({ user, role: 'admin', vendor: null, isAdmin: true, loading: false })
-        return
-      }
-
-      // Check if vendor
-      const { data: vendor } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('user_id', user.id)
-        .single()
-
-      if (vendor && vendor.status === 'approved') {
-        setState({ user, role: 'vendor', vendor, isAdmin: false, loading: false })
-      } else {
-        setState({ user, role: 'customer', vendor, isAdmin: false, loading: false })
-      }
+      try {
+        // Use server API to check auth — it reads httpOnly cookies reliably
+        const res = await fetch('/api/auth/check-vendor')
+        if (res.ok) {
+          const json = await res.json()
+          if (json.user) {
+            const email = json.user.email || ''
+            if (ADMIN_EMAILS.includes(email)) {
+              setState({ user: json.user, role: 'admin', vendor: null, isAdmin: true, loading: false })
+              return
+            }
+            if (json.vendor && json.vendor.status === 'approved') {
+              setState({ user: json.user, role: 'vendor', vendor: json.vendor, isAdmin: false, loading: false })
+              return
+            }
+            setState({ user: json.user, role: 'customer', vendor: json.vendor, isAdmin: false, loading: false })
+            return
+          }
+        }
+      } catch {}
+      setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
     }
 
     detect()
@@ -78,8 +76,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   async function signOut() {
+    signingOut.current = true
     setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
+    // Clear server-side cookies via API
+    await fetch('/api/auth/logout', { method: 'POST' })
+    // Clear client-side session
     await supabase.auth.signOut()
+    signingOut.current = false
   }
 
   return (
