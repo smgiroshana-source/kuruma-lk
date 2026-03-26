@@ -66,7 +66,7 @@ export const metadata: Metadata = {
     canonical: SITE_URL,
   },
   icons: {
-    icon: '/favicon.ico',
+    icon: '/favicon.svg',
     apple: '/apple-touch-icon.png',
   },
   manifest: '/manifest.json',
