@@ -164,15 +164,20 @@ export async function GET(req: NextRequest) {
   const periodStart = fromDate ? new Date(fromDate).toISOString() : dateFilter
   const periodEnd = toDate ? (() => { const e = new Date(toDate); e.setDate(e.getDate() + 1); return e.toISOString() })() : null
   if (periodStart) {
+    // Get ALL payments made in this period (on any invoice, including older ones)
     let pQuery = admin
       .from('payments')
       .select('id, amount, payment_method, cheque_number, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, customer:customers(name, phone))')
       .eq('sales.vendor_id', vendor.id)
-      .eq('payment_method', 'settlement')
       .gte('created_at', periodStart)
     if (periodEnd) pQuery = pQuery.lt('created_at', periodEnd)
-    const { data: periodPayments } = await pQuery.limit(200)
-    collectionsToday = (periodPayments || []).map((p: any) => ({
+    const { data: periodPayments } = await pQuery.limit(500)
+    // Filter to only payments on invoices created BEFORE this period (credit collections)
+    collectionsToday = (periodPayments || []).filter((p: any) => {
+      const saleDate = p.sales?.created_at
+      if (!saleDate) return false
+      return saleDate < periodStart // Payment is on an older sale
+    }).map((p: any) => ({
       id: p.id,
       amount: parseFloat(p.amount || 0),
       payment_method: p.payment_method,
