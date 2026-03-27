@@ -978,7 +978,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[]) {
     // 7:30 PM cutoff: sales after 19:30 go to next day
     const cutoffHour = 19, cutoffMin = 30
     const filtered = salesList.filter((s: any) => {
@@ -991,6 +991,8 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
         : d.toISOString().slice(0, 10)
       return saleDate === reportDate
     })
+    const dayCollections = collections || []
+    const totalCollections = dayCollections.reduce((s: number, c: any) => s + c.amount, 0)
 
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
@@ -1045,6 +1047,8 @@ ${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="co
 <table><thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr></thead><tbody>
 ${filtered.map((s: any) => '<tr><td><strong>' + s.invoice_no + '</strong></td><td>' + (s.customer_name || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + (s.items || []).map((i: any) => i.product_name).join(', ') + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>').join('')}
 </tbody></table>
+
+${dayCollections.length > 0 ? '<h3 style="font-size:13px;font-weight:800;color:#059669;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Credit Collections (' + dayCollections.length + ') — Rs.' + totalCollections.toLocaleString() + '</h3><table><thead><tr><th>Invoice</th><th>Customer</th><th class="text-right">Amount Received</th></tr></thead><tbody>' + dayCollections.map((c: any) => '<tr><td><strong>' + (c.invoice_no || '-') + '</strong></td><td>' + c.customer_name + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') + '</tbody></table>' : ''}
 
 <div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
 
@@ -1957,6 +1961,12 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       <p className="text-lg sm:text-xl font-black text-orange-600">Rs.{Math.round(salesData.stats.avgSale).toLocaleString()}</p>
                       <p className="text-[11px] text-slate-400 font-semibold">Avg Invoice</p>
                     </div>
+                    {salesData.stats.totalCollections > 0 && (
+                    <div className="bg-white rounded-xl border border-emerald-200 p-3.5 sm:p-4">
+                      <p className="text-lg sm:text-xl font-black text-teal-600">Rs.{salesData.stats.totalCollections.toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Credit Collections</p>
+                    </div>
+                    )}
                   </div>
 
                   {/* Revenue chart — simple bar chart with CSS */}
@@ -2213,7 +2223,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                         <button onClick={async () => {
                           showToast('Fetching sales...')
-                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings) } catch { showToast('Failed') }
+                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || []) } catch { showToast('Failed') }
                         }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
                         <button onClick={async () => {
                           showToast('Fetching sales...')
