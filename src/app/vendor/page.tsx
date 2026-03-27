@@ -1048,7 +1048,17 @@ ${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="co
 ${filtered.map((s: any) => '<tr><td><strong>' + s.invoice_no + '</strong></td><td>' + (s.customer_name || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + (s.items || []).map((i: any) => i.product_name).join(', ') + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>').join('')}
 </tbody></table>
 
-${dayCollections.length > 0 ? '<h3 style="font-size:13px;font-weight:800;color:#059669;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Credit Collections (' + dayCollections.length + ') — Rs.' + totalCollections.toLocaleString() + '</h3><table><thead><tr><th>Invoice</th><th>Customer</th><th class="text-right">Amount Received</th></tr></thead><tbody>' + dayCollections.map((c: any) => '<tr><td><strong>' + (c.invoice_no || '-') + '</strong></td><td>' + c.customer_name + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') + '</tbody></table>' : ''}
+${dayCollections.length > 0 ? (() => {
+      const colMethodMap: Record<string, number> = {}
+      dayCollections.forEach((c: any) => { const m = (c.payment_method || 'cash').toUpperCase(); colMethodMap[m] = (colMethodMap[m] || 0) + c.amount })
+      const methodIcons: Record<string, string> = { CASH: '💵', CHEQUE: '📝', BANK: '🏦', CARD: '💳', SETTLEMENT: '🔄' }
+      const methodSummary = Object.entries(colMethodMap).map(([m, a]) => '<span style="margin-right:15px">' + (methodIcons[m] || '') + ' ' + m + ': <strong>Rs.' + a.toLocaleString() + '</strong></span>').join('')
+      return '<h3 style="font-size:13px;font-weight:800;color:#059669;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Credit Collections (' + dayCollections.length + ') — Rs.' + totalCollections.toLocaleString() + '</h3>' +
+        '<div style="margin-bottom:10px;font-size:12px;color:#333">' + methodSummary + '</div>' +
+        '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Method</th><th class="text-right">Amount</th></tr></thead><tbody>' +
+        dayCollections.map((c: any) => '<tr><td><strong>' + (c.invoice_no || '-') + '</strong></td><td>' + c.customer_name + '</td><td>' + (c.payment_method || 'cash').toUpperCase() + (c.cheque_number ? ' #' + c.cheque_number : '') + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') +
+        '</tbody></table>'
+    })() : ''}
 
 <div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
 
@@ -1965,6 +1975,11 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                     <div className="bg-white rounded-xl border border-emerald-200 p-3.5 sm:p-4">
                       <p className="text-lg sm:text-xl font-black text-teal-600">Rs.{salesData.stats.totalCollections.toLocaleString()}</p>
                       <p className="text-[11px] text-slate-400 font-semibold">Credit Collections</p>
+                      {salesData.collectionsToday && (() => {
+                        const methods: Record<string, number> = {}
+                        salesData.collectionsToday.forEach((c: any) => { const m = (c.payment_method || 'cash'); methods[m] = (methods[m] || 0) + c.amount })
+                        return <div className="mt-1.5 space-y-0.5">{Object.entries(methods).map(([m, a]) => <p key={m} className="text-[10px] text-teal-700 font-semibold">{m.toUpperCase()}: Rs.{(a as number).toLocaleString()}</p>)}</div>
+                      })()}
                     </div>
                     )}
                   </div>
