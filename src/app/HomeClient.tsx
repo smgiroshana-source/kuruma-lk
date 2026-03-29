@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import type { Product, Vendor } from '@/types'
-import { thumbnail, thumb64 } from '@/lib/image'
+import { thumbnail, thumb64, imgFallback } from '@/lib/image'
 import { useAuth } from '@/components/AuthProvider'
 
 // Isolated search input — typing here does NOT re-render the parent (5500 products)
@@ -663,7 +663,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
                 <button onClick={e=>{e.preventDefault();e.stopPropagation();toggleWishlist(product.id)}} className={`absolute top-2.5 right-2.5 z-10 w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm transition-all duration-200 ${isWished?'bg-red-500 shadow-[0_2px_12px_rgba(239,68,68,0.4)] scale-105':'bg-white/95 backdrop-blur-sm border-[1.5px] border-black/10 shadow-[0_1px_4px_rgba(0,0,0,0.08)]'}`}>{isWished?'❤️':'🤍'}</button>
                 <a href={`/product/${product.id}`} className="block">
                   <div className="aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
-                    {imageUrl?<img src={thumbnail(imageUrl)} alt={product.name} loading={idx<6?'eager':'lazy'} fetchPriority={idx<6?'high':undefined} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
+                    {imageUrl?<img src={thumbnail(imageUrl)} alt={product.name} loading={idx<6?'eager':'lazy'} fetchPriority={idx<6?'high':undefined} onError={imgFallback} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
                     {imageCount>1&&<span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-md">📷 {imageCount}</span>}
                   </div>
                   <div className="p-3">
@@ -758,7 +758,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
                   <a href={`https://wa.me/${(group.vendor.whatsapp||'').replace(/[^0-9]/g,'')}?text=${encodeURIComponent(`Hi ${group.vendor.name},\n\nI'm interested in these parts:\n${group.items.map(p=>`- ${p.sku} - ${p.name}`).join('\n')}\n\nPlease let me know availability and pricing.`)}`} target="_blank" className="flex items-center gap-1.5 bg-[#25d366] active:bg-[#1fb855] text-white text-[11px] font-bold px-3.5 py-2 rounded-lg shadow-[0_2px_8px_rgba(37,211,102,0.25)] flex-shrink-0">💬 WhatsApp All</a>
                 </div>
                 <div className="space-y-2">{group.items.map(product=>{const img=getProductImage(product);return(<div key={product.id} className="bg-white rounded-xl border border-[#eee] overflow-hidden flex">
-                  <a href={`/product/${product.id}`} onClick={()=>setWishlistOpen(false)} className="w-[90px] flex-shrink-0 bg-[#fafafa]">{img?<img src={thumb64(img)} alt={product.name} className="w-full h-full object-cover" style={{minHeight:90}}/>:<div className="w-full flex items-center justify-center" style={{minHeight:90}}><span className="text-2xl opacity-10">🔧</span></div>}</a>
+                  <a href={`/product/${product.id}`} onClick={()=>setWishlistOpen(false)} className="w-[90px] flex-shrink-0 bg-[#fafafa]">{img?<img src={thumb64(img)} alt={product.name} onError={imgFallback} className="w-full h-full object-cover" style={{minHeight:90}}/>:<div className="w-full flex items-center justify-center" style={{minHeight:90}}><span className="text-2xl opacity-10">🔧</span></div>}</a>
                   <div className="flex-1 p-2.5 min-w-0 flex flex-col justify-between">
                     <div>
                       <span className={`text-[9px] font-bold px-1.5 py-[2px] rounded ${product.condition==='Excellent'?'bg-[#ecfdf5] text-[#059669]':product.condition==='Good'?'bg-[#eff6ff] text-[#2563eb]':product.condition==='Fair'?'bg-[#fffbeb] text-[#d97706]':'bg-[#fef2f2] text-[#dc2626]'}`}>{product.condition}</span>
