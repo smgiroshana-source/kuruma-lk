@@ -1,7 +1,7 @@
 /**
  * Supabase Image Transformation helpers.
  * Converts public storage URLs to render URLs with resize/quality params.
- * Requires Supabase Pro plan.
+ * Requires Supabase Pro plan with Image Transformations enabled.
  *
  * /storage/v1/object/public/...  →  /storage/v1/render/image/public/...?width=W&quality=Q
  */
@@ -27,4 +27,13 @@ export function medium(url: string): string {
 /** 128px wide, quality 60 — for small thumbnail strips */
 export function thumb64(url: string): string {
   return transform(url, 128, 60)
+}
+
+/** onError handler: falls back to original URL if transform fails */
+export function imgFallback(e: React.SyntheticEvent<HTMLImageElement>) {
+  const img = e.currentTarget
+  const src = img.src
+  if (src.includes('/render/image/')) {
+    img.src = src.replace('/storage/v1/render/image/public/', '/storage/v1/object/public/').split('?')[0]
+  }
 }
