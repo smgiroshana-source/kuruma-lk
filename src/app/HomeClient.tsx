@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import type { Product, Vendor } from '@/types'
+import { thumbnail, thumb64 } from '@/lib/image'
 import { useAuth } from '@/components/AuthProvider'
 
 // Isolated search input — typing here does NOT re-render the parent (5500 products)
@@ -656,13 +657,13 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
           {loading ?(<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">{[...Array(8)].map((_,i)=>(<div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]"><div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse"/><div className="p-3 space-y-2.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse"/><div className="h-4 bg-[#f0f0f0] rounded animate-pulse"/><div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3"/></div></div>))}</div>
           ) : filteredProducts.length===0 ? (<div className="text-center py-20"><div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🔍</div><p className="font-bold text-[17px] text-[#333]">No parts found</p><p className="text-sm text-[#aaa] mt-1.5">Try adjusting your search or filters</p>{(search||selectedCategory!=='All'||activeFilterCount>0)&&<button onClick={clearAllFilters} className="mt-5 text-sm font-bold px-6 py-2.5 rounded-xl text-white shadow-[0_4px_12px_rgba(255,107,53,0.25)]" style={{background:'linear-gradient(135deg,#ff6b35,#ff8f65)'}}>Clear all filters</button>}{isVendorView&&<button onClick={clearVendor} className="mt-3 block mx-auto text-sm font-bold text-[#ff6b35] underline">Browse all shops</button>}</div>
           ) : (<div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-3">
-            {filteredProducts.map(product => {
+            {filteredProducts.map((product, idx) => {
               const imageUrl = getProductImage(product); const imageCount = product.images?.length||0; const isWished = wishlist.has(product.id)
               return (<div key={product.id} className="bg-white rounded-2xl overflow-hidden relative group transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_12px_40px_rgba(0,0,0,0.1)] border border-[#eee]">
                 <button onClick={e=>{e.preventDefault();e.stopPropagation();toggleWishlist(product.id)}} className={`absolute top-2.5 right-2.5 z-10 w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm transition-all duration-200 ${isWished?'bg-red-500 shadow-[0_2px_12px_rgba(239,68,68,0.4)] scale-105':'bg-white/95 backdrop-blur-sm border-[1.5px] border-black/10 shadow-[0_1px_4px_rgba(0,0,0,0.08)]'}`}>{isWished?'❤️':'🤍'}</button>
                 <a href={`/product/${product.id}`} className="block">
                   <div className="aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
-                    {imageUrl?<img src={imageUrl} alt={product.name} loading="lazy" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
+                    {imageUrl?<img src={thumbnail(imageUrl)} alt={product.name} loading={idx<6?'eager':'lazy'} fetchPriority={idx<6?'high':undefined} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
                     {imageCount>1&&<span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-md">📷 {imageCount}</span>}
                   </div>
                   <div className="p-3">
@@ -757,7 +758,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
                   <a href={`https://wa.me/${(group.vendor.whatsapp||'').replace(/[^0-9]/g,'')}?text=${encodeURIComponent(`Hi ${group.vendor.name},\n\nI'm interested in these parts:\n${group.items.map(p=>`- ${p.sku} - ${p.name}`).join('\n')}\n\nPlease let me know availability and pricing.`)}`} target="_blank" className="flex items-center gap-1.5 bg-[#25d366] active:bg-[#1fb855] text-white text-[11px] font-bold px-3.5 py-2 rounded-lg shadow-[0_2px_8px_rgba(37,211,102,0.25)] flex-shrink-0">💬 WhatsApp All</a>
                 </div>
                 <div className="space-y-2">{group.items.map(product=>{const img=getProductImage(product);return(<div key={product.id} className="bg-white rounded-xl border border-[#eee] overflow-hidden flex">
-                  <a href={`/product/${product.id}`} onClick={()=>setWishlistOpen(false)} className="w-[90px] flex-shrink-0 bg-[#fafafa]">{img?<img src={img} alt={product.name} className="w-full h-full object-cover" style={{minHeight:90}}/>:<div className="w-full flex items-center justify-center" style={{minHeight:90}}><span className="text-2xl opacity-10">🔧</span></div>}</a>
+                  <a href={`/product/${product.id}`} onClick={()=>setWishlistOpen(false)} className="w-[90px] flex-shrink-0 bg-[#fafafa]">{img?<img src={thumb64(img)} alt={product.name} className="w-full h-full object-cover" style={{minHeight:90}}/>:<div className="w-full flex items-center justify-center" style={{minHeight:90}}><span className="text-2xl opacity-10">🔧</span></div>}</a>
                   <div className="flex-1 p-2.5 min-w-0 flex flex-col justify-between">
                     <div>
                       <span className={`text-[9px] font-bold px-1.5 py-[2px] rounded ${product.condition==='Excellent'?'bg-[#ecfdf5] text-[#059669]':product.condition==='Good'?'bg-[#eff6ff] text-[#2563eb]':product.condition==='Fair'?'bg-[#fffbeb] text-[#d97706]':'bg-[#fef2f2] text-[#dc2626]'}`}>{product.condition}</span>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { thumbnail, medium, thumb64 } from '@/lib/image'
 
 const CONDITION_COLORS: Record<string, string> = {
   'Excellent': 'bg-emerald-100 text-emerald-700',
@@ -175,7 +176,7 @@ export default function ProductDetailPage() {
                     className="flex overflow-x-auto snap-x snap-mandatory" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
                     {images.map((img: any, i: number) => (
                       <div key={img.id} className="w-full flex-shrink-0 snap-center aspect-square bg-white" onClick={() => setLightbox(true)}>
-                        <img src={img.url} alt={product.name} loading={i === 0 ? 'eager' : 'lazy'} className="w-full h-full object-contain" />
+                        <img src={medium(img.url)} alt={product.name} loading={i === 0 ? 'eager' : 'lazy'} className="w-full h-full object-contain" />
                       </div>
                     ))}
                   </div>
@@ -192,7 +193,7 @@ export default function ProductDetailPage() {
                 {/* Desktop: main image + thumbnails */}
                 <div className="hidden md:block">
                   <div className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden cursor-zoom-in aspect-square" onClick={() => setLightbox(true)}>
-                    <img src={images[activeImage]?.url} alt={product.name} className="w-full h-full object-contain" />
+                    <img src={medium(images[activeImage]?.url)} alt={product.name} className="w-full h-full object-contain" />
                     {images.length > 1 && (<>
                       <button onClick={(e) => { e.stopPropagation(); navigateImage(-1) }} className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:bg-white text-lg font-bold">‹</button>
                       <button onClick={(e) => { e.stopPropagation(); navigateImage(1) }} className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:bg-white text-lg font-bold">›</button>
@@ -204,7 +205,7 @@ export default function ProductDetailPage() {
                       {images.map((img: any, i: number) => (
                         <button key={img.id} onClick={() => setActiveImage(i)}
                           className={`w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition ${i === activeImage ? 'border-orange-500 shadow-md' : 'border-slate-200 hover:border-slate-400'}`}>
-                          <img src={img.url} alt="" className="w-full h-full object-cover" />
+                          <img src={thumb64(img.url)} alt="" className="w-full h-full object-cover" />
                         </button>
                       ))}
                     </div>
@@ -320,7 +321,7 @@ export default function ProductDetailPage() {
                 return (
                   <a key={item.id} href={`/product/${item.id}`} className="flex-shrink-0 w-36 sm:w-44 bg-white rounded-xl border border-slate-200 overflow-hidden active:shadow-md transition">
                     <div className="aspect-square bg-slate-50 overflow-hidden">
-                      {imgUrl ? <img src={imgUrl} alt={item.name} loading="lazy" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><span className="text-2xl opacity-20">🔧</span></div>}
+                      {imgUrl ? <img src={thumbnail(imgUrl)} alt={item.name} loading="lazy" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center"><span className="text-2xl opacity-20">🔧</span></div>}
                     </div>
                     <div className="p-2">
                       <h3 className="font-bold text-[11px] text-slate-900 line-clamp-2 leading-tight">{item.name}</h3>
