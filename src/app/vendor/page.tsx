@@ -83,6 +83,7 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
 <table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? i.product_sku + ' - ' : ''}${i.product_name}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? `<div style="margin-top:6px"><div style="font-size:${isThermal ? '10px' : '11px'};font-weight:900;margin-bottom:3px">PAYMENTS</div>${paymentLines}</div>` : ''}
+${sale.notes ? `<div style="margin-top:${isThermal ? '5px' : '10px'};padding:${isThermal ? '4px' : '8px 12px'};font-size:${isThermal ? '10px' : '13px'};font-weight:600;font-style:italic;color:#000">Note: ${sale.notes}</div>` : ''}
 ${parseFloat(sale.balance_due) > 0 ? (isThermal ? `<div style="text-align:center;font-weight:900;font-size:14px;margin-top:8px;padding:5px;border-top:1px dashed #000;border-bottom:1px dashed #000">BALANCE DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}</div>` : `<div class="balance-due">BALANCE DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}</div>`) : ''}
 ${termsHtml}
 <div class="footer"><p>${footerText}</p><p style="margin-top:3px;font-size:${isThermal ? '8px' : '10px'}">Powered by kuruma.lk</p></div></body></html>`
@@ -1818,6 +1819,10 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       {posCart.map((item, i) => (<tr key={i} className="border-t border-slate-100"><td className="px-4 py-2"><span className="font-mono text-xs text-slate-400 mr-1">{item.productSku}</span><span className="font-semibold">{item.productName}</span></td><td className="px-4 py-2"><input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-16 px-2 py-1 border border-slate-200 rounded text-center text-sm" /></td><td className="px-4 py-2"><input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className="w-24 px-2 py-1 border border-slate-200 rounded text-sm" /></td><td className="px-4 py-2 text-right font-bold">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td><td className="px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td></tr>))}
                     </tbody></table></div>
                   )}
+                  {/* Notes */}
+                  <div className="bg-white rounded-xl border border-red-200 mt-3">
+                    <textarea value={posNotes} onChange={e => setPosNotes(e.target.value)} placeholder="Notes (printed on invoice)..." rows={2} className="w-full px-4 py-3 text-sm outline-none resize-none rounded-xl" />
+                  </div>
                 </div>
 
                 {/* Right sidebar */}
