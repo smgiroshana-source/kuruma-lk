@@ -84,7 +84,7 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? `<div style="margin-top:6px"><div style="font-size:${isThermal ? '10px' : '11px'};font-weight:900;margin-bottom:3px">PAYMENTS</div>${paymentLines}</div>` : ''}
 ${sale.notes ? `<div style="margin-top:${isThermal ? '5px' : '10px'};padding:${isThermal ? '4px' : '8px 12px'};font-size:${isThermal ? '10px' : '13px'};font-weight:600;font-style:italic;color:#000">Note: ${sale.notes}</div>` : ''}
-${parseFloat(sale.balance_due) > 0 ? (isThermal ? `<div style="text-align:center;font-weight:900;font-size:14px;margin-top:8px;padding:5px;border-top:1px dashed #000;border-bottom:1px dashed #000">BALANCE DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}</div>` : `<div class="balance-due">BALANCE DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}</div>`) : ''}
+${parseFloat(sale.balance_due) > 0 ? (isThermal ? `<div style="text-align:center;font-weight:900;font-size:14px;margin-top:8px;padding:5px;border-top:1px dashed #000;border-bottom:1px dashed #000">TOTAL AMOUNT DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}</div>` : `<div class="balance-due">TOTAL AMOUNT DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}</div>`) : ''}
 ${termsHtml}
 <div class="footer"><p>${footerText}</p><p style="margin-top:3px;font-size:${isThermal ? '8px' : '10px'}">Powered by kuruma.lk</p></div></body></html>`
   const win = window.open('', '_blank', `width=${isThermal ? 350 : 900},height=700`); if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
@@ -98,7 +98,7 @@ function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
   if (parseFloat(sale.discount) > 0) msg += `%0ADiscount: -Rs.${parseFloat(sale.discount).toLocaleString()}`
   msg += `%0A*TOTAL: Rs.${parseFloat(sale.total).toLocaleString()}*`
   if (payments) msg += `%0A%0APayments:%0A${payments}`
-  if (parseFloat(sale.balance_due) > 0) msg += `%0A%0A⚠️ *BALANCE DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}*`
+  if (parseFloat(sale.balance_due) > 0) msg += `%0A%0A⚠️ *TOTAL AMOUNT DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}*`
   msg += `%0A%0AThank you! - ${vendor?.name || 'kuruma.lk'}`
   window.open(`https://wa.me/${waPhone}?text=${msg}`, '_blank')
 }
