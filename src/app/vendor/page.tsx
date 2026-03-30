@@ -361,7 +361,20 @@ export default function VendorDashboard() {
     } catch {}
   }
 
-  async function fetchData() { setLoading(true); try { const r = await fetch('/api/vendor/data'); if (r.status === 401 || r.status === 403) { window.location.href = '/login'; return }; if (r.ok) setData(await r.json()) } catch {} setLoading(false) }
+  async function fetchData(full?: boolean) {
+    setLoading(true)
+    try {
+      // Phase 1: Quick load — vendor info + stats only (fast)
+      const quickR = await fetch('/api/vendor/data?quick=1')
+      if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
+      if (quickR.ok) { const quickData = await quickR.json(); setData(quickData); setLoading(false) }
+
+      // Phase 2: Full load — all products with images (background)
+      const fullR = await fetch('/api/vendor/data')
+      if (fullR.ok) { const fullData = await fullR.json(); setData(fullData) }
+    } catch {}
+    setLoading(false)
+  }
   async function fetchSales() { setSalesLoading(true); try { const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`); if (r.ok) setSalesData(await r.json()) } catch {} setSalesLoading(false) }
   async function fetchCreditCustomers() {
     setCreditLoading(true)
