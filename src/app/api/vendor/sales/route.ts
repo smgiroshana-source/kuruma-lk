@@ -395,12 +395,26 @@ export async function POST(req: NextRequest) {
     const finalAdvance = excessPayment > excessAppliedToOutstanding ? excessPayment - excessAppliedToOutstanding : 0
     if (finalAdvance > 0) msg += ` | Rs.${finalAdvance.toLocaleString()} to advance`
 
+    // Calculate total amount due across ALL invoices for this customer
+    let totalAmountDue = 0
+    if (customerId) {
+      const { data: allCustomerSales } = await admin
+        .from('sales')
+        .select('balance_due')
+        .eq('vendor_id', vendor.id)
+        .eq('customer_id', customerId)
+        .neq('payment_status', 'voided')
+        .gt('balance_due', 0)
+      totalAmountDue = (allCustomerSales || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
+    }
+
     return NextResponse.json({
       success: true, sale: completeSale,
       advanceUsed: advanceUsedForBill,
       appliedToOutstanding: excessAppliedToOutstanding,
       settledInvoices,
       newAdvance: finalAdvance,
+      totalAmountDue,
       message: msg,
     })
   }
