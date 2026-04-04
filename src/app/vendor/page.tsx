@@ -84,20 +84,26 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? `<div style="margin-top:6px"><div style="font-size:${isThermal ? '10px' : '11px'};font-weight:900;margin-bottom:3px">PAYMENTS</div>${paymentLines}</div>` : ''}
 ${sale.notes ? `<div style="margin-top:${isThermal ? '5px' : '10px'};padding:${isThermal ? '4px' : '8px 12px'};font-size:${isThermal ? '10px' : '13px'};font-weight:600;font-style:italic;color:#000">Note: ${sale.notes}</div>` : ''}
-${parseFloat(sale.balance_due) > 0 ? (() => {
-  const hasTotalDue = parseFloat(sale.total_amount_due || sale.totalAmountDue || 0) > 0
-  const currentInvoiceDue = parseFloat(sale.balance_due)
-  if (hasTotalDue) {
-    const amountDue = parseFloat(sale.total_amount_due || sale.totalAmountDue)
-    const showBreakdown = amountDue > currentInvoiceDue
+${(() => {
+  const totalDue = parseFloat(sale.total_amount_due || sale.totalAmountDue || 0)
+  const currentInvoiceDue = parseFloat(sale.balance_due || 0)
+  // Case 1: Has total_amount_due saved (new invoices) — show even if this invoice is fully paid
+  if (totalDue > 0) {
+    const showBreakdown = currentInvoiceDue > 0 && totalDue > currentInvoiceDue
+    const paidNote = currentInvoiceDue === 0 ? '<div style="font-size:13px;font-weight:700;color:#059669;margin-bottom:4px">This Invoice: PAID</div>' : ''
     return isThermal
-      ? `<div style="text-align:center;font-weight:900;font-size:14px;margin-top:8px;padding:5px;border-top:1px dashed #000;border-bottom:1px dashed #000">${showBreakdown ? `This Invoice Due: Rs.${currentInvoiceDue.toLocaleString()}<br/>` : ''}TOTAL AMOUNT DUE: Rs.${amountDue.toLocaleString()}</div>`
-      : `<div class="balance-due">${showBreakdown ? `<div style="font-size:14px;font-weight:700;margin-bottom:4px">This Invoice Due: Rs.${currentInvoiceDue.toLocaleString()}</div>` : ''}TOTAL AMOUNT DUE: Rs.${amountDue.toLocaleString()}</div>`
+      ? `<div style="text-align:center;font-weight:900;font-size:14px;margin-top:8px;padding:5px;border-top:1px dashed #000;border-bottom:1px dashed #000">${showBreakdown ? `This Invoice Due: Rs.${currentInvoiceDue.toLocaleString()}<br/>` : ''}${currentInvoiceDue === 0 ? 'This Invoice: PAID<br/>' : ''}TOTAL AMOUNT DUE: Rs.${totalDue.toLocaleString()}</div>`
+      : `<div class="balance-due">${paidNote}${showBreakdown ? `<div style="font-size:14px;font-weight:700;margin-bottom:4px">This Invoice Due: Rs.${currentInvoiceDue.toLocaleString()}</div>` : ''}TOTAL AMOUNT DUE: Rs.${totalDue.toLocaleString()}</div>`
   }
-  return isThermal
-    ? `<div style="text-align:center;font-weight:900;font-size:14px;margin-top:8px;padding:5px;border-top:1px dashed #000;border-bottom:1px dashed #000">BALANCE DUE: Rs.${currentInvoiceDue.toLocaleString()}</div>`
-    : `<div class="balance-due">BALANCE DUE: Rs.${currentInvoiceDue.toLocaleString()}</div>`
-})() : ''}
+  // Case 2: Old invoice with balance — show simple BALANCE DUE
+  if (currentInvoiceDue > 0) {
+    return isThermal
+      ? `<div style="text-align:center;font-weight:900;font-size:14px;margin-top:8px;padding:5px;border-top:1px dashed #000;border-bottom:1px dashed #000">BALANCE DUE: Rs.${currentInvoiceDue.toLocaleString()}</div>`
+      : `<div class="balance-due">BALANCE DUE: Rs.${currentInvoiceDue.toLocaleString()}</div>`
+  }
+  // Case 3: Fully paid, no outstanding — show nothing
+  return ''
+})()}
 ${termsHtml}
 <div class="footer"><p>${footerText}</p><p style="margin-top:3px;font-size:${isThermal ? '8px' : '10px'}">Powered by kuruma.lk</p></div></body></html>`
   const win = window.open('', '_blank', `width=${isThermal ? 350 : 900},height=700`); if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
