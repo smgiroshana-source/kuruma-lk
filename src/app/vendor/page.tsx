@@ -1589,23 +1589,25 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
             {editProductImages.length > 0 && (
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-2">Current Images ({editProductImages.length})</label>
-                <div className="flex gap-2 overflow-x-auto pb-2" style={{WebkitOverflowScrolling:'touch'}}>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                   {editProductImages.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)).map((img: any, idx: number) => (
-                    <div key={img.id} className="relative group shrink-0">
-                      <img src={img.url} alt={`Image ${idx + 1}`} className={'w-24 h-24 sm:w-20 sm:h-20 rounded-lg object-cover ' + (idx === 0 ? 'ring-2 ring-orange-500' : 'border border-slate-200')} />
-                      <div className="absolute top-0 right-0 flex gap-0.5 p-0.5">
+                    <div key={img.id} className="relative">
+                      <img src={img.url} alt={`Image ${idx + 1}`} className={'w-full aspect-square rounded-lg object-cover ' + (idx === 0 ? 'ring-2 ring-orange-500' : 'border border-slate-200')} />
+                      {idx === 0 && <span className="absolute top-1 left-1 bg-orange-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">PRIMARY</span>}
+                      <div className="flex gap-1 mt-1">
                         {idx !== 0 && <button onClick={async () => {
                           const sorted = editProductImages.slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
                           const newOrder = [img.id, ...sorted.filter((x: any) => x.id !== img.id).map((x: any) => x.id)]
                           try { const r = await fetch('/api/vendor/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reorder', imageOrder: newOrder }) }); const j = await r.json(); if (j.success) { showToast('Primary updated'); await fetchData(); setEditProductImages(prev => { const updated = prev.map((x: any) => ({ ...x, sort_order: newOrder.indexOf(x.id) })); return updated.sort((a: any, b: any) => a.sort_order - b.sort_order) }) } } catch {}
-                        }} className="bg-orange-500 text-white text-[8px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-lg active:scale-90">★</button>}
-                        <button onClick={() => deleteProductImage(img.id)} disabled={deletingImageId === img.id} className="bg-red-500 text-white text-[8px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-lg active:scale-90">✕</button>
+                        }} className="flex-1 bg-orange-50 text-orange-600 text-[10px] font-bold py-1.5 rounded active:bg-orange-100">Set Primary</button>}
+                        <button onClick={() => deleteProductImage(img.id)} disabled={deletingImageId === img.id} className={(idx === 0 ? 'flex-1' : '') + ' bg-red-50 text-red-500 text-[10px] font-bold py-1.5 px-2 rounded active:bg-red-100'}>
+                          {deletingImageId === img.id ? '...' : 'Delete'}
+                        </button>
                       </div>
-                      {idx === 0 && <span className="absolute bottom-0.5 left-0.5 bg-orange-500 text-white text-[7px] font-bold px-1 py-0.5 rounded">PRIMARY</span>}
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1">Swipe to see all · Tap ★ to set primary · Tap ✕ to delete</p>
+                <p className="text-[10px] text-slate-400 mt-1">Tap "Set Primary" to change cover image</p>
               </div>
             )}
             <div>
