@@ -1589,21 +1589,23 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
             {editProductImages.length > 0 && (
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-2">Current Images ({editProductImages.length})</label>
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex gap-2 overflow-x-auto pb-2" style={{WebkitOverflowScrolling:'touch'}}>
                   {editProductImages.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)).map((img: any, idx: number) => (
-                    <div key={img.id} className="relative group w-24 h-24 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-slate-200">
-                      <img src={img.url} alt={`Image ${idx + 1}`} className="w-full h-full object-cover" />
-                      <button onClick={() => deleteProductImage(img.id)} disabled={deletingImageId === img.id}
-                        className="absolute inset-0 bg-black/0 group-hover:bg-black/40 group-active:bg-black/40 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 group-active:opacity-100">
-                        {deletingImageId === img.id
-                          ? <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          : <span className="bg-red-500 text-white text-xs font-bold w-7 h-7 rounded-full flex items-center justify-center shadow-lg">✕</span>}
-                      </button>
-                      {idx === 0 && <span className="absolute bottom-0.5 left-0.5 bg-orange-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">PRIMARY</span>}
+                    <div key={img.id} className="relative group shrink-0">
+                      <img src={img.url} alt={`Image ${idx + 1}`} className={'w-24 h-24 sm:w-20 sm:h-20 rounded-lg object-cover ' + (idx === 0 ? 'ring-2 ring-orange-500' : 'border border-slate-200')} />
+                      <div className="absolute top-0 right-0 flex gap-0.5 p-0.5">
+                        {idx !== 0 && <button onClick={async () => {
+                          const sorted = editProductImages.slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+                          const newOrder = [img.id, ...sorted.filter((x: any) => x.id !== img.id).map((x: any) => x.id)]
+                          try { const r = await fetch('/api/vendor/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reorder', imageOrder: newOrder }) }); const j = await r.json(); if (j.success) { showToast('Primary updated'); await fetchData(); setEditProductImages(prev => { const updated = prev.map((x: any) => ({ ...x, sort_order: newOrder.indexOf(x.id) })); return updated.sort((a: any, b: any) => a.sort_order - b.sort_order) }) } } catch {}
+                        }} className="bg-orange-500 text-white text-[8px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-lg active:scale-90">★</button>}
+                        <button onClick={() => deleteProductImage(img.id)} disabled={deletingImageId === img.id} className="bg-red-500 text-white text-[8px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow-lg active:scale-90">✕</button>
+                      </div>
+                      {idx === 0 && <span className="absolute bottom-0.5 left-0.5 bg-orange-500 text-white text-[7px] font-bold px-1 py-0.5 rounded">PRIMARY</span>}
                     </div>
                   ))}
                 </div>
-                <p className="text-[10px] text-slate-400 mt-1">Hover and click ✕ to delete</p>
+                <p className="text-[10px] text-slate-400 mt-1">Swipe to see all · Tap ★ to set primary · Tap ✕ to delete</p>
               </div>
             )}
             <div>
@@ -1618,11 +1620,28 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
               }} className="w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100" />
             </div>
           </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, description: editingProduct.description, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, year: editingProduct.year, model_code: editingProduct.model_code, condition: editingProduct.condition, side: editingProduct.side, color: editingProduct.color, oem_code: editingProduct.oem_code, cost: editingProduct.cost, category: editingProduct.category, show_price: editingProduct.show_price })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
-          {products.length === 0 ? (productsLoading ? <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><div className="w-8 h-8 border-3 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div><p className="text-slate-400 font-semibold">Loading products...</p></div> : <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><p className="text-4xl mb-3">📦</p><p className="text-slate-500 font-semibold">No products</p></div>) : (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
+          {products.length === 0 ? (productsLoading ? <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><div className="w-8 h-8 border-3 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div><p className="text-slate-400 font-semibold">Loading products...</p></div> : <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><p className="text-4xl mb-3">📦</p><p className="text-slate-500 font-semibold">No products</p></div>) : (<>
+            {/* Mobile: Grid of image cards */}
+            <div className="sm:hidden grid grid-cols-2 gap-2">
+              {filteredProducts.map((p: any) => { const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]; return (
+                <div key={p.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden" onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }}>
+                  <div className="aspect-square bg-slate-100">{img ? <img src={img.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl opacity-20">🔧</div>}</div>
+                  <div className="p-2">
+                    <p className="text-[11px] font-bold text-slate-800 leading-tight line-clamp-2">{p.name}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{[p.make, p.model].filter(Boolean).join(' ')}</p>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-xs font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</span>
+                      <span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + (p.quantity <= 0 ? 'bg-red-50 text-red-500' : p.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400')}>{p.quantity <= 0 ? 'SOLD' : p.is_active ? 'Qty:' + p.quantity : 'HIDDEN'}</span>
+                    </div>
+                  </div>
+                </div>
+              ) })}
+            </div>
+            {/* Desktop: Full table */}
+            <div className="hidden sm:block bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
               {filteredProducts.map((p: any, i: number) => { const sortedImages = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)); const pendingChange = primaryChanges.get(p.id); const effectivePrimaryId = pendingChange ? pendingChange.imageId : sortedImages[0]?.id; return (<tr key={p.id} className={'border-t border-slate-100 ' + (pendingChange ? 'bg-blue-50/50' : selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5"><div className={'flex gap-1.5 overflow-x-auto ' + (primaryMode ? 'max-w-[420px]' : 'max-w-[300px]')}>{sortedImages.length > 0 ? sortedImages.slice(0, 6).map((img: any) => { const isPrimary = img.id === effectivePrimaryId; const size = primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14'; return (<img key={img.id} src={img.url} alt="" loading="lazy" title={isPrimary ? 'Primary image' : primaryMode ? 'Click to set as primary' : ''} onClick={() => { if (primaryMode && !isPrimary) markAsPrimary(p.id, img.id, p.images) }} className={size + ' rounded-lg object-cover shrink-0 transition-all ' + (isPrimary ? 'ring-2 ring-orange-500' : 'border border-slate-200') + (primaryMode && !isPrimary ? ' cursor-pointer hover:ring-2 hover:ring-blue-400 active:scale-95 active:ring-2 active:ring-blue-400' : '')} />) }) : <div className={(primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14') + ' rounded-lg bg-slate-100 flex items-center justify-center text-lg'}>🔧</div>}{sortedImages.length > 6 && <span className="text-[10px] text-slate-400 self-center shrink-0">+{sortedImages.length - 6}</span>}</div></td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className={'px-4 py-2.5 font-semibold ' + (p.quantity <= 0 ? 'text-red-500' : '')}>{p.quantity <= 0 ? <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">0 - Sold</span> : p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
             </tbody></table></div></div>
-          )}
+          </>)}
         </div>)}
 
         {/* ADD PRODUCT */}
