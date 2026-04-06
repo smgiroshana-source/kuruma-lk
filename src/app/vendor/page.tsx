@@ -73,33 +73,33 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
   const emailLine = s.email ? `<div style="font-size:${isThermal ? '9px' : '12px'};color:#000;font-weight:700">${s.email}</div>` : ''
   const footerText = s.invoice_footer || 'Thank you for your business!'
   const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${s.invoice_terms.replace(/\n/g, '<br/>')}</div>` : ''
-  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '12px'};font-weight:${isThermal ? '700' : '500'};color:${isThermal ? '#000' : '#333'};padding:3px 0"><span>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
-  const a4Style = `@page{size:A4;margin:15mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:12px;color:#444;font-weight:400;width:100%;max-width:100%;margin:0 auto}
+  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
+  const a4Style = `@page{size:A4;margin:15mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:13px;color:#222;font-weight:400;width:100%;max-width:100%;margin:0 auto}
 .header{text-align:center;padding:20px 0 15px;margin-bottom:0}
-.shop-name{font-size:24px;font-weight:700;color:#111;letter-spacing:-0.5px}
-.header-sub{font-size:11px;color:#777;margin-top:2px;line-height:1.6}
-.invoice-title{display:flex;justify-content:space-between;align-items:center;padding:10px 0;margin-top:15px;border-top:2px solid #111;border-bottom:1px solid #ddd}
-.invoice-title h2{font-size:18px;font-weight:700;color:#111;text-transform:uppercase;letter-spacing:2px}
-.invoice-no{font-size:18px;font-weight:700;color:#111;font-family:'Courier New',monospace}
+.shop-name{font-size:24px;font-weight:700;color:#000;letter-spacing:-0.5px}
+.header-sub{font-size:11px;color:#444;margin-top:2px;line-height:1.6}
+.invoice-title{display:flex;justify-content:space-between;align-items:center;padding:10px 0;margin-top:15px;border-top:2px solid #000;border-bottom:1px solid #aaa}
+.invoice-title h2{font-size:18px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:2px}
+.invoice-no{font-size:18px;font-weight:700;color:#000;font-family:'Courier New',monospace}
 .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:12px 0}
-.info-cell{padding:8px 0;font-size:12px;border-bottom:1px solid #eee}
+.info-cell{padding:8px 0;font-size:12px;border-bottom:1px solid #ccc}
 .info-cell:nth-child(even){text-align:right}
-.info-label{color:#999;font-size:9px;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:2px}
-.info-value{font-weight:600;color:#222;font-size:13px}
+.info-label{color:#555;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:2px}
+.info-value{font-weight:600;color:#000;font-size:13px}
 table{width:100%;border-collapse:collapse;margin:15px 0}
-thead{background:#f5f5f5}
-th{text-align:left;font-size:10px;font-weight:600;padding:8px 10px;color:#555;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #ddd}
-td{padding:10px;font-size:12px;font-weight:400;color:#333;border-bottom:1px solid #eee}
+thead{background:#eee}
+th{text-align:left;font-size:10px;font-weight:700;padding:8px 10px;color:#222;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #aaa}
+td{padding:10px;font-size:13px;font-weight:500;color:#111;border-bottom:1px solid #ddd}
 .text-right{text-align:right}
-.totals{margin-top:10px;border-top:1px solid #ddd;padding-top:5px}
-.total-row{display:flex;justify-content:space-between;padding:4px 10px;font-size:12px;font-weight:500;color:#555}
-.grand-total{display:flex;justify-content:space-between;font-weight:700;font-size:20px;color:#111;padding:12px 10px;margin-top:5px;background:#f5f5f5;border-radius:4px}
-.balance-due{font-weight:700;font-size:15px;text-align:right;margin-top:15px;padding:12px 15px;border:1.5px solid #333;color:#111;border-radius:4px}
-.payments-section{margin-top:10px;padding:8px 10px;background:#fafafa;border-radius:4px}
-.payments-label{font-size:9px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
-.note-section{margin-top:10px;padding:8px 12px;font-size:11px;font-style:italic;color:#777;border-left:3px solid #ddd}
-.footer{text-align:center;padding:25px 0 10px;font-size:10px;color:#bbb;margin-top:30px;border-top:1px solid #eee}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}thead{background:#f5f5f5 !important}.grand-total{background:#f5f5f5 !important}}`
+.totals{margin-top:10px;border-top:1px solid #aaa;padding-top:5px}
+.total-row{display:flex;justify-content:space-between;padding:4px 10px;font-size:13px;font-weight:600;color:#222}
+.grand-total{display:flex;justify-content:space-between;font-weight:800;font-size:20px;color:#000;padding:12px 10px;margin-top:5px;background:#eee;border-radius:4px}
+.balance-due{font-weight:700;font-size:16px;text-align:right;margin-top:15px;padding:12px 15px;border:2px solid #000;color:#000;border-radius:4px}
+.payments-section{margin-top:10px;padding:8px 10px;background:#f0f0f0;border-radius:4px}
+.payments-label{font-size:9px;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.note-section{margin-top:10px;padding:8px 12px;font-size:12px;font-style:italic;color:#333;border-left:3px solid #999}
+.footer{text-align:center;padding:25px 0 10px;font-size:10px;color:#888;margin-top:30px;border-top:1px solid #ccc}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}thead{background:#eee !important}.grand-total{background:#eee !important}}`
   const thermalStyle = `@page{size:80mm auto;margin:2mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Courier New',monospace;font-size:12px;color:#000;width:300px;max-width:100%;margin:0 auto}.header{text-align:center;padding:5px 0;border-bottom:1px dashed #000}.shop-name{font-size:16px;font-weight:900}table{width:100%;border-collapse:collapse;margin:5px 0}th{text-align:left;font-size:10px;font-weight:900;padding:3px 2px;border-bottom:1px dashed #000}td{padding:3px 2px;font-size:11px;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{border-top:1px dashed #000;padding-top:5px}.total-row{display:flex;justify-content:space-between;padding:2px 0;font-size:12px;font-weight:700}.grand-total{font-weight:900;font-size:16px;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:5px 0;margin-top:5px}.footer{text-align:center;padding:8px 0 5px;font-size:10px;border-top:1px dashed #000;margin-top:5px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${sale.invoice_no}</title>
 <style>${isThermal ? thermalStyle : a4Style}</style></head><body>
