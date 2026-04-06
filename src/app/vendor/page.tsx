@@ -74,7 +74,7 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
   const footerText = s.invoice_footer || 'Thank you for your business!'
   const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${s.invoice_terms.replace(/\n/g, '<br/>')}</div>` : ''
   const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
-  const a4Style = `@page{size:A4;margin:15mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:13px;color:#222;font-weight:400;width:100%;max-width:100%;margin:0 auto}
+  const a4Style = `@page{size:A4;margin:20mm 25mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:13px;color:#222;font-weight:400;width:100%;max-width:100%;margin:0 auto}
 .header{text-align:center;padding:20px 0 15px;margin-bottom:0}
 .shop-name{font-size:24px;font-weight:700;color:#000;letter-spacing:-0.5px}
 .header-sub{font-size:11px;color:#444;margin-top:2px;line-height:1.6}
