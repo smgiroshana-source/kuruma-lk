@@ -267,6 +267,9 @@ export default function VendorDashboard() {
   const [editProductImages, setEditProductImages] = useState<any[]>([])
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null)
 
+  // Mobile product actions
+  const [mobileActiveProduct, setMobileActiveProduct] = useState<string | null>(null)
+
   // Primary image selection mode
   const [primaryMode, setPrimaryMode] = useState(false)
   const [primaryChanges, setPrimaryChanges] = useState<Map<string, { imageId: string, images: any[] }>>(new Map())
@@ -1623,17 +1626,30 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
             </div>
           </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, description: editingProduct.description, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, year: editingProduct.year, model_code: editingProduct.model_code, condition: editingProduct.condition, side: editingProduct.side, color: editingProduct.color, oem_code: editingProduct.oem_code, cost: editingProduct.cost, category: editingProduct.category, show_price: editingProduct.show_price })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
           {products.length === 0 ? (productsLoading ? <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><div className="w-8 h-8 border-3 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div><p className="text-slate-400 font-semibold">Loading products...</p></div> : <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><p className="text-4xl mb-3">📦</p><p className="text-slate-500 font-semibold">No products</p></div>) : (<>
-            {/* Mobile: Grid of image cards */}
-            <div className="sm:hidden grid grid-cols-2 gap-2">
-              {filteredProducts.map((p: any) => { const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]; return (
-                <div key={p.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden" onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }}>
-                  <div className="aspect-square bg-slate-100">{img ? <img src={img.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-3xl opacity-20">🔧</div>}</div>
-                  <div className="p-2">
-                    <p className="text-[11px] font-bold text-slate-800 leading-tight line-clamp-2">{p.name}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{[p.make, p.model].filter(Boolean).join(' ')}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-xs font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</span>
-                      <span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + (p.quantity <= 0 ? 'bg-red-50 text-red-500' : p.is_active ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400')}>{p.quantity <= 0 ? 'SOLD' : p.is_active ? 'Qty:' + p.quantity : 'HIDDEN'}</span>
+            {/* Mobile: Grid of image cards with tap-to-reveal actions */}
+            <div className="sm:hidden grid grid-cols-3 gap-1.5">
+              {filteredProducts.map((p: any) => { const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]; const isActive = mobileActiveProduct === p.id; return (
+                <div key={p.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                  <div className="aspect-square bg-slate-100 relative" onClick={() => setMobileActiveProduct(isActive ? null : p.id)}>
+                    {img ? <img src={img.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-2xl opacity-20">🔧</div>}
+                    {/* Action overlay on tap */}
+                    {isActive && (
+                      <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1.5 p-1.5" onClick={e => e.stopPropagation()}>
+                        <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-blue-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-blue-600">✏️ Edit</button>
+                        <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-orange-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-orange-600">🖼️ Primary</button>
+                        {p.quantity > 0 && <button onClick={() => { addToCart(p); setTab('pos'); setMobileActiveProduct(null); showToast('Added to POS') }} className="w-full bg-green-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-green-600">🛒 POS</button>}
+                        <button onClick={() => setMobileActiveProduct(null)} className="w-full text-white/70 text-[10px] font-semibold py-1">Cancel</button>
+                      </div>
+                    )}
+                    {/* Status badge */}
+                    {p.quantity <= 0 && <span className="absolute top-1 left-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">SOLD</span>}
+                    {!p.is_active && p.quantity > 0 && <span className="absolute top-1 left-1 bg-slate-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">HIDDEN</span>}
+                  </div>
+                  <div className="px-1.5 py-1">
+                    <p className="text-[10px] font-bold text-slate-800 leading-tight line-clamp-1">{p.name}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</span>
+                      <span className="text-[9px] text-slate-400 font-mono">{p.sku}</span>
                     </div>
                   </div>
                 </div>
