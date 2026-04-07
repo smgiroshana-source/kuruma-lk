@@ -10,7 +10,7 @@ export async function GET() {
   const [productsRes, vendorsRes, synonymsRes] = await Promise.all([
     admin
       .from('products')
-      .select('id, name, sku, category, make, model, year, model_code, condition, price, show_price, quantity, vendor_id, created_at, side, color, oem_code, vendor:vendors(id, name, slug, location, phone, whatsapp), images:product_images(id, url, sort_order)')
+      .select('id, name, sku, category, make, model, condition, price, show_price, quantity, vendor_id, created_at, vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order)')
       .eq('is_active', true)
       .gt('quantity', 0)
       .order('created_at', { ascending: false })
@@ -40,7 +40,7 @@ export async function GET() {
   })
 
   // Cache for 60 seconds, serve stale while revalidating for up to 5 minutes
-  response.headers.set('Cache-Control', 's-maxage=60, stale-while-revalidate=300')
+  response.headers.set('Cache-Control', 's-maxage=300, stale-while-revalidate=600')
 
   return response
 }
