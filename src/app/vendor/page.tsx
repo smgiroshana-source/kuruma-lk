@@ -2276,10 +2276,12 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                           <tbody>
                             {filteredSales.map((sale: any) => {
                               const isExpanded = expandedSale === sale.id
+                              const hasReturns = (sale.items || []).some((i: any) => (i.returned_quantity || 0) > 0)
+                              const totalReturned = (sale.items || []).reduce((s: number, i: any) => s + ((i.returned_quantity || 0) * parseFloat(i.unit_price || 0)), 0)
                               return (<>
-                                <tr key={sale.id} onClick={() => setExpandedSale(isExpanded ? null : sale.id)} className={'border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition ' + (sale.payment_status === 'voided' ? 'opacity-50' : '') + (isExpanded ? ' bg-orange-50/50' : '')}>
+                                <tr key={sale.id} onClick={() => setExpandedSale(isExpanded ? null : sale.id)} className={'border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition ' + (sale.payment_status === 'voided' ? 'opacity-50' : '') + (hasReturns && sale.payment_status !== 'voided' ? ' bg-red-50/30' : '') + (isExpanded ? ' bg-orange-50/50' : '')}>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatDateShort(sale.created_at)}</td>
-                                  <td className="px-2 sm:px-3 py-2.5"><span className="font-mono text-[10px] font-bold bg-slate-100 px-1.5 py-0.5 rounded">{sale.invoice_no}</span></td>
+                                  <td className="px-2 sm:px-3 py-2.5"><span className="font-mono text-[10px] font-bold bg-slate-100 px-1.5 py-0.5 rounded">{sale.invoice_no}</span>{hasReturns && <span className="block text-[8px] font-bold text-red-500 mt-0.5">↩ RETURN</span>}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs max-w-[300px] hidden md:table-cell">
                                     {(sale.items || []).map((i: any) => (
                                       <div key={i.id} className="truncate"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span>{i.product_name} <span className="text-slate-400">x{i.quantity}</span></div>
@@ -2289,7 +2291,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                                   <td className="px-2 sm:px-3 py-2.5 text-xs font-mono font-semibold text-slate-600 hidden sm:table-cell">{sale.vehicle_no || '—'}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs font-semibold whitespace-nowrap">{sale.customer?.name || sale.customer_name}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-right font-bold text-orange-600 whitespace-nowrap">Rs.{parseFloat(sale.total).toLocaleString()}</td>
-                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + (sale.payment_status === 'voided' ? 'bg-red-100 text-red-600' : sale.payment_status === 'paid' ? 'bg-green-100 text-green-600' : sale.payment_status === 'partial' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600')}>{sale.payment_status === 'voided' ? 'VOID' : sale.payment_status.toUpperCase()}</span></td>
+                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + (sale.payment_status === 'voided' ? 'bg-red-100 text-red-600' : sale.payment_status === 'paid' ? 'bg-green-100 text-green-600' : sale.payment_status === 'partial' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600')}>{sale.payment_status === 'voided' ? 'VOID' : sale.payment_status.toUpperCase()}</span>{hasReturns && <span className="block text-[9px] font-bold text-red-500 mt-0.5">-Rs.{totalReturned.toLocaleString()}</span>}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</td>
                                 </tr>
                                 {isExpanded && (
