@@ -649,13 +649,23 @@ export async function POST(req: NextRequest) {
           }).eq('id', sale.customer_id)
         }
       }
-      // Record refund payment (only the cash portion that actually needs to be returned)
+      // Record refund payments for ALL portions
+      // Cash/advance portion (money that needs to move back)
       if (paidReduction > 0) {
         await admin.from('payments').insert({
           sale_id: saleId, vendor_id: vendor.id,
           amount: -paidReduction,
           payment_method: refundMethod === 'advance' ? 'advance' : 'cash',
           notes: 'RETURN: ' + returnedDetails.join(', ')
+        })
+      }
+      // Credit portion (balance that was owed but now cancelled — no money moves)
+      if (balanceReduction > 0) {
+        await admin.from('payments').insert({
+          sale_id: saleId, vendor_id: vendor.id,
+          amount: -balanceReduction,
+          payment_method: 'credit_return',
+          notes: 'RETURN (credit cancelled): ' + returnedDetails.join(', ')
         })
       }
     }
