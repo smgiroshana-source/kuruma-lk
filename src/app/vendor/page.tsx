@@ -1145,7 +1145,9 @@ ${(() => {
 
   function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any) {
     const filtered = salesList.filter((s: any) => s.payment_status !== 'voided' && !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL'))
-    const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
+    const grossSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
+    const totalReturnAmount = 0 // Period report doesn't track returns separately yet
+    const totalSales = grossSales
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
 
