@@ -1057,8 +1057,11 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
     })
     const dayCollections = collections || []
     const totalCollections = dayCollections.reduce((s: number, c: any) => s + c.amount, 0)
+    const dayReturnsForCalc = returns || []
+    const totalReturnAmount = dayReturnsForCalc.reduce((s: number, r: any) => s + r.amount, 0)
 
-    const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
+    const grossSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
+    const totalSales = grossSales - totalReturnAmount
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
 
@@ -1092,7 +1095,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
 
 <div class="summary">
-<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
+<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Gross: Rs.' + grossSales.toLocaleString() + '<br/>Returns: -Rs.' + totalReturnAmount.toLocaleString() + '</div>' : ''}</div>
 <div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
@@ -1206,7 +1209,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Sales Report</div><div class="date">${fromStr} — ${toStr}</div></div>
 
 <div class="summary">
-<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
+<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Gross: Rs.' + grossSales.toLocaleString() + '<br/>Returns: -Rs.' + totalReturnAmount.toLocaleString() + '</div>' : ''}</div>
 <div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
@@ -2060,8 +2063,9 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                   {/* Stats cards — 2 cols mobile, 3 cols desktop */}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-5">
                     <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-green-600">Rs.{salesData.stats.totalRevenue.toLocaleString()}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Revenue</p>
+                      <p className="text-lg sm:text-xl font-black text-green-600">Rs.{(salesData.stats.totalRevenue - (salesData.stats.totalReturns || 0)).toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Net Revenue</p>
+                      {salesData.stats.totalReturns > 0 && <p className="text-[10px] text-red-500 mt-0.5">Returns: -Rs.{salesData.stats.totalReturns.toLocaleString()}</p>}
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
                       <p className="text-lg sm:text-xl font-black text-emerald-600">Rs.{salesData.stats.totalPaid.toLocaleString()}</p>
