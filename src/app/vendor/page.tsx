@@ -2094,8 +2094,6 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       })()}
                     </div>
                     )}
-                  </div>
-
                     {salesData.stats.totalReturns > 0 && (
                     <div className="bg-white rounded-xl border border-red-200 p-3.5 sm:p-4">
                       <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalReturns.toLocaleString()}</p>
