@@ -192,12 +192,40 @@ export async function GET(req: NextRequest) {
       customer_name: p.sales?.customer?.name || p.sales?.customer_name || 'Unknown',
     }))
   }
-  const totalCollections = collectionsToday.reduce((s: number, c: any) => s + c.amount, 0)
+  // Separate positive collections from negative (returns/refunds)
+  const positiveCollections = collectionsToday.filter((c: any) => c.amount > 0)
+  const returnsInPeriod = collectionsToday.filter((c: any) => c.amount < 0).map((c: any) => ({ ...c, amount: Math.abs(c.amount) }))
+  const totalCollections = positiveCollections.reduce((s: number, c: any) => s + c.amount, 0)
+  const totalReturns = returnsInPeriod.reduce((s: number, c: any) => s + c.amount, 0)
+
+  // Also check for returns made in this period on same-period invoices (not just older ones)
+  // These show up as negative payments on same-day sales
+  if (periodStart) {
+    let rQuery = admin
+      .from('payments')
+      .select('id, amount, payment_method, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, vendor_id, customer:customers(name))')
+      .eq('sales.vendor_id', vendor.id)
+      .lt('amount', 0)
+      .gte('created_at', periodStart)
+    if (periodEnd) rQuery = rQuery.lt('created_at', periodEnd)
+    const { data: returnPayments } = await rQuery.limit(200)
+    const existingIds = new Set(returnsInPeriod.map((r: any) => r.id))
+    ;(returnPayments || []).filter((p: any) => !existingIds.has(p.id)).forEach((p: any) => {
+      returnsInPeriod.push({
+        id: p.id, amount: Math.abs(parseFloat(p.amount || 0)),
+        payment_method: p.payment_method, created_at: p.created_at, sale_id: p.sale_id,
+        invoice_no: p.sales?.invoice_no, customer_name: p.sales?.customer?.name || p.sales?.customer_name || 'Unknown',
+        notes: p.notes || '',
+      })
+    })
+  }
+  const totalReturnsAll = returnsInPeriod.reduce((s: number, c: any) => s + c.amount, 0)
 
   return NextResponse.json({
     sales: allSales,
-    stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections },
-    collectionsToday,
+    stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections, totalReturns: totalReturnsAll },
+    collectionsToday: positiveCollections,
+    returnsInPeriod,
     topProducts,
     paymentBreakdown,
     dailyRevenue,

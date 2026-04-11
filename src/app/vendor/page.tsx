@@ -1042,7 +1042,7 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[]) {
     // 7:30 PM cutoff: sales after 19:30 go to next day
     const cutoffHour = 19, cutoffMin = 30
     const filtered = salesList.filter((s: any) => {
@@ -1123,6 +1123,16 @@ ${dayCollections.length > 0 ? (() => {
         dayCollections.map((c: any) => '<tr><td><strong>' + (c.invoice_no || '-') + '</strong></td><td>' + c.customer_name + '</td><td>' + (c.payment_method || 'cash').toUpperCase() + (c.cheque_number ? ' #' + c.cheque_number : '') + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') +
         '</tbody></table>'
     })() : ''}
+
+${(() => {
+      const dayReturns = returns || []
+      if (dayReturns.length === 0) return ''
+      const totalReturnAmt = dayReturns.reduce((s: number, r: any) => s + r.amount, 0)
+      return '<h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Returns / Refunds (' + dayReturns.length + ') — Rs.' + totalReturnAmt.toLocaleString() + '</h3>' +
+        '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Details</th><th class="text-right">Refund</th></tr></thead><tbody>' +
+        dayReturns.map((r: any) => '<tr><td><strong>' + (r.invoice_no || '-') + '</strong></td><td>' + r.customer_name + '</td><td style="font-size:11px;color:#666">' + (r.notes || r.payment_method?.toUpperCase() || '') + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + r.amount.toLocaleString() + '</td></tr>').join('') +
+        '</tbody></table>'
+    })()}
 
 <div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
 
@@ -2086,6 +2096,15 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                     )}
                   </div>
 
+                    {salesData.stats.totalReturns > 0 && (
+                    <div className="bg-white rounded-xl border border-red-200 p-3.5 sm:p-4">
+                      <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalReturns.toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Returns / Refunds</p>
+                      <p className="text-[10px] text-red-500 mt-0.5">{(salesData.returnsInPeriod || []).length} return(s)</p>
+                    </div>
+                    )}
+                  </div>
+
                   {/* Revenue chart — simple bar chart with CSS */}
                   {salesData.dailyRevenue && salesData.dailyRevenue.length > 1 && (
                     <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
@@ -2340,7 +2359,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                         <button onClick={async () => {
                           showToast('Fetching sales...')
-                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || []) } catch { showToast('Failed') }
+                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || []) } catch { showToast('Failed') }
                         }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
                         <button onClick={async () => {
                           showToast('Fetching sales...')
