@@ -3129,6 +3129,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                         <div className="space-y-1.5">
                           {atLoc.map((p: any) => {
                             const ago = confirmedAgo(p.last_stock_confirmed_at)
+                            const isClearing = assignLoading === ('clear-' + p.id)
                             return (
                               <div key={p.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3">
                                 <div className="flex-1 min-w-0">
@@ -3142,6 +3143,19 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                                     ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${ago.cls}`}>✓ {ago.label}</span>
                                     : <span className="text-[10px] text-slate-300">not confirmed</span>}
                                 </div>
+                                <button
+                                  disabled={isClearing}
+                                  onClick={async () => {
+                                    setAssignLoading('clear-' + p.id)
+                                    await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: null, loc_floor: null, loc_sub1: null, loc_sub2: null } }) })
+                                    await fetchData()
+                                    setAssignLoading(null)
+                                    showToast('Location cleared')
+                                  }}
+                                  className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 active:bg-red-100 border border-slate-200 text-lg font-bold disabled:opacity-40 transition">
+                                  {isClearing ? '…' : '✕'}
+                                </button>
                               </div>
                             )
                           })}
