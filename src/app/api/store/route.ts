@@ -39,8 +39,8 @@ export async function GET() {
     synonyms: (synonymsRes.data || []).map(s => s.keywords),
   })
 
-  // Cache for 60 seconds, serve stale while revalidating for up to 5 minutes
-  response.headers.set('Cache-Control', 's-maxage=300, stale-while-revalidate=600')
+  // Cache at CDN edge for 1 hour, serve stale for up to 4 hours (reduces Fast Origin Transfer)
+  response.headers.set('Cache-Control', 's-maxage=3600, stale-while-revalidate=14400')
 
   return response
 }

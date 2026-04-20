@@ -1,7 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import HomePage from './HomeClient'
 
-export const revalidate = 60 // ISR: regenerate every 60 seconds
+export const revalidate = 3600 // ISR: regenerate every 1 hour (was 60s — caused 305K ISR writes)
 
 async function getStoreData() {
   const admin = createAdminClient()
