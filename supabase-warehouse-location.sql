@@ -1,15 +1,17 @@
 -- ============================================================
--- Migration: Add warehouse_location to products
+-- Migration: Replace warehouse_location with 4-level location columns
 -- Run this in Supabase SQL Editor
 -- ============================================================
 
--- Add warehouse_location column to products table
-ALTER TABLE products
-  ADD COLUMN IF NOT EXISTS warehouse_location TEXT;
+-- Drop the single column added in the previous migration (if it exists)
+ALTER TABLE products DROP COLUMN IF EXISTS warehouse_location;
 
--- Optional: index for fast filtering by location
-CREATE INDEX IF NOT EXISTS idx_products_warehouse_location
-  ON products (vendor_id, warehouse_location)
-  WHERE warehouse_location IS NOT NULL;
+-- Add 4 structured location columns
+ALTER TABLE products ADD COLUMN IF NOT EXISTS loc_store TEXT;   -- e.g. "Main Store", "Branch 2"
+ALTER TABLE products ADD COLUMN IF NOT EXISTS loc_floor TEXT;   -- e.g. "Ground", "1st Floor"
+ALTER TABLE products ADD COLUMN IF NOT EXISTS loc_sub1  TEXT;   -- e.g. "Rack A", "Shelf 3"
+ALTER TABLE products ADD COLUMN IF NOT EXISTS loc_sub2  TEXT;   -- e.g. "Bin 5", "Box 12"
 
--- That's it! The column is nullable text — e.g. "Shelf A3", "Rack B2", "Counter"
+-- Index for fast location-based filtering
+CREATE INDEX IF NOT EXISTS idx_products_loc_store ON products (vendor_id, loc_store) WHERE loc_store IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_products_loc_sub1  ON products (vendor_id, loc_sub1)  WHERE loc_sub1  IS NOT NULL;
