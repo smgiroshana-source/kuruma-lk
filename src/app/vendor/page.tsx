@@ -67,6 +67,14 @@ async function extractZipImages(file: File): Promise<Map<string, File[]>> {
 function formatDate(d: string) { return new Date(d).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' }) }
 function formatDateShort(d: string) { return new Date(d).toLocaleDateString('en-LK', { day: '2-digit', month: 'short' }) }
 function locLabel(p: any) { return [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ') }
+function confirmedAgo(dateStr: string | null): { label: string; cls: string } | null {
+  if (!dateStr) return null
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
+  if (days === 0) return { label: 'Confirmed today', cls: 'text-emerald-700 bg-emerald-50' }
+  if (days <= 7)  return { label: `${days}d ago`, cls: 'text-emerald-600 bg-emerald-50' }
+  if (days <= 30) return { label: `${days}d ago`, cls: 'text-amber-700 bg-amber-50' }
+  return { label: `${days}d ago`, cls: 'text-red-600 bg-red-50' }
+}
 
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
   const items = sale.items || []; const payments = sale.payments || []; const isThermal = format === 'thermal'; const w = isThermal ? 300 : 800
@@ -284,6 +292,7 @@ export default function VendorDashboard() {
   const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [stocktakeSearch, setStocktakeSearch] = useState('')
   const [stockQtyEdits, setStockQtyEdits] = useState<Record<string, number>>({})
+  const [stockConfirmSet, setStockConfirmSet] = useState<Set<string>>(new Set())
   const [stocktakeSaving, setStocktakeSaving] = useState(false)
   // Quick Assign mode
   const [assignLoc, setAssignLoc] = useState({ store: '', floor: '', sub1: '', sub2: '' })
@@ -520,16 +529,25 @@ export default function VendorDashboard() {
   async function handleSignOut() { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = '/' }
 
   async function saveAllStockChanges() {
-    const entries = Object.entries(stockQtyEdits)
-    if (!entries.length) return
+    const now = new Date().toISOString()
+    const qtyEntries = Object.entries(stockQtyEdits)
+    // confirm-only: products ticked but qty not changed
+    const confirmOnly = [...stockConfirmSet].filter(id => !(id in stockQtyEdits))
+    if (!qtyEntries.length && !confirmOnly.length) return
     setStocktakeSaving(true)
     try {
-      await Promise.all(entries.map(([id, qty]) =>
-        fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'update', productId: id, data: { quantity: qty } }) })
-      ))
-      showToast(`${entries.length} product${entries.length !== 1 ? 's' : ''} updated`)
+      await Promise.all([
+        ...qtyEntries.map(([id, qty]) =>
+          fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update', productId: id, data: { quantity: qty, last_stock_confirmed_at: now } }) })),
+        ...confirmOnly.map(id =>
+          fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update', productId: id, data: { last_stock_confirmed_at: now } }) }))
+      ])
+      const total = qtyEntries.length + confirmOnly.length
+      showToast(`${total} product${total !== 1 ? 's' : ''} saved & confirmed`)
       setStockQtyEdits({})
+      setStockConfirmSet(new Set())
       await fetchData()
     } catch { showToast('Error saving') }
     setStocktakeSaving(false)
@@ -2882,7 +2900,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
           })
 
           const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch
-          const pendingCount = Object.keys(stockQtyEdits).length
+          const pendingCount = Object.keys(stockQtyEdits).length + stockConfirmSet.size
 
           // ── quick assign: search results ──
           const assignSearchLower = assignSearch.toLowerCase()
@@ -2984,25 +3002,42 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       {browseProducts.map((p: any) => {
                         const curQty = stockQtyEdits[p.id] ?? p.quantity
                         const changed = stockQtyEdits[p.id] !== undefined
+                        const confirmed = stockConfirmSet.has(p.id)
                         const loc = locLabel(p)
+                        const ago = confirmedAgo(p.last_stock_confirmed_at)
                         return (
-                          <div key={p.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${changed ? 'border-orange-300 bg-orange-50' : 'border-slate-200'}`}>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                                <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
-                                {p.condition && <span className="text-[10px] font-semibold text-slate-400">{p.condition}</span>}
+                          <div key={p.id} className={`bg-white rounded-xl border p-4 ${changed ? 'border-orange-300 bg-orange-50' : confirmed ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
+                            {/* Top row: info + confirmed badge */}
+                            <div className="flex items-start justify-between gap-2 mb-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                  <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
+                                  {p.condition && <span className="text-[10px] font-semibold text-slate-400">{p.condition}</span>}
+                                </div>
+                                <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
+                                {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model}</p>}
+                                {loc && !anyFilter && <p className="text-[10px] font-semibold text-amber-700 mt-0.5">📍 {loc}</p>}
+                                {changed && <p className="text-[10px] font-bold text-orange-600 mt-0.5">Was {p.quantity} → now {curQty}</p>}
                               </div>
-                              <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
-                              {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model}</p>}
-                              {loc && !anyFilter && <p className="text-[10px] font-semibold text-amber-700 mt-0.5">📍 {loc}</p>}
-                              {changed && <p className="text-[10px] font-bold text-orange-600 mt-0.5">Was {p.quantity} → now {curQty}</p>}
+                              <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                {ago
+                                  ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ago.cls}`}>✓ {ago.label}</span>
+                                  : <span className="text-[10px] font-semibold text-slate-300 px-2 py-0.5 rounded-full bg-slate-50">Never confirmed</span>}
+                                {!changed && (
+                                  <button onClick={() => setStockConfirmSet(prev => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n })}
+                                    className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border transition active:scale-95 ${confirmed ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600'}`}>
+                                    {confirmed ? '✓ Confirmed' : 'Confirm'}
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
+                            {/* Bottom row: qty controls */}
+                            <div className="flex items-center gap-2">
                               <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
                                 className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
                               <input type="number" min="0" value={curQty}
                                 onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: parseInt(e.target.value) || 0}))}
-                                className="w-16 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
+                                className="w-20 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
                               <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
                                 className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
                             </div>
@@ -3075,6 +3110,45 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                   {assignSearch.length < 2 && (
                     <p className="text-xs text-slate-400 text-center py-6">Type at least 2 characters to search products</p>
                   )}
+
+                  {/* ── At this location ── always visible when a location is set */}
+                  {anyAssignLoc && (() => {
+                    const atLoc = allProducts.filter((p: any) =>
+                      (!assignLoc.store || p.loc_store === assignLoc.store) &&
+                      (!assignLoc.floor || p.loc_floor === assignLoc.floor) &&
+                      (!assignLoc.sub1  || p.loc_sub1  === assignLoc.sub1) &&
+                      (!assignLoc.sub2  || p.loc_sub2  === assignLoc.sub2))
+                    if (!atLoc.length) return (
+                      <div className="mb-4 text-center py-4 border-2 border-dashed border-slate-200 rounded-xl">
+                        <p className="text-sm text-slate-400">No products assigned here yet</p>
+                      </div>
+                    )
+                    return (
+                      <div className="mb-5">
+                        <p className="text-xs font-bold text-slate-400 uppercase mb-2">At this location — {atLoc.length} part{atLoc.length !== 1 ? 's' : ''}</p>
+                        <div className="space-y-1.5">
+                          {atLoc.map((p: any) => {
+                            const ago = confirmedAgo(p.last_stock_confirmed_at)
+                            return (
+                              <div key={p.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{p.sku}</span>
+                                  <p className="font-semibold text-slate-900 text-sm leading-tight mt-0.5">{p.name}</p>
+                                  {(p.make || p.model) && <p className="text-xs text-slate-400">{p.make} {p.model}</p>}
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className="font-bold text-slate-700 text-sm">qty: {p.quantity}</p>
+                                  {ago
+                                    ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${ago.cls}`}>✓ {ago.label}</span>
+                                    : <span className="text-[10px] text-slate-300">not confirmed</span>}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })()}
 
                   {assignResults.length > 0 && (
                     <div className="space-y-2">

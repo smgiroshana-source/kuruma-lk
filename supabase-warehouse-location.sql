@@ -15,3 +15,6 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS loc_sub2  TEXT;   -- e.g. "Bin 5",
 -- Index for fast location-based filtering
 CREATE INDEX IF NOT EXISTS idx_products_loc_store ON products (vendor_id, loc_store) WHERE loc_store IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_products_loc_sub1  ON products (vendor_id, loc_sub1)  WHERE loc_sub1  IS NOT NULL;
+
+-- Stock confirmation date: records when qty was physically verified
+ALTER TABLE products ADD COLUMN IF NOT EXISTS last_stock_confirmed_at TIMESTAMPTZ;
