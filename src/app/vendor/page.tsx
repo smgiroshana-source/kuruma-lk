@@ -3,7 +3,7 @@ import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constant
 
 import { useState, useEffect, useRef } from 'react'
 
-type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'settings'
+type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
 const PAY_METHODS = ['cash','cheque','bank','card']
@@ -158,7 +158,7 @@ export default function VendorDashboard() {
   const [productSearch, setProductSearch] = useState('')
   const [showSoldOut, setShowSoldOut] = useState(false)
 
-  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true })
+  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, warehouse_location:'' })
   const [productImages, setProductImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [addLoading, setAddLoading] = useState(false)
@@ -273,6 +273,12 @@ export default function VendorDashboard() {
   // Primary image selection mode
   const [primaryMode, setPrimaryMode] = useState(false)
   const [primaryChanges, setPrimaryChanges] = useState<Map<string, { imageId: string, images: any[] }>>(new Map())
+
+  // Stock Take
+  const [stockLocation, setStockLocation] = useState<string | null>(null)
+  const [stocktakeSearch, setStocktakeSearch] = useState('')
+  const [stockQtyEdits, setStockQtyEdits] = useState<Record<string, number>>({})
+  const [stocktakeSaving, setStocktakeSaving] = useState(false)
 
   // Feature 8: Vendor change request
   const [pendingChangeRequest, setPendingChangeRequest] = useState<any>(null)
@@ -503,6 +509,22 @@ export default function VendorDashboard() {
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 4000) }
   async function handleSignOut() { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = '/' }
 
+  async function saveAllStockChanges() {
+    const entries = Object.entries(stockQtyEdits)
+    if (!entries.length) return
+    setStocktakeSaving(true)
+    try {
+      await Promise.all(entries.map(([id, qty]) =>
+        fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', productId: id, data: { quantity: qty } }) })
+      ))
+      showToast(`${entries.length} product${entries.length !== 1 ? 's' : ''} updated`)
+      setStockQtyEdits({})
+      await fetchData()
+    } catch { showToast('Error saving') }
+    setStocktakeSaving(false)
+  }
+
   async function productAction(action: string, productId: string, updateData?: any) {
     setActionLoading(productId); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, productId, data: updateData }) }); const j = await r.json(); if (j.success) { showToast(j.message); await fetchData(); setEditingProduct(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setActionLoading(null)
   }
@@ -594,7 +616,7 @@ export default function VendorDashboard() {
   }
 
   // Product handlers
-  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
+  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, warehouse_location:'' }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files || []); setProductImages(p => [...p, ...files]); files.forEach(f => { const r = new FileReader(); r.onload = ev => setImagePreviews(p => [...p, ev.target?.result as string]); r.readAsDataURL(f) }) }
   function removeImage(i: number) { setProductImages(p => p.filter((_, x) => x !== i)); setImagePreviews(p => p.filter((_, x) => x !== i)) }
 
@@ -1538,7 +1560,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
       <header className="bg-white border-b border-slate-200 sticky top-0 z-50"><div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between"><div className="flex items-center gap-3"><a href="/" className="text-xl font-black text-orange-500">kuruma.lk</a><span className="bg-purple-100 text-purple-700 text-xs font-bold px-2 py-0.5 rounded-full">VENDOR</span><span className="text-sm font-semibold text-slate-600 hidden sm:inline">{vendor.name}</span></div><div className="flex items-center gap-3"><a href="/" className="text-sm text-slate-400 hover:text-slate-600">View Store</a><button onClick={handleSignOut} className="text-sm text-red-500 hover:text-red-600 font-semibold">Log Out</button></div></div></header>
 
       <div className="bg-white border-b border-slate-200"><div className="max-w-7xl mx-auto px-2 sm:px-4 flex gap-0 overflow-x-auto scrollbar-hide" style={{WebkitOverflowScrolling:'touch'}}>
-        {([{key:'overview' as VendorTab,l:'Overview'},{key:'products' as VendorTab,l:'Products'},{key:'add' as VendorTab,l:'+ Add'},{key:'bulk' as VendorTab,l:'Bulk'},{key:'pos' as VendorTab,l:'POS'},{key:'sales' as VendorTab,l:'Sales'},{key:'credit' as VendorTab,l:'Credit'},{key:'settings' as VendorTab,l:'⚙️'}])
+        {([{key:'overview' as VendorTab,l:'Overview'},{key:'products' as VendorTab,l:'Products'},{key:'add' as VendorTab,l:'+ Add'},{key:'bulk' as VendorTab,l:'Bulk'},{key:'pos' as VendorTab,l:'POS'},{key:'sales' as VendorTab,l:'Sales'},{key:'credit' as VendorTab,l:'Credit'},{key:'stocktake' as VendorTab,l:'📦 Stock'},{key:'settings' as VendorTab,l:'⚙️'}])
         .filter((t) => staffRole === 'cashier' ? t.key === 'pos' : true).map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 sm:px-4 py-4 text-xs sm:text-sm font-bold border-b-2 transition whitespace-nowrap ${tab === t.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 hover:text-slate-700'} ${t.key === 'bulk' ? 'hidden sm:inline-block' : ''}`}>{t.l}</button>
         ))}
@@ -1602,7 +1624,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
               </>)}
             </div>
           </div>
-          {editingProduct && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setEditingProduct(null)}><div className="bg-white rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}><h3 className="text-lg font-bold mb-4">Edit Product</h3><div className="space-y-3"><div className="bg-blue-50 border border-blue-200 rounded-lg p-3"><label className="block text-xs font-bold text-blue-800 mb-1">Part ID</label><input value={editingProduct.sku || ''} onChange={e => setEditingProduct({...editingProduct, sku: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none font-mono font-bold bg-white" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Name</label><input value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Description</label><textarea value={editingProduct.description || ''} onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} rows={2} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" /></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Category</label><select value={editingProduct.category} onChange={e => setEditingProduct({...editingProduct, category: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Condition</label><select value={editingProduct.condition} onChange={e => setEditingProduct({...editingProduct, condition: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div><div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Make</label><input value={editingProduct.make || ''} onChange={e => setEditingProduct({...editingProduct, make: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Toyota" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model</label><input value={editingProduct.model || ''} onChange={e => setEditingProduct({...editingProduct, model: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Year</label><input value={editingProduct.year || ''} onChange={e => setEditingProduct({...editingProduct, year: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model Code</label><input value={editingProduct.model_code || ''} onChange={e => setEditingProduct({...editingProduct, model_code: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="ZRE172" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Side</label><select value={editingProduct.side || ''} onChange={e => setEditingProduct({...editingProduct, side: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none"><option value="">Any</option><option>Front</option><option>Rear</option><option>Left</option><option>Right</option><option>Front Left</option><option>Front Right</option><option>Rear Left</option><option>Rear Right</option></select></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Color</label><input value={editingProduct.color || ''} onChange={e => setEditingProduct({...editingProduct, color: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Black" /></div></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">OEM Code</label><input value={editingProduct.oem_code || ''} onChange={e => setEditingProduct({...editingProduct, oem_code: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Cost (Rs.)</label><input type="number" value={editingProduct.cost || ''} onChange={e => setEditingProduct({...editingProduct, cost: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal cost" /></div></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Price (Rs.)</label><input type="number" value={editingProduct.price || ''} onChange={e => setEditingProduct({...editingProduct, price: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Qty</label><input type="number" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3"><div><p className="text-xs font-semibold text-slate-700">Show Price Publicly</p><p className="text-[11px] text-slate-400 mt-0.5">Customers will see the price on the listing</p></div><button type="button" onClick={() => setEditingProduct({...editingProduct, show_price: !editingProduct.show_price})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (editingProduct.show_price ? 'bg-orange-500' : 'bg-slate-300')}><span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingProduct.show_price ? 'translate-x-6' : 'translate-x-1')} /></button></div>
+          {editingProduct && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setEditingProduct(null)}><div className="bg-white rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 w-full sm:max-w-lg h-[95vh] sm:h-auto sm:max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}><h3 className="text-lg font-bold mb-4">Edit Product</h3><div className="space-y-3"><div className="bg-blue-50 border border-blue-200 rounded-lg p-3"><label className="block text-xs font-bold text-blue-800 mb-1">Part ID</label><input value={editingProduct.sku || ''} onChange={e => setEditingProduct({...editingProduct, sku: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none font-mono font-bold bg-white" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Name</label><input value={editingProduct.name} onChange={e => setEditingProduct({...editingProduct, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Description</label><textarea value={editingProduct.description || ''} onChange={e => setEditingProduct({...editingProduct, description: e.target.value})} rows={2} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" /></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Category</label><select value={editingProduct.category} onChange={e => setEditingProduct({...editingProduct, category: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Condition</label><select value={editingProduct.condition} onChange={e => setEditingProduct({...editingProduct, condition: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div><div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Make</label><input value={editingProduct.make || ''} onChange={e => setEditingProduct({...editingProduct, make: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Toyota" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model</label><input value={editingProduct.model || ''} onChange={e => setEditingProduct({...editingProduct, model: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Year</label><input value={editingProduct.year || ''} onChange={e => setEditingProduct({...editingProduct, year: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Model Code</label><input value={editingProduct.model_code || ''} onChange={e => setEditingProduct({...editingProduct, model_code: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="ZRE172" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Side</label><select value={editingProduct.side || ''} onChange={e => setEditingProduct({...editingProduct, side: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none"><option value="">Any</option><option>Front</option><option>Rear</option><option>Left</option><option>Right</option><option>Front Left</option><option>Front Right</option><option>Rear Left</option><option>Rear Right</option></select></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Color</label><input value={editingProduct.color || ''} onChange={e => setEditingProduct({...editingProduct, color: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Black" /></div></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">OEM Code</label><input value={editingProduct.oem_code || ''} onChange={e => setEditingProduct({...editingProduct, oem_code: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Cost (Rs.)</label><input type="number" value={editingProduct.cost || ''} onChange={e => setEditingProduct({...editingProduct, cost: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal cost" /></div></div><div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-500 mb-1">Price (Rs.)</label><input type="number" value={editingProduct.price || ''} onChange={e => setEditingProduct({...editingProduct, price: e.target.value ? parseInt(e.target.value) : null})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-500 mb-1">Qty</label><input type="number" value={editingProduct.quantity} onChange={e => setEditingProduct({...editingProduct, quantity: parseInt(e.target.value) || 0})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div><div className="bg-amber-50 border border-amber-200 rounded-lg p-3"><label className="block text-xs font-bold text-amber-800 mb-1">📍 Warehouse Location</label><input value={editingProduct.warehouse_location || ''} onChange={e => setEditingProduct({...editingProduct, warehouse_location: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-amber-200 text-sm outline-none bg-white focus:border-orange-400" placeholder="e.g. Shelf A3, Rack B2, Counter" /></div><div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3"><div><p className="text-xs font-semibold text-slate-700">Show Price Publicly</p><p className="text-[11px] text-slate-400 mt-0.5">Customers will see the price on the listing</p></div><button type="button" onClick={() => setEditingProduct({...editingProduct, show_price: !editingProduct.show_price})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (editingProduct.show_price ? 'bg-orange-500' : 'bg-slate-300')}><span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingProduct.show_price ? 'translate-x-6' : 'translate-x-1')} /></button></div>
             {/* Feature 5: Existing Images with Delete */}
             {editProductImages.length > 0 && (
               <div>
@@ -1639,7 +1661,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 showToast('Images uploaded!')
               }} className="w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100" />
             </div>
-          </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, description: editingProduct.description, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, year: editingProduct.year, model_code: editingProduct.model_code, condition: editingProduct.condition, side: editingProduct.side, color: editingProduct.color, oem_code: editingProduct.oem_code, cost: editingProduct.cost, category: editingProduct.category, show_price: editingProduct.show_price })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
+          </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, description: editingProduct.description, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, year: editingProduct.year, model_code: editingProduct.model_code, condition: editingProduct.condition, side: editingProduct.side, color: editingProduct.color, oem_code: editingProduct.oem_code, cost: editingProduct.cost, category: editingProduct.category, show_price: editingProduct.show_price, warehouse_location: editingProduct.warehouse_location || null })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
           {products.length === 0 ? (productsLoading ? <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><div className="w-8 h-8 border-3 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div><p className="text-slate-400 font-semibold">Loading products...</p></div> : <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><p className="text-4xl mb-3">📦</p><p className="text-slate-500 font-semibold">No products</p></div>) : (<>
             {/* Mobile: Grid of image cards with tap-to-reveal actions */}
             <div className="sm:hidden grid grid-cols-3 gap-1.5">
@@ -1666,13 +1688,14 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       <span className="text-[10px] font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</span>
                       <span className="text-[9px] text-slate-400 font-mono">{p.sku}</span>
                     </div>
+                    {p.warehouse_location && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 px-1 rounded truncate block">📍 {p.warehouse_location}</span>}
                   </div>
                 </div>
               ) })}
             </div>
             {/* Desktop: Full table */}
-            <div className="hidden sm:block bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
-              {filteredProducts.map((p: any, i: number) => { const sortedImages = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)); const pendingChange = primaryChanges.get(p.id); const effectivePrimaryId = pendingChange ? pendingChange.imageId : sortedImages[0]?.id; return (<tr key={p.id} className={'border-t border-slate-100 ' + (pendingChange ? 'bg-blue-50/50' : selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5"><div className={'flex gap-1.5 overflow-x-auto ' + (primaryMode ? 'max-w-[420px]' : 'max-w-[300px]')}>{sortedImages.length > 0 ? sortedImages.slice(0, 6).map((img: any) => { const isPrimary = img.id === effectivePrimaryId; const size = primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14'; return (<img key={img.id} src={img.url} alt="" loading="lazy" title={isPrimary ? 'Primary image' : primaryMode ? 'Click to set as primary' : ''} onClick={() => { if (primaryMode && !isPrimary) markAsPrimary(p.id, img.id, p.images) }} className={size + ' rounded-lg object-cover shrink-0 transition-all ' + (isPrimary ? 'ring-2 ring-orange-500' : 'border border-slate-200') + (primaryMode && !isPrimary ? ' cursor-pointer hover:ring-2 hover:ring-blue-400 active:scale-95 active:ring-2 active:ring-blue-400' : '')} />) }) : <div className={(primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14') + ' rounded-lg bg-slate-100 flex items-center justify-center text-lg'}>🔧</div>}{sortedImages.length > 6 && <span className="text-[10px] text-slate-400 self-center shrink-0">+{sortedImages.length - 6}</span>}</div></td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className={'px-4 py-2.5 font-semibold ' + (p.quantity <= 0 ? 'text-red-500' : '')}>{p.quantity <= 0 ? <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">0 - Sold</span> : p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
+            <div className="hidden sm:block bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500 hidden lg:table-cell">Location</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
+              {filteredProducts.map((p: any, i: number) => { const sortedImages = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)); const pendingChange = primaryChanges.get(p.id); const effectivePrimaryId = pendingChange ? pendingChange.imageId : sortedImages[0]?.id; return (<tr key={p.id} className={'border-t border-slate-100 ' + (pendingChange ? 'bg-blue-50/50' : selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5"><div className={'flex gap-1.5 overflow-x-auto ' + (primaryMode ? 'max-w-[420px]' : 'max-w-[300px]')}>{sortedImages.length > 0 ? sortedImages.slice(0, 6).map((img: any) => { const isPrimary = img.id === effectivePrimaryId; const size = primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14'; return (<img key={img.id} src={img.url} alt="" loading="lazy" title={isPrimary ? 'Primary image' : primaryMode ? 'Click to set as primary' : ''} onClick={() => { if (primaryMode && !isPrimary) markAsPrimary(p.id, img.id, p.images) }} className={size + ' rounded-lg object-cover shrink-0 transition-all ' + (isPrimary ? 'ring-2 ring-orange-500' : 'border border-slate-200') + (primaryMode && !isPrimary ? ' cursor-pointer hover:ring-2 hover:ring-blue-400 active:scale-95 active:ring-2 active:ring-blue-400' : '')} />) }) : <div className={(primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14') + ' rounded-lg bg-slate-100 flex items-center justify-center text-lg'}>🔧</div>}{sortedImages.length > 6 && <span className="text-[10px] text-slate-400 self-center shrink-0">+{sortedImages.length - 6}</span>}</div></td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 hidden lg:table-cell">{p.warehouse_location ? <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">📍 {p.warehouse_location}</span> : <span className="text-xs text-slate-300">—</span>}</td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className={'px-4 py-2.5 font-semibold ' + (p.quantity <= 0 ? 'text-red-500' : '')}>{p.quantity <= 0 ? <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">0 - Sold</span> : p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
             </tbody></table></div></div>
           </>)}
         </div>)}
@@ -1689,6 +1712,7 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Model Code</label><input value={newProduct.modelCode} onChange={e => setNewProduct({...newProduct, modelCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="ZRE172" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Side</label><select value={newProduct.side} onChange={e => setNewProduct({...newProduct, side: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none"><option value="">Any</option><option>Front</option><option>Rear</option><option>Left</option><option>Right</option><option>Front Left</option><option>Front Right</option><option>Rear Left</option><option>Rear Right</option></select></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Color</label><input value={newProduct.color} onChange={e => setNewProduct({...newProduct, color: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Black" /></div></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">OEM Code</label><input value={newProduct.oemCode} onChange={e => setNewProduct({...newProduct, oemCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Cost (Rs.)</label><input type="number" value={newProduct.cost} onChange={e => setNewProduct({...newProduct, cost: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal cost" /></div></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Price (Rs.)</label><input type="number" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Quantity</label><input type="number" value={newProduct.quantity} onChange={e => setNewProduct({...newProduct, quantity: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3"><label className="block text-xs font-bold text-amber-800 mb-1">📍 Warehouse Location</label><input value={newProduct.warehouse_location} onChange={e => setNewProduct({...newProduct, warehouse_location: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-amber-200 text-sm outline-none bg-white focus:border-orange-400" placeholder="e.g. Shelf A3, Rack B2, Counter" /></div>
             <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-lg px-4 py-3"><div><p className="text-xs font-semibold text-slate-700">Show Price Publicly</p><p className="text-[11px] text-slate-400 mt-0.5">Customers will see the price on the listing</p></div><button type="button" onClick={() => setNewProduct({...newProduct, show_price: !newProduct.show_price})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (newProduct.show_price ? 'bg-orange-500' : 'bg-slate-300')}><span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (newProduct.show_price ? 'translate-x-6' : 'translate-x-1')} /></button></div>
             <div><label className="block text-xs font-semibold text-slate-600 mb-2">Images</label><input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleImageSelect} className="hidden" /><div className="flex flex-wrap gap-3">{imagePreviews.map((p, i) => (<div key={i} className="relative w-24 h-24 sm:w-20 sm:h-20 rounded-lg overflow-hidden border-2 border-slate-200"><img src={p} alt="" className="w-full h-full object-cover" /><button type="button" onClick={() => removeImage(i)} className="absolute top-0.5 right-0.5 w-6 h-6 sm:w-5 sm:h-5 bg-red-500 text-white rounded-full text-xs font-bold flex items-center justify-center">x</button></div>))}<button type="button" onClick={() => fileInputRef.current?.click()} className="w-24 h-24 sm:w-20 sm:h-20 rounded-lg border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 hover:border-orange-400 active:border-orange-400 active:bg-orange-50"><span className="text-2xl sm:text-xl">+</span></button></div></div>
             <button type="submit" disabled={addLoading} className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl disabled:opacity-50">{addLoading ? 'Creating...' : 'Add Product'}</button>
@@ -2815,6 +2839,182 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
             </div>
           </div>
         )}
+
+        {/* STOCK TAKE */}
+        {tab === 'stocktake' && (() => {
+          const allProducts = (data?.products || [])
+          const searchLower = stocktakeSearch.toLowerCase()
+          const filtered = stocktakeSearch
+            ? allProducts.filter((p: any) =>
+                p.name?.toLowerCase().includes(searchLower) ||
+                (p.sku || '').toLowerCase().includes(searchLower) ||
+                (p.warehouse_location || '').toLowerCase().includes(searchLower))
+            : allProducts
+
+          // Build location groups
+          const locationGroups = new Map<string, any[]>()
+          filtered.forEach((p: any) => {
+            const loc = p.warehouse_location?.trim() || 'Unassigned'
+            if (!locationGroups.has(loc)) locationGroups.set(loc, [])
+            locationGroups.get(loc)!.push(p)
+          })
+          const locationList = Array.from(locationGroups.entries()).sort((a, b) => {
+            if (a[0] === 'Unassigned') return 1; if (b[0] === 'Unassigned') return -1
+            return a[0].localeCompare(b[0])
+          })
+          const locationProducts = stockLocation ? (locationGroups.get(stockLocation) || []) : []
+
+          const pendingCount = Object.keys(stockQtyEdits).length
+
+          return (
+            <div>
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4 gap-3">
+                <div className="flex items-center gap-2">
+                  {stockLocation && (
+                    <button onClick={() => { setStockLocation(null); setStockQtyEdits({}) }}
+                      className="text-slate-400 hover:text-slate-700 text-xl font-bold leading-none px-1 py-1 rounded active:bg-slate-100">←</button>
+                  )}
+                  <h1 className="text-xl font-black text-slate-900">
+                    {stockLocation ? stockLocation : '📦 Stock Take'}
+                  </h1>
+                  {stockLocation && <span className="text-xs font-semibold text-slate-400">{locationProducts.length} parts</span>}
+                </div>
+                {pendingCount > 0 && (
+                  <button onClick={saveAllStockChanges} disabled={stocktakeSaving}
+                    className="bg-orange-500 active:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-xl disabled:opacity-50 shrink-0">
+                    {stocktakeSaving ? 'Saving...' : `Save ${pendingCount} Change${pendingCount !== 1 ? 's' : ''}`}
+                  </button>
+                )}
+              </div>
+
+              {/* Search */}
+              <div className="relative mb-4">
+                <input type="search" placeholder="Search by name, SKU, or location..." value={stocktakeSearch}
+                  onChange={e => setStocktakeSearch(e.target.value)}
+                  className="w-full px-4 py-3 text-base rounded-xl border-2 border-slate-200 outline-none focus:border-orange-400 bg-white" />
+                {stocktakeSearch && (
+                  <button onClick={() => setStocktakeSearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl font-bold">×</button>
+                )}
+              </div>
+
+              {!stockLocation ? (
+                /* ── Location Tiles View ── */
+                <div>
+                  {locationList.length === 0 ? (
+                    <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
+                      <p className="text-4xl mb-3">📍</p>
+                      <p className="text-slate-500 font-semibold mb-1">No locations set</p>
+                      <p className="text-xs text-slate-400">Add a Warehouse Location to products via Edit or Add Product</p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-3">{locationList.length} Location{locationList.length !== 1 ? 's' : ''}</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {locationList.map(([loc, prods]) => {
+                          const totalQty = prods.reduce((s: number, p: any) => s + (p.quantity || 0), 0)
+                          const isUnassigned = loc === 'Unassigned'
+                          return (
+                            <button key={loc} onClick={() => { setStockLocation(loc); setStocktakeSearch('') }}
+                              className={`text-left p-4 rounded-xl border-2 transition active:scale-95 ${isUnassigned ? 'border-slate-200 bg-white hover:border-slate-300' : 'border-amber-200 bg-amber-50 hover:border-amber-400 hover:bg-amber-100'}`}>
+                              <div className="text-2xl mb-1.5">{isUnassigned ? '📭' : '📦'}</div>
+                              <div className="font-bold text-slate-900 text-sm leading-tight break-words">{loc}</div>
+                              <div className="text-xs text-slate-500 mt-1">{prods.length} part{prods.length !== 1 ? 's' : ''}</div>
+                              <div className="text-xs font-bold text-slate-700 mt-0.5">{totalQty} in stock</div>
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      {/* When searching — show matching products across all locations */}
+                      {stocktakeSearch && filtered.length > 0 && (
+                        <div className="mt-6">
+                          <p className="text-xs font-bold text-slate-400 uppercase mb-3">{filtered.length} Matching Product{filtered.length !== 1 ? 's' : ''}</p>
+                          <div className="space-y-2">
+                            {filtered.map((p: any) => {
+                              const curQty = stockQtyEdits[p.id] ?? p.quantity
+                              const changed = stockQtyEdits[p.id] !== undefined
+                              return (
+                                <div key={p.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${changed ? 'border-orange-300 bg-orange-50' : 'border-slate-200'}`}>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                      <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
+                                      {p.warehouse_location && <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">📍 {p.warehouse_location}</span>}
+                                    </div>
+                                    <p className="font-bold text-slate-900 text-sm leading-tight">{p.name}</p>
+                                    {(p.make || p.model) && <p className="text-xs text-slate-400">{p.make} {p.model}</p>}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
+                                      className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 font-bold text-xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
+                                    <input type="number" min="0" value={curQty}
+                                      onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: parseInt(e.target.value) || 0}))}
+                                      className="w-14 h-9 text-center font-bold text-base border-2 rounded-lg outline-none focus:border-orange-400 border-slate-200 bg-white" />
+                                    <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
+                                      className="w-9 h-9 rounded-lg bg-slate-100 text-slate-700 font-bold text-xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : (
+                /* ── Products in Location View ── */
+                <div>
+                  {locationProducts.length === 0 ? (
+                    <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
+                      <p className="text-slate-400 font-semibold">No products in this location</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {locationProducts.map((p: any) => {
+                        const curQty = stockQtyEdits[p.id] ?? p.quantity
+                        const changed = stockQtyEdits[p.id] !== undefined
+                        return (
+                          <div key={p.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${changed ? 'border-orange-300 bg-orange-50' : 'border-slate-200'}`}>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                                <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
+                                {p.condition && <span className="text-[10px] font-semibold text-slate-400">{p.condition}</span>}
+                              </div>
+                              <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
+                              {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model} {p.year}</p>}
+                              {changed && <p className="text-[10px] font-bold text-orange-600 mt-0.5">Changed: {p.quantity} → {curQty}</p>}
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
+                                className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
+                              <input type="number" min="0" value={curQty}
+                                onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: parseInt(e.target.value) || 0}))}
+                                className="w-16 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
+                              <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
+                                className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {/* Sticky save bar at bottom when changes exist */}
+                  {pendingCount > 0 && (
+                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-50 sm:hidden">
+                      <button onClick={saveAllStockChanges} disabled={stocktakeSaving}
+                        className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl disabled:opacity-50">
+                        {stocktakeSaving ? 'Saving...' : `✓ Save ${pendingCount} Change${pendingCount !== 1 ? 's' : ''}`}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* SETTINGS */}
         {tab === 'settings' && (<div>

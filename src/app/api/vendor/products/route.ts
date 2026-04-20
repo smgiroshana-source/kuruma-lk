@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
       price: pd.price ? parseInt(pd.price) : null, cost: pd.cost ? parseInt(pd.cost) : null,
       show_price: pd.show_price !== false, quantity: parseInt(pd.quantity) || 1,
       added_date: pd.added_date || null, is_active: true,
+      warehouse_location: pd.warehouse_location || null,
     }).select().single()
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
     return NextResponse.json({ success: true, product, message: 'Product created (ID: ' + sku + ')' })
@@ -107,6 +108,7 @@ export async function POST(req: NextRequest) {
         show_price: item.show_price !== false,
         quantity: parseInt(item.quantity) || 1,
         added_date: item.added_date || null, is_active: true,
+        warehouse_location: item.warehouse_location || null,
       }
       if (existingMap.has(sku)) {
         if (importMode === 'update') toUpdate.push({ ...row, id: existingMap.get(sku) })
