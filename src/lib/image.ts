@@ -1,39 +1,22 @@
 /**
- * Supabase Image Transformation helpers.
- * Converts public storage URLs to render URLs with resize/quality params.
- * Requires Supabase Pro plan with Image Transformations enabled.
+ * Image URL helpers.
  *
- * /storage/v1/object/public/...  →  /storage/v1/render/image/public/...?width=W&quality=Q
+ * Images are now resized to max 1200px at upload time (see /api/vendor/upload),
+ * so we no longer need Supabase Storage Image Transformations (which cost $5/1000).
+ * These functions return the original URL unchanged and are kept for compatibility.
  */
 
-function transform(url: string, width: number, quality = 75): string {
-  if (!url) return url
-  return url.replace(
-    '/storage/v1/object/public/',
-    '/storage/v1/render/image/public/'
-  ) + `?width=${width}&quality=${quality}`
-}
+export function thumbnail(url: string): string { return url || '' }
+export function medium(url: string): string { return url || '' }
+export function thumb64(url: string): string { return url || '' }
 
-/** ~400px wide, quality 75 — for product listing cards */
-export function thumbnail(url: string): string {
-  return transform(url, 400)
-}
-
-/** ~800px wide, quality 80 — for product detail main image */
-export function medium(url: string): string {
-  return transform(url, 800, 80)
-}
-
-/** 128px wide, quality 60 — for small thumbnail strips */
-export function thumb64(url: string): string {
-  return transform(url, 128, 60)
-}
-
-/** onError handler: falls back to original URL if transform fails */
+/** onError fallback — kept for safety but no longer strips transform params */
 export function imgFallback(e: React.SyntheticEvent<HTMLImageElement>) {
   const img = e.currentTarget
-  const src = img.src
-  if (src.includes('/render/image/')) {
-    img.src = src.replace('/storage/v1/render/image/public/', '/storage/v1/object/public/').split('?')[0]
+  // Strip any legacy render/image transform URLs that may still exist in DB
+  if (img.src.includes('/storage/v1/render/image/')) {
+    img.src = img.src
+      .replace('/storage/v1/render/image/public/', '/storage/v1/object/public/')
+      .split('?')[0]
   }
 }
