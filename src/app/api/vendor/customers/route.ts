@@ -38,23 +38,30 @@ export async function GET(req: NextRequest) {
     if (customerIds.length > 0) {
       const { data: sales } = await admin
         .from('sales')
-        .select('customer_id, total, paid_amount, balance_due, payment_status')
+        .select('customer_id, total, paid_amount, balance_due, payment_status, created_at')
         .eq('vendor_id', vendor.id)
         .in('customer_id', customerIds)
         .neq('payment_status', 'voided')
 
-      const creditMap: Record<string, { totalBought: number; totalPaid: number; balance: number; salesCount: number }> = {}
+      const creditMap: Record<string, { totalBought: number; totalPaid: number; balance: number; salesCount: number; oldestDueDate: string | null }> = {}
       for (const sale of (sales || [])) {
-        if (!creditMap[sale.customer_id]) creditMap[sale.customer_id] = { totalBought: 0, totalPaid: 0, balance: 0, salesCount: 0 }
+        if (!creditMap[sale.customer_id]) creditMap[sale.customer_id] = { totalBought: 0, totalPaid: 0, balance: 0, salesCount: 0, oldestDueDate: null }
         creditMap[sale.customer_id].totalBought += parseFloat(sale.total || 0)
         creditMap[sale.customer_id].totalPaid += parseFloat(sale.paid_amount || 0)
         creditMap[sale.customer_id].balance += parseFloat(sale.balance_due || 0)
         creditMap[sale.customer_id].salesCount++
+        // Track the oldest outstanding invoice date for aging display
+        if (parseFloat(sale.balance_due || 0) > 0 && sale.created_at) {
+          const existing = creditMap[sale.customer_id].oldestDueDate
+          if (!existing || sale.created_at < existing) {
+            creditMap[sale.customer_id].oldestDueDate = sale.created_at
+          }
+        }
       }
 
       const customersWithCredit = customers.map((c: any) => ({
         ...c,
-        credit: creditMap[c.id] || { totalBought: 0, totalPaid: 0, balance: 0, salesCount: 0 },
+        credit: creditMap[c.id] || { totalBought: 0, totalPaid: 0, balance: 0, salesCount: 0, oldestDueDate: null },
         advance: parseFloat(c.advance_balance || 0),
       }))
 

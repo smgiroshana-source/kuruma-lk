@@ -76,6 +76,18 @@ function confirmedAgo(dateStr: string | null): { label: string; cls: string } | 
   return { label: `${days}d ago`, cls: 'text-red-600 bg-red-50' }
 }
 
+/** Credit aging badge — shown on customer cards and individual invoices.
+ *  Based on the oldest unpaid invoice date.
+ *  <30d → nothing  |  30-44d → yellow  |  45-59d → orange  |  60d+ → red */
+function creditAge(dateStr: string | null): { label: string; pill: string; dot: string } | null {
+  if (!dateStr) return null
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
+  if (days >= 60) return { label: `${days}d overdue`, pill: 'text-red-700 bg-red-100 border border-red-300',    dot: 'bg-red-500' }
+  if (days >= 45) return { label: `${days}d overdue`, pill: 'text-orange-700 bg-orange-100 border border-orange-300', dot: 'bg-orange-500' }
+  if (days >= 30) return { label: `${days}d overdue`, pill: 'text-yellow-700 bg-yellow-100 border border-yellow-300', dot: 'bg-yellow-500' }
+  return null
+}
+
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
   const items = sale.items || []; const payments = sale.payments || []; const isThermal = format === 'thermal'; const w = isThermal ? 300 : 800
   const s = settings || {}
@@ -2636,7 +2648,11 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 {(() => { const filtered = creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }); return filtered.length === 0 })() ? <div className="bg-white rounded-xl border border-slate-200 p-6 text-center"><p className="text-2xl opacity-30">✅</p><p className="text-slate-400 text-sm font-semibold mt-2">No outstanding credit or advances</p></div> : creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }).map((c: any) => (
                   <button key={c.id} onClick={() => loadOutstanding(c)} className={'w-full text-left bg-white rounded-xl border px-4 py-3 hover:shadow-md transition ' + (selectedCreditCustomer?.id === c.id ? 'border-orange-500 bg-orange-50' : 'border-slate-200')}>
                     <div className="flex items-center justify-between">
-                      <div><p className="font-bold text-sm">{c.name}</p>{c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}</div>
+                      <div>
+                        <p className="font-bold text-sm">{c.name}</p>
+                        {c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}
+                        {(() => { const age = creditAge(c.credit?.oldestDueDate); return age ? <span className={'inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded mt-1 ' + age.pill}><span className={'w-1.5 h-1.5 rounded-full ' + age.dot} />{age.label}</span> : null })()}
+                      </div>
                       <div className="text-right">
                         {c.credit?.balance > 0 && <p className="font-black text-red-600">Owes: Rs.{c.credit.balance.toLocaleString()}</p>}
                         {c.advance > 0 && <p className="font-bold text-emerald-600">Advance: Rs.{c.advance.toLocaleString()}</p>}
@@ -2717,17 +2733,28 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                   {/* Outstanding invoices */}
                   {outstandingSales.length > 0 && (<div className="mb-4">
                     <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Outstanding Invoices</h4>
-                    <div className="space-y-3">{outstandingSales.map((sale: any) => (
-                      <div key={sale.id} className="bg-white rounded-xl border border-slate-200 p-4">
+                    <div className="space-y-3">{outstandingSales.map((sale: any) => {
+                      const age = creditAge(sale.created_at)
+                      const borderCls = age
+                        ? age.dot === 'bg-red-500'    ? 'border-red-300 bg-red-50/30'
+                        : age.dot === 'bg-orange-500' ? 'border-orange-300 bg-orange-50/30'
+                        :                               'border-yellow-300 bg-yellow-50/30'
+                        : 'border-slate-200'
+                      return (
+                      <div key={sale.id} className={'bg-white rounded-xl border p-4 ' + borderCls}>
                         <div className="flex items-center justify-between mb-2">
-                          <div><span className="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded">{sale.invoice_no}</span><span className="text-xs text-slate-400 ml-2">{formatDateShort(sale.created_at)}</span></div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded">{sale.invoice_no}</span>
+                            <span className="text-xs text-slate-400">{formatDateShort(sale.created_at)}</span>
+                            {age && <span className={'inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ' + age.pill}><span className={'w-1.5 h-1.5 rounded-full ' + age.dot} />{age.label}</span>}
+                          </div>
                           <div className="text-right"><p className="text-xs text-slate-400">Total: Rs.{parseFloat(sale.total).toLocaleString()}</p><p className="text-xs text-green-600">Paid: Rs.{parseFloat(sale.paid_amount).toLocaleString()}</p><p className="font-black text-red-600">Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p></div>
                         </div>
                         <div className="text-xs text-slate-500 mb-2">{(sale.items || []).map((i: any) => `${i.product_name} x${i.quantity}`).join(', ')}</div>
                         {sale.payments && sale.payments.length > 0 && (<div className="text-xs text-slate-400 mb-2">Payments: {sale.payments.map((p: any) => `${PAY_LABELS[p.payment_method] || p.payment_method} Rs.${parseFloat(p.amount).toLocaleString()}${p.cheque_number ? ' #' + p.cheque_number : ''}`).join(' + ')}</div>)}
                         <button onClick={() => { setSettleSale(sale); setSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]) }} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-lg">💰 Record Payment</button>
                       </div>
-                    ))}</div>
+                    )})}</div>
                   </div>)}
 
                   {outstandingSales.length === 0 && selectedCreditCustomer.credit?.balance <= 0 && (
