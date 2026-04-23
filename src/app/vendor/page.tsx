@@ -925,8 +925,9 @@ export default function VendorDashboard() {
 
   // Credit settlement
   async function loadOutstanding(customer: any) {
-    setSelectedCreditCustomer(customer); setOutstandingSales([])
+    setSelectedCreditCustomer(customer); setOutstandingSales([]); setRecentPayments([]); setRecentPaymentsOpen(false); setBulkSettleConfirm(false)
     try { const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: customer.id }) }); if (r.ok) { const j = await r.json(); setOutstandingSales(j.sales || []) } } catch {}
+    loadRecentPayments(customer.id)
   }
 
   async function handleSettle() {
@@ -996,11 +997,21 @@ export default function VendorDashboard() {
   const [bulkSettleMode, setBulkSettleMode] = useState(false)
   const [bulkSettlePayments, setBulkSettlePayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
   const [bulkSettleLoading, setBulkSettleLoading] = useState(false)
+  const [bulkSettleConfirm, setBulkSettleConfirm] = useState(false)
+  const [reversingPayment, setReversingPayment] = useState<string | null>(null)
+  const [recentPayments, setRecentPayments] = useState<any[]>([])
+  const [recentPaymentsOpen, setRecentPaymentsOpen] = useState(false)
 
   async function handleBulkSettle() {
     if (!selectedCreditCustomer) return
     const totalPay = bulkSettlePayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
     if (totalPay <= 0) { showToast('Enter payment amount'); return }
+    // Show confirmation step instead of processing immediately
+    setBulkSettleConfirm(true)
+  }
+
+  async function confirmBulkSettle() {
+    if (!selectedCreditCustomer) return
     setBulkSettleLoading(true)
     try {
       const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -1008,10 +1019,34 @@ export default function VendorDashboard() {
         payments: bulkSettlePayments.filter((p: any) => parseFloat(p.amount) > 0),
       }) })
       const j = await r.json()
-      if (j.success) { showToast(j.message); setBulkSettleMode(false); setBulkSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]); fetchCreditCustomers(); loadOutstanding(selectedCreditCustomer) }
+      if (j.success) { showToast(j.message); setBulkSettleMode(false); setBulkSettleConfirm(false); setBulkSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]); fetchCreditCustomers(); loadOutstanding(selectedCreditCustomer) }
       else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
     setBulkSettleLoading(false)
+  }
+
+  async function handleReversePayment(paymentId: string) {
+    if (!confirm('Reverse this payment? The invoice balance will be restored.')) return
+    setReversingPayment(paymentId)
+    try {
+      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reverse_payment', paymentId }) })
+      const j = await r.json()
+      if (j.success) {
+        showToast('Payment reversed — invoice balance restored')
+        if (selectedCreditCustomer) { loadOutstanding(selectedCreditCustomer); loadRecentPayments(selectedCreditCustomer.id) }
+        fetchCreditCustomers()
+      } else showToast('Error: ' + j.error)
+    } catch { showToast('Network error') }
+    setReversingPayment(null)
+  }
+
+  async function loadRecentPayments(customerId: string) {
+    try {
+      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_recent_payments', customerId }) })
+      if (r.ok) { const j = await r.json(); setRecentPayments(j.payments || []) }
+    } catch {}
   }
 
   function printCreditReport(customer: any, sales: any[], vendorInfo: any) {
@@ -2723,10 +2758,28 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                           <button onClick={() => { const total = outstandingSales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0); const u = [...bulkSettlePayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(total) }; setBulkSettlePayments(u) }} className="text-xs font-bold text-orange-600">Fill full balance</button>
                         </div>
                       </div>
-                      <div className="mt-3 flex gap-2">
-                        <button onClick={handleBulkSettle} disabled={bulkSettleLoading} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">{bulkSettleLoading ? 'Processing...' : '💰 Apply Payment'}</button>
-                        <p className="text-xs text-purple-500 self-center">Excess amount will be added to advance</p>
-                      </div>
+                      {bulkSettleConfirm ? (
+                        <div className="mt-3 bg-white border-2 border-red-400 rounded-xl p-4 space-y-3">
+                          <p className="text-xs font-bold text-red-500 uppercase tracking-wider text-center">⚠️ Confirm Payment</p>
+                          <p className="text-center text-slate-500 text-xs">You are applying</p>
+                          <p className="text-center font-black text-2xl text-slate-800">Rs.{bulkSettlePayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0).toLocaleString()}</p>
+                          <p className="text-center text-slate-500 text-xs">to</p>
+                          <p className="text-center font-black text-xl text-orange-600">{selectedCreditCustomer?.name}</p>
+                          <div className="flex gap-2 pt-1">
+                            <button onClick={confirmBulkSettle} disabled={bulkSettleLoading} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black text-sm py-3 rounded-xl disabled:opacity-50">
+                              {bulkSettleLoading ? 'Processing…' : '✅ Yes, confirm'}
+                            </button>
+                            <button onClick={() => setBulkSettleConfirm(false)} disabled={bulkSettleLoading} className="flex-1 border-2 border-slate-300 text-slate-600 font-bold text-sm py-3 rounded-xl hover:bg-slate-50">
+                              ✕ Go back
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-3 flex gap-2">
+                          <button onClick={handleBulkSettle} disabled={bulkSettleLoading} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">💰 Apply Payment</button>
+                          <p className="text-xs text-purple-500 self-center">Excess amount will be added to advance</p>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2751,7 +2804,18 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                           <div className="text-right"><p className="text-xs text-slate-400">Total: Rs.{parseFloat(sale.total).toLocaleString()}</p><p className="text-xs text-green-600">Paid: Rs.{parseFloat(sale.paid_amount).toLocaleString()}</p><p className="font-black text-red-600">Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p></div>
                         </div>
                         <div className="text-xs text-slate-500 mb-2">{(sale.items || []).map((i: any) => `${i.product_name} x${i.quantity}`).join(', ')}</div>
-                        {sale.payments && sale.payments.length > 0 && (<div className="text-xs text-slate-400 mb-2">Payments: {sale.payments.map((p: any) => `${PAY_LABELS[p.payment_method] || p.payment_method} Rs.${parseFloat(p.amount).toLocaleString()}${p.cheque_number ? ' #' + p.cheque_number : ''}`).join(' + ')}</div>)}
+                        {sale.payments && sale.payments.length > 0 && (
+                          <div className="mb-2 space-y-1">
+                            {sale.payments.map((p: any) => (
+                              <div key={p.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5">
+                                <span className="text-xs text-slate-500">{PAY_LABELS[p.payment_method] || p.payment_method} Rs.{parseFloat(p.amount).toLocaleString()}{p.cheque_number ? ` #${p.cheque_number}` : ''}{p.bank_ref ? ` ref:${p.bank_ref}` : ''}<span className="text-slate-300 ml-1">· {formatDateShort(p.created_at)}</span></span>
+                                <button onClick={() => handleReversePayment(p.id)} disabled={reversingPayment === p.id} className="text-[10px] font-bold text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 px-2 py-0.5 rounded ml-2 disabled:opacity-40 shrink-0">
+                                  {reversingPayment === p.id ? '…' : '↩ Reverse'}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         <button onClick={() => { setSettleSale(sale); setSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]) }} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-lg">💰 Record Payment</button>
                       </div>
                     )})}</div>
@@ -2760,6 +2824,33 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                   {outstandingSales.length === 0 && selectedCreditCustomer.credit?.balance <= 0 && (
                     <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4 text-center mb-4">
                       <p className="text-emerald-600 font-semibold">No outstanding invoices</p>
+                    </div>
+                  )}
+
+                  {/* Recent Payments — for reversing payments on fully-settled invoices */}
+                  {recentPayments.length > 0 && (
+                    <div className="mb-4">
+                      <button onClick={() => setRecentPaymentsOpen(o => !o)} className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase mb-2 hover:text-slate-700">
+                        <span>{recentPaymentsOpen ? '▾' : '▸'}</span> Recent Payments (last 7 days) — tap to reverse a mistake
+                      </button>
+                      {recentPaymentsOpen && (
+                        <div className="space-y-2">
+                          {recentPayments.map((p: any) => (
+                            <div key={p.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-3 py-2.5">
+                              <div>
+                                <span className="text-xs font-bold text-slate-700">Rs.{parseFloat(p.amount).toLocaleString()}</span>
+                                <span className="text-xs text-slate-400 ml-2">{PAY_LABELS[p.payment_method] || p.payment_method}</span>
+                                {p.sale?.invoice_no && <span className="text-xs text-slate-400 ml-2">· {p.sale.invoice_no}</span>}
+                                <span className="text-xs text-slate-300 ml-2">· {formatDateShort(p.created_at)}</span>
+                              </div>
+                              <button onClick={() => handleReversePayment(p.id)} disabled={reversingPayment === p.id} className="text-xs font-bold text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg ml-3 disabled:opacity-40 shrink-0">
+                                {reversingPayment === p.id ? '…' : '↩ Reverse'}
+                              </button>
+                            </div>
+                          ))}
+                          <p className="text-[10px] text-slate-400 text-center pt-1">Reversing a payment restores the invoice balance so it reappears as outstanding</p>
+                        </div>
+                      )}
                     </div>
                   )}
 

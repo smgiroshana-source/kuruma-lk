@@ -269,6 +269,50 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, message: msg })
   }
 
+  // Reverse a single payment record — restores the invoice balance
+  if (action === 'reverse_payment') {
+    const { paymentId } = body
+    if (!paymentId) return NextResponse.json({ error: 'paymentId required' }, { status: 400 })
+
+    // Fetch the payment, scoped to this vendor for security
+    const { data: payment } = await admin
+      .from('payments').select('id, sale_id, amount, payment_method, customer_id')
+      .eq('id', paymentId).eq('vendor_id', vendor.id).single()
+    if (!payment) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+
+    // Delete the payment record
+    await admin.from('payments').delete().eq('id', paymentId)
+
+    // Restore the sale's paid_amount and balance_due
+    const { data: sale } = await admin.from('sales')
+      .select('paid_amount, balance_due, total').eq('id', payment.sale_id).single()
+    if (sale) {
+      const newPaid = Math.max(0, parseFloat(sale.paid_amount) - payment.amount)
+      const newBalance = Math.max(0, parseFloat(sale.total) - newPaid)
+      const newStatus = newPaid <= 0 ? 'credit' : newBalance <= 0 ? 'paid' : 'partial'
+      await admin.from('sales').update({
+        paid_amount: newPaid, balance_due: newBalance, payment_status: newStatus,
+      }).eq('id', payment.sale_id)
+    }
+
+    return NextResponse.json({ success: true, message: `Rs.${payment.amount.toLocaleString()} payment reversed` })
+  }
+
+  // Fetch recent payments (last 7 days) for a customer — used to reverse mis-applied payments
+  if (action === 'get_recent_payments') {
+    const { customerId } = body
+    const since = new Date(); since.setDate(since.getDate() - 7)
+    const { data: payments } = await admin
+      .from('payments')
+      .select('id, sale_id, amount, payment_method, cheque_number, bank_ref, notes, created_at, sale:sales(invoice_no)')
+      .eq('vendor_id', vendor.id)
+      .eq('customer_id', customerId)
+      .gte('created_at', since.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(20)
+    return NextResponse.json({ payments: payments || [] })
+  }
+
   // Record a credit settlement payment (single invoice)
   if (action === 'settle_credit') {
     const { customerId, saleId, payments: paymentLines } = body
