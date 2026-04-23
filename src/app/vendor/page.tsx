@@ -2805,15 +2805,8 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                         </div>
                         <div className="text-xs text-slate-500 mb-2">{(sale.items || []).map((i: any) => `${i.product_name} x${i.quantity}`).join(', ')}</div>
                         {sale.payments && sale.payments.length > 0 && (
-                          <div className="mb-2 space-y-1">
-                            {sale.payments.map((p: any) => (
-                              <div key={p.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-2.5 py-1.5">
-                                <span className="text-xs text-slate-500">{PAY_LABELS[p.payment_method] || p.payment_method} Rs.{parseFloat(p.amount).toLocaleString()}{p.cheque_number ? ` #${p.cheque_number}` : ''}{p.bank_ref ? ` ref:${p.bank_ref}` : ''}<span className="text-slate-300 ml-1">· {formatDateShort(p.created_at)}</span></span>
-                                <button onClick={() => handleReversePayment(p.id)} disabled={reversingPayment === p.id} className="text-[10px] font-bold text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 px-2 py-0.5 rounded ml-2 disabled:opacity-40 shrink-0">
-                                  {reversingPayment === p.id ? '…' : '↩ Reverse'}
-                                </button>
-                              </div>
-                            ))}
+                          <div className="text-xs text-slate-400 mb-2">
+                            Payments: {sale.payments.map((p: any) => `${PAY_LABELS[p.payment_method] || p.payment_method} Rs.${parseFloat(p.amount).toLocaleString()}${p.cheque_number ? ' #' + p.cheque_number : ''}${p.bank_ref ? ' ref:' + p.bank_ref : ''}`).join(' + ')}
                           </div>
                         )}
                         <button onClick={() => { setSettleSale(sale); setSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]) }} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-lg">💰 Record Payment</button>
