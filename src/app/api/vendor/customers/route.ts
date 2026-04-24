@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   const { action } = body
 
   if (action === 'create') {
-    const { name, phone, whatsapp, email, address, notes, advance_balance } = body
+    const { name, phone, whatsapp, email, address, notes, advance_balance, require_vehicle_no } = body
     if (!name?.trim()) return NextResponse.json({ error: 'Customer name required' }, { status: 400 })
 
     const { data: customer, error } = await admin.from('customers').insert({
@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
       email: email || null,
       address: address || null, notes: notes || null,
       advance_balance: advance_balance ? parseFloat(advance_balance) : 0,
+      require_vehicle_no: require_vehicle_no || false,
     }).select().single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })

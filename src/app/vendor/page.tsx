@@ -210,8 +210,9 @@ export default function VendorDashboard() {
   const [posDate, setPosDate] = useState(new Date().toISOString().split('T')[0])
   const [posVehicleNo, setPosVehicleNo] = useState('')
   const [posLoading, setPosLoading] = useState(false)
-  const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean }>({})
+  const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean; vehicle?: boolean }>({})
   const [posReceipt, setPosReceipt] = useState<any>(null)
+  const [posPreview, setPosPreview] = useState(false)
   const [useAdvance, setUseAdvance] = useState(false)
 
   // Sales
@@ -268,7 +269,7 @@ export default function VendorDashboard() {
   const [editingCustomer, setEditingCustomer] = useState<any>(null)
   const [editCustomerLoading, setEditCustomerLoading] = useState(false)
   const [showAddCustomer, setShowAddCustomer] = useState(false)
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '' })
+  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '', require_vehicle_no: false })
   const [addCustomerLoading, setAddCustomerLoading] = useState(false)
   const [adjustAdvanceAmount, setAdjustAdvanceAmount] = useState('')
 
@@ -492,6 +493,7 @@ export default function VendorDashboard() {
           whatsapp: newCustomer.whatsapp || newCustomer.phone, email: newCustomer.email,
           address: newCustomer.address, notes: newCustomer.notes,
           advance_balance: newCustomer.advance ? parseFloat(newCustomer.advance) : 0,
+          require_vehicle_no: newCustomer.require_vehicle_no || false,
         })
       })
       const j = await r.json()
@@ -509,7 +511,7 @@ export default function VendorDashboard() {
           })
         }
         showToast('Customer registered!')
-        setNewCustomer({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '' })
+        setNewCustomer({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '', require_vehicle_no: false })
         setShowAddCustomer(false)
         fetchCreditCustomers()
       } else showToast('Error: ' + j.error)
@@ -869,7 +871,7 @@ export default function VendorDashboard() {
 
   function selectCustomer(customer: any) {
     const advance = parseFloat(customer.advance_balance || 0)
-    setPosCustomer({ id: customer.id, name: customer.name, phone: customer.phone || '', advance, outstanding: 0 })
+    setPosCustomer({ id: customer.id, name: customer.name, phone: customer.phone || '', advance, outstanding: 0, require_vehicle_no: customer.require_vehicle_no || false })
     setCustomerSuggestions([])
     if (advance > 0) setUseAdvance(true)
     // Fetch outstanding
@@ -902,13 +904,23 @@ export default function VendorDashboard() {
   const posBalance = Math.max(0, posTotal - posTotalPaid)
   const posOverpayment = Math.max(0, posTotalPaid - posTotal)
 
-  async function handleCreateSale() {
-    if (posCart.length === 0) { showToast('Add items'); return }
-    const errors: { name?: boolean; phone?: boolean } = {}
+  function handleCreateSale() {
+    if (posCart.length === 0) { showToast('Add items to cart'); return }
+    const errors: { name?: boolean; phone?: boolean; vehicle?: boolean } = {}
     if (!posCustomer.name.trim()) errors.name = true
     if (!posCustomer.phone.trim()) errors.phone = true
-    if (errors.name || errors.phone) { setPosErrors(errors); setTimeout(() => setPosErrors({}), 3000); return }
+    if (posCustomer.require_vehicle_no && !posVehicleNo.trim()) errors.vehicle = true
+    if (errors.name || errors.phone || errors.vehicle) {
+      setPosErrors(errors)
+      if (errors.vehicle) showToast('⚠️ Vehicle number required for this customer')
+      setTimeout(() => setPosErrors({}), 4000)
+      return
+    }
     setPosErrors({})
+    setPosPreview(true)
+  }
+
+  async function confirmCreateSale() {
     setPosLoading(true)
     try {
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -917,8 +929,14 @@ export default function VendorDashboard() {
         discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0), notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
       }) })
       const j = await r.json()
-      if (j.success) { setPosReceipt({ sale: { ...j.sale, totalAmountDue: j.totalAmountDue || 0 }, vendor: data?.vendor, advanceUsed: j.advanceUsed, appliedToOutstanding: j.appliedToOutstanding, settledInvoices: j.settledInvoices, newAdvance: j.newAdvance }); showToast(j.message); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]); setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false); await fetchData() }
-      else showToast('Error: ' + j.error)
+      if (j.success) {
+        setPosReceipt({ sale: { ...j.sale, totalAmountDue: j.totalAmountDue || 0 }, vendor: data?.vendor, advanceUsed: j.advanceUsed, appliedToOutstanding: j.appliedToOutstanding, settledInvoices: j.settledInvoices, newAdvance: j.newAdvance })
+        showToast(j.message)
+        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
+        setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
+        setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false)
+        setPosPreview(false); await fetchData()
+      } else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
     setPosLoading(false)
   }
@@ -975,7 +993,7 @@ export default function VendorDashboard() {
     try {
       const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         action: 'update', customerId: editingCustomer.id,
-        data: { name: editingCustomer.name, phone: editingCustomer.phone, whatsapp: editingCustomer.whatsapp, email: editingCustomer.email, address: editingCustomer.address, notes: editingCustomer.notes },
+        data: { name: editingCustomer.name, phone: editingCustomer.phone, whatsapp: editingCustomer.whatsapp, email: editingCustomer.email, address: editingCustomer.address, notes: editingCustomer.notes, require_vehicle_no: editingCustomer.require_vehicle_no || false },
       }) })
       const j = await r.json()
       if (j.success) { showToast('Customer updated'); setEditingCustomer(null); fetchCreditCustomers(); if (selectedCreditCustomer?.id === editingCustomer.id) setSelectedCreditCustomer({ ...selectedCreditCustomer, ...editingCustomer }) }
@@ -1980,6 +1998,80 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
 
         {/* POS */}
         {tab === 'pos' && (<div>
+
+          {/* Invoice Preview Modal */}
+          {posPreview && (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+              <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[92vh] overflow-y-auto">
+                {/* Header */}
+                <div className="bg-slate-800 text-white px-5 py-4 rounded-t-2xl sm:rounded-t-2xl">
+                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-0.5">Invoice Preview</p>
+                  <p className="font-black text-xl">{data?.vendor?.name}</p>
+                  <p className="text-sm text-slate-300 mt-1">{new Date(posDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                </div>
+
+                <div className="p-5 space-y-4">
+                  {/* Customer */}
+                  <div className="bg-slate-50 rounded-xl p-3 space-y-0.5">
+                    <p className="font-black text-slate-800">{posCustomer.name || 'Walk-in Customer'}</p>
+                    {posCustomer.phone && <p className="text-xs text-slate-500">📞 {posCustomer.phone}</p>}
+                    {posVehicleNo && <p className="text-xs font-mono font-bold text-slate-700">🚗 {posVehicleNo}</p>}
+                    {posNotes && <p className="text-xs text-slate-400 italic mt-1">{posNotes}</p>}
+                  </div>
+
+                  {/* Items */}
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Items</p>
+                    <div className="space-y-1.5">
+                      {posCart.map((item, i) => (
+                        <div key={i} className="flex justify-between items-start text-sm">
+                          <div className="flex-1 min-w-0 pr-3">
+                            <p className="font-semibold text-slate-800 truncate">{item.productName}</p>
+                            <p className="text-xs text-slate-400">{item.productSku} · Rs.{item.unitPrice.toLocaleString()} × {item.quantity}</p>
+                          </div>
+                          <p className="font-bold text-slate-800 shrink-0">Rs.{(item.unitPrice * item.quantity).toLocaleString()}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Totals */}
+                  <div className="border-t border-slate-100 pt-3 space-y-1.5">
+                    <div className="flex justify-between text-sm text-slate-500"><span>Subtotal</span><span>Rs.{posSubtotal.toLocaleString()}</span></div>
+                    {posDiscountAmt > 0 && <div className="flex justify-between text-sm text-emerald-600"><span>Discount</span><span>−Rs.{posDiscountAmt.toLocaleString()}</span></div>}
+                    <div className="flex justify-between font-black text-base text-slate-800 pt-1 border-t border-slate-200"><span>Total</span><span>Rs.{posTotal.toLocaleString()}</span></div>
+                  </div>
+
+                  {/* Payment breakdown */}
+                  {posPayments.filter(p => parseFloat(p.amount) > 0).length > 0 && (
+                    <div className="bg-emerald-50 rounded-xl p-3 space-y-1">
+                      <p className="text-[10px] font-black text-emerald-700 uppercase tracking-wider mb-1.5">Payment</p>
+                      {posPayments.filter(p => parseFloat(p.amount) > 0).map((p, i) => (
+                        <div key={i} className="flex justify-between text-sm text-emerald-800">
+                          <span>{PAY_LABELS[p.method] || p.method}{p.chequeNumber ? ` #${p.chequeNumber}` : ''}{p.bankRef ? ` ref:${p.bankRef}` : ''}</span>
+                          <span className="font-bold">Rs.{parseFloat(p.amount).toLocaleString()}</span>
+                        </div>
+                      ))}
+                      {useAdvance && posAdvanceApplied > 0 && <div className="flex justify-between text-sm text-cyan-700"><span>Advance Applied</span><span className="font-bold">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
+                    </div>
+                  )}
+                  {posBalance > 0 && <div className="flex justify-between font-black text-red-600 bg-red-50 rounded-xl px-3 py-2"><span>Balance Due (Credit)</span><span>Rs.{posBalance.toLocaleString()}</span></div>}
+                  {posOverpayment > 0 && <div className="flex justify-between font-bold text-cyan-700 bg-cyan-50 rounded-xl px-3 py-2"><span>{posCustomer.outstanding > 0 ? 'Excess → applied to outstanding' : 'Excess → advance'}</span><span>Rs.{posOverpayment.toLocaleString()}</span></div>}
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex gap-3 px-5 pb-6">
+                  <button onClick={() => setPosPreview(false)} className="flex-1 border-2 border-slate-300 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-50 text-sm">
+                    ← Back to Edit
+                  </button>
+                  <button onClick={confirmCreateSale} disabled={posLoading} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black py-3.5 rounded-xl text-sm disabled:opacity-50">
+                    {posLoading ? 'Creating…' : '✅ Confirm'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {posReceipt ? (
             <div>
               <div className="flex items-center justify-between mb-4"><h1 className="text-2xl font-black">Invoice Created!</h1><button onClick={() => setPosReceipt(null)} className="text-sm text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200">+ New Sale</button></div>
@@ -2061,7 +2153,10 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
 
                   {/* Vehicle & Date */}
                   <div className="flex gap-2">
-                    <input type="text" value={posVehicleNo} onChange={e => { let v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = v.match(/^([A-Z]{2,3})(\d{1,4})$/); if (m) v = m[1] + '-' + m[2]; setPosVehicleNo(v) }} placeholder="ABC-1234" maxLength={8} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 font-mono font-bold tracking-wider" />
+                    <div className="flex-1 relative">
+                      <input type="text" value={posVehicleNo} onChange={e => { let v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = v.match(/^([A-Z]{2,3})(\d{1,4})$/); if (m) v = m[1] + '-' + m[2]; setPosVehicleNo(v); if (posErrors.vehicle) setPosErrors(prev => ({...prev, vehicle: false})) }} placeholder={posCustomer.require_vehicle_no ? 'ABC-1234 (required)' : 'ABC-1234'} maxLength={8} className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono font-bold tracking-wider transition-all ' + (posErrors.vehicle ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400')} />
+                      {posCustomer.require_vehicle_no && <span className="absolute right-2 top-2 text-[9px] font-black text-red-500">REQ</span>}
+                    </div>
                     <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                   </div>
 
@@ -2589,6 +2684,15 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 <div><label className="block text-[11px] font-semibold text-emerald-600 mb-1">Opening Advance (Rs.)</label><input type="text" inputMode="numeric" value={newCustomer.advance} onChange={e => setNewCustomer({...newCustomer, advance: e.target.value.replace(/[^0-9.]/g, '')})} className="w-full px-3 py-2 rounded-lg border-2 border-emerald-200 text-sm outline-none focus:border-emerald-400 bg-emerald-50" placeholder="0" /></div>
                 <div><label className="block text-[11px] font-semibold text-red-600 mb-1">Opening Credit Owed (Rs.)</label><input type="text" inputMode="numeric" value={newCustomer.credit} onChange={e => setNewCustomer({...newCustomer, credit: e.target.value.replace(/[^0-9.]/g, '')})} className="w-full px-3 py-2 rounded-lg border-2 border-red-200 text-sm outline-none focus:border-red-400 bg-red-50" placeholder="0" /></div>
               </div>
+              <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 mt-3">
+                <div>
+                  <p className="text-xs font-semibold text-amber-800">Require Vehicle Number</p>
+                  <p className="text-[10px] text-amber-600">POS will block sale if vehicle no. is blank</p>
+                </div>
+                <button type="button" onClick={() => setNewCustomer({...newCustomer, require_vehicle_no: !newCustomer.require_vehicle_no})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (newCustomer.require_vehicle_no ? 'bg-amber-500' : 'bg-slate-300')}>
+                  <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (newCustomer.require_vehicle_no ? 'translate-x-6' : 'translate-x-1')} />
+                </button>
+              </div>
               <div className="flex gap-2 mt-4">
                 <button onClick={registerCustomer} disabled={addCustomerLoading} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-6 py-2 rounded-lg disabled:opacity-50">{addCustomerLoading ? 'Registering...' : 'Register Customer'}</button>
                 <button onClick={() => setShowAddCustomer(false)} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
@@ -2655,6 +2759,16 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                 <div><label className="block text-xs font-semibold text-slate-500 mb-1">Email</label><input type="email" value={editingCustomer.email || ''} onChange={e => setEditingCustomer({...editingCustomer, email: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="customer@email.com" /></div>
                 <div><label className="block text-xs font-semibold text-slate-500 mb-1">Address</label><textarea value={editingCustomer.address || ''} onChange={e => setEditingCustomer({...editingCustomer, address: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" placeholder="Street, City, District" /></div>
                 <div><label className="block text-xs font-semibold text-slate-500 mb-1">Notes</label><textarea value={editingCustomer.notes || ''} onChange={e => setEditingCustomer({...editingCustomer, notes: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" placeholder="Internal notes about this customer" /></div>
+                {/* Require vehicle number */}
+                <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
+                  <div>
+                    <p className="text-xs font-semibold text-amber-800">Require Vehicle Number</p>
+                    <p className="text-[10px] text-amber-600">POS will block sale if vehicle no. is blank</p>
+                  </div>
+                  <button type="button" onClick={() => setEditingCustomer({...editingCustomer, require_vehicle_no: !editingCustomer.require_vehicle_no})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (editingCustomer.require_vehicle_no ? 'bg-amber-500' : 'bg-slate-300')}>
+                    <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingCustomer.require_vehicle_no ? 'translate-x-6' : 'translate-x-1')} />
+                  </button>
+                </div>
                 {/* Advance Balance Adjustment */}
                 <div className="border-t border-slate-200 pt-3 mt-3">
                   <label className="block text-xs font-bold text-slate-700 mb-2">Advance Balance: <span className="text-emerald-600">Rs.{parseFloat(editingCustomer.advance_balance || 0).toLocaleString()}</span></label>
