@@ -236,6 +236,10 @@ export default function VendorDashboard() {
   const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10))
   const [reportFrom, setReportFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
   const [reportTo, setReportTo] = useState(new Date().toISOString().slice(0, 10))
+  const [periodReportModal, setPeriodReportModal] = useState(false)
+  const [periodReportLoading, setPeriodReportLoading] = useState(false)
+  const [periodReportSales, setPeriodReportSales] = useState<any[]>([])
+  const [periodReportSelected, setPeriodReportSelected] = useState<Set<string>>(new Set())
   const [customerHistoryId, setCustomerHistoryId] = useState<string | null>(null)
   const [customerHistoryName, setCustomerHistoryName] = useState('')
   const [customerHistory, setCustomerHistory] = useState<any[] | null>(null)
@@ -1256,6 +1260,21 @@ ${(() => {
 
     const win = window.open('', '_blank', 'width=850,height=700')
     if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+  }
+
+  async function openPeriodReport() {
+    setPeriodReportLoading(true)
+    try {
+      const r = await fetch(`/api/vendor/sales?from=${reportFrom}&to=${reportTo}`)
+      const j = await r.json()
+      const sales = (j.sales || []).filter((s: any) => s.payment_status !== 'voided' && !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL'))
+      setPeriodReportSales(sales)
+      // Pre-select all unique customer keys
+      const keys = new Set<string>(sales.map((s: any) => s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')))
+      setPeriodReportSelected(keys)
+      setPeriodReportModal(true)
+    } catch { showToast('Failed to fetch sales') }
+    setPeriodReportLoading(false)
   }
 
   function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any) {
@@ -2577,15 +2596,12 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
                       </div>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-5">
-                      <h3 className="font-bold text-sm text-slate-800 mb-3">📆 Period Report</h3>
-                      <p className="text-xs text-slate-400 mb-3">Includes customer-wise credit details</p>
+                      <h3 className="font-bold text-sm text-slate-800 mb-1">📆 Period Report</h3>
+                      <p className="text-xs text-slate-400 mb-3">Customer-wise sales breakdown with selectable PDF</p>
                       <div className="flex items-end gap-3 flex-wrap">
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label><input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label><input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <button onClick={async () => {
-                          showToast('Fetching sales...')
-                          try { const r = await fetch(`/api/vendor/sales?from=${reportFrom}&to=${reportTo}`); const j = await r.json(); generatePeriodReport(j.sales || [], data?.vendor, reportFrom, reportTo, vendorSettings) } catch { showToast('Failed') }
-                        }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                        <button onClick={openPeriodReport} disabled={periodReportLoading} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">{periodReportLoading ? '⏳ Loading…' : '📊 View Report'}</button>
                       </div>
                       <div className="flex gap-2 mt-3">
                         {[{l:"This Week",f:7},{l:"This Month",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(new Date().toISOString().slice(0, 10)) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
@@ -2966,6 +2982,106 @@ ${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px
             </div>
           )}
         </div>)}
+
+        {/* PERIOD REPORT MODAL */}
+        {periodReportModal && (() => {
+          // Group sales by customer
+          const byCustomer: Record<string, { key: string; name: string; phone: string; invoices: number; total: number; paid: number; balance: number; sales: any[] }> = {}
+          periodReportSales.forEach((s: any) => {
+            const key = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
+            if (!byCustomer[key]) byCustomer[key] = { key, name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, balance: 0, sales: [] }
+            byCustomer[key].invoices++
+            byCustomer[key].total += parseFloat(s.total || 0)
+            byCustomer[key].paid += parseFloat(s.paid_amount || 0)
+            byCustomer[key].balance += parseFloat(s.balance_due || 0)
+            byCustomer[key].sales.push(s)
+          })
+          const customers = Object.values(byCustomer).sort((a, b) => b.total - a.total)
+          const allKeys = customers.map(c => c.key)
+          const allSelected = allKeys.every(k => periodReportSelected.has(k))
+          const selectedCustomers = customers.filter(c => periodReportSelected.has(c.key))
+          const selTotal = selectedCustomers.reduce((s, c) => s + c.total, 0)
+          const selPaid = selectedCustomers.reduce((s, c) => s + c.paid, 0)
+          const selBalance = selectedCustomers.reduce((s, c) => s + c.balance, 0)
+          const fromStr = new Date(reportFrom).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
+          const toStr = new Date(reportTo).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
+
+          return (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+              <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl flex flex-col max-h-[92vh]">
+
+                {/* Header */}
+                <div className="flex items-start justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+                  <div>
+                    <h2 className="font-black text-slate-800 text-base">📊 Sales Report</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">{fromStr} — {toStr} · {customers.length} customers · {periodReportSales.length} invoices</p>
+                  </div>
+                  <button onClick={() => setPeriodReportModal(false)} className="text-slate-400 hover:text-slate-600 text-xl font-bold px-2">✕</button>
+                </div>
+
+                {/* Summary bar */}
+                <div className="grid grid-cols-3 divide-x divide-slate-100 shrink-0 bg-slate-50 border-b border-slate-100">
+                  {[['Total Sales', selTotal], ['Total Paid', selPaid], ['Balance Due', selBalance]].map(([lbl, val]) => (
+                    <div key={lbl as string} className="px-4 py-3 text-center">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lbl}</p>
+                      <p className={'font-black text-sm mt-0.5 ' + (lbl === 'Balance Due' && (val as number) > 0 ? 'text-red-600' : 'text-slate-800')}>Rs.{(val as number).toLocaleString()}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Select all row */}
+                <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-100 shrink-0">
+                  <button onClick={() => setPeriodReportSelected(allSelected ? new Set() : new Set(allKeys))} className="text-xs font-bold text-orange-600 hover:text-orange-700">
+                    {allSelected ? 'Deselect All' : 'Select All'}
+                  </button>
+                  <p className="text-xs text-slate-400">{periodReportSelected.size} of {customers.length} selected</p>
+                </div>
+
+                {/* Customer rows */}
+                <div className="overflow-y-auto flex-1">
+                  {customers.map(c => {
+                    const checked = periodReportSelected.has(c.key)
+                    return (
+                      <label key={c.key} className={'flex items-center gap-3 px-5 py-3 border-b border-slate-50 cursor-pointer transition ' + (checked ? 'bg-orange-50/60' : 'hover:bg-slate-50')}>
+                        <input type="checkbox" checked={checked} onChange={() => {
+                          const next = new Set(periodReportSelected)
+                          checked ? next.delete(c.key) : next.add(c.key)
+                          setPeriodReportSelected(next)
+                        }} className="w-4 h-4 accent-orange-500 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-sm text-slate-800 truncate">{c.name}</p>
+                          {c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}
+                        </div>
+                        <div className="text-right shrink-0 space-y-0.5">
+                          <p className="text-xs text-slate-400">{c.invoices} invoice{c.invoices !== 1 ? 's' : ''}</p>
+                          <p className="font-bold text-sm text-slate-800">Rs.{c.total.toLocaleString()}</p>
+                          {c.balance > 0 && <p className="text-xs font-bold text-red-500">Due Rs.{c.balance.toLocaleString()}</p>}
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+
+                {/* Footer */}
+                <div className="px-5 py-4 border-t border-slate-100 shrink-0 flex gap-3 items-center">
+                  <button
+                    disabled={periodReportSelected.size === 0}
+                    onClick={() => {
+                      const selectedSales = periodReportSales.filter((s: any) => {
+                        const key = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
+                        return periodReportSelected.has(key)
+                      })
+                      generatePeriodReport(selectedSales, data?.vendor, reportFrom, reportTo, vendorSettings)
+                    }}
+                    className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-sm py-3 rounded-xl">
+                    📄 Generate PDF ({periodReportSelected.size} customer{periodReportSelected.size !== 1 ? 's' : ''})
+                  </button>
+                  <button onClick={() => setPeriodReportModal(false)} className="px-4 py-3 rounded-xl border-2 border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50">Close</button>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* RETURN ITEMS MODAL */}
         {returnModal && (
