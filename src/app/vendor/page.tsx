@@ -1279,9 +1279,7 @@ ${(() => {
 
   function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any) {
     const filtered = salesList.filter((s: any) => s.payment_status !== 'voided' && !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL'))
-    const grossSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
-    const totalReturnAmount = 0 // Period report doesn't track returns separately yet
-    const totalSales = grossSales
+    const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
 
@@ -1293,40 +1291,21 @@ ${(() => {
           methodTotals[method] = (methodTotals[method] || 0) + parseFloat(p.amount || 0)
         })
       } else if (parseFloat(sale.paid_amount || 0) > 0) {
-        const method = sale.payment_method || 'cash'
-        methodTotals[method] = (methodTotals[method] || 0) + parseFloat(sale.paid_amount || 0)
+        methodTotals[sale.payment_method || 'cash'] = (methodTotals[sale.payment_method || 'cash'] || 0) + parseFloat(sale.paid_amount || 0)
       }
     })
 
-    // Customer-wise credit breakdown
-    const customerCredit: Record<string, { name: string; phone: string; total: number; paid: number; due: number; invoices: number }> = {}
+    // Customer-wise breakdown — ALL customers sorted by total desc
+    const byCustomer: Record<string, { name: string; phone: string; invoices: number; total: number; paid: number; due: number }> = {}
     filtered.forEach((s: any) => {
-      const due = parseFloat(s.balance_due || 0)
-      if (due <= 0) return
-      const id = s.customer_id || 'walkin'
-      const name = s.customer_name || 'Walk-in'
-      if (!customerCredit[id]) customerCredit[id] = { name, phone: s.customer_phone || '', total: 0, paid: 0, due: 0, invoices: 0 }
-      customerCredit[id].total += parseFloat(s.total || 0)
-      customerCredit[id].paid += parseFloat(s.paid_amount || 0)
-      customerCredit[id].due += due
-      customerCredit[id].invoices++
+      const id = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
+      if (!byCustomer[id]) byCustomer[id] = { name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, due: 0 }
+      byCustomer[id].invoices++
+      byCustomer[id].total += parseFloat(s.total || 0)
+      byCustomer[id].paid += parseFloat(s.paid_amount || 0)
+      byCustomer[id].due += parseFloat(s.balance_due || 0)
     })
-    const creditList = Object.values(customerCredit).sort((a, b) => b.due - a.due)
-
-    // Also include customers with advance balance from the sales data
-    const customerAdvances: Record<string, { name: string; phone: string; advance: number }> = {}
-    filtered.forEach((s: any) => {
-      if (s.payments) {
-        s.payments.forEach((p: any) => {
-          if (p.payment_method === 'advance' && s.customer_id) {
-            const id = s.customer_id
-            if (!customerAdvances[id]) customerAdvances[id] = { name: s.customer_name || 'Unknown', phone: s.customer_phone || '', advance: 0 }
-            customerAdvances[id].advance += parseFloat(p.amount || 0)
-          }
-        })
-      }
-    })
-    const advanceList = Object.values(customerAdvances).filter(c => c.advance > 0).sort((a, b) => b.advance - a.advance)
+    const customerRows = Object.values(byCustomer).sort((a, b) => b.total - a.total)
 
     const shopName = settings?.invoice_title || vendorInfo?.name || 'kuruma.lk'
     const fromStr = new Date(fromDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -1337,34 +1316,55 @@ ${(() => {
 .header{text-align:center;padding:20px 0;border-bottom:3px solid #ff6b35}.shop{font-size:24px;font-weight:900}.date{font-size:14px;color:#666;margin-top:4px}.report-title{font-size:18px;font-weight:800;color:#ff6b35;margin-top:8px;text-transform:uppercase;letter-spacing:1px}
 .summary{display:flex;gap:12px;margin:20px 0;flex-wrap:wrap}.summary-box{flex:1;min-width:120px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:15px;text-align:center}.summary-box .val{font-size:22px;font-weight:900}.summary-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
 .green{color:#16a34a}.red{color:#dc2626}.orange{color:#ff6b35}.blue{color:#2563eb}
-table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;text-align:left;font-size:11px;font-weight:700;padding:10px 8px;border-bottom:2px solid #e2e8f0;text-transform:uppercase}td{padding:10px 8px;font-size:12px;border-bottom:1px solid #f1f5f9}.text-right{text-align:right}
+table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;text-align:left;font-size:11px;font-weight:700;padding:10px 8px;border-bottom:2px solid #e2e8f0;text-transform:uppercase}td{padding:9px 8px;font-size:12px;border-bottom:1px solid #f1f5f9}.text-right{text-align:right}tr:nth-child(even) td{background:#fafbfc}
 .method-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:15px 0}.method-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}.method-box .val{font-size:18px;font-weight:900}.method-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
-.credit-section{margin-top:20px;page-break-before:auto}.credit-box{background:#fef2f2;border:2px solid #fecaca;border-radius:8px;padding:12px 15px;margin-bottom:8px}
 .footer{text-align:center;padding:20px 0;color:#94a3b8;font-size:10px;border-top:1px solid #e2e8f0;margin-top:20px}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Sales Report</div><div class="date">${fromStr} — ${toStr}</div></div>
 
 <div class="summary">
-<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Gross: Rs.' + grossSales.toLocaleString() + '<br/>Returns: -Rs.' + totalReturnAmount.toLocaleString() + '</div>' : ''}</div>
+<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
 <div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
-<div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
+<div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">Balance Due</div></div>
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
 </div>
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
 <div class="method-grid">
-${methodTotals.cash > 0 ? '<div class="method-box"><div class="val green">Rs.' + methodTotals.cash.toLocaleString() + '</div><div class="lbl">💵 Cash</div></div>' : ''}
-${methodTotals.cheque > 0 ? '<div class="method-box"><div class="val blue">Rs.' + methodTotals.cheque.toLocaleString() + '</div><div class="lbl">📝 Cheque</div></div>' : ''}
-${methodTotals.bank > 0 ? '<div class="method-box"><div class="val" style="color:#7c3aed">Rs.' + methodTotals.bank.toLocaleString() + '</div><div class="lbl">🏦 Bank Transfer</div></div>' : ''}
-${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color:#0891b2">Rs.' + methodTotals.card.toLocaleString() + '</div><div class="lbl">💳 Card</div></div>' : ''}
-${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="color:#059669">Rs.' + methodTotals.advance.toLocaleString() + '</div><div class="lbl">💰 From Advance</div></div>' : ''}
+${methodTotals.cash > 0 ? '<div class="method-box"><div class="val green">Rs.' + methodTotals.cash.toLocaleString() + '</div><div class="lbl">Cash</div></div>' : ''}
+${methodTotals.cheque > 0 ? '<div class="method-box"><div class="val blue">Rs.' + methodTotals.cheque.toLocaleString() + '</div><div class="lbl">Cheque</div></div>' : ''}
+${methodTotals.bank > 0 ? '<div class="method-box"><div class="val" style="color:#7c3aed">Rs.' + methodTotals.bank.toLocaleString() + '</div><div class="lbl">Bank Transfer</div></div>' : ''}
+${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color:#0891b2">Rs.' + methodTotals.card.toLocaleString() + '</div><div class="lbl">Card</div></div>' : ''}
+${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="color:#059669">Rs.' + methodTotals.advance.toLocaleString() + '</div><div class="lbl">From Advance</div></div>' : ''}
 </div>
 
-${creditList.length > 0 ? '<div class="credit-section"><h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Customer Credit Details (Rs.' + totalCredit.toLocaleString() + ' outstanding)</h3><table><thead><tr><th>Customer</th><th>Phone</th><th class="text-right">Total Sales</th><th class="text-right">Paid</th><th class="text-right">Outstanding</th><th class="text-right">Invoices</th></tr></thead><tbody>' + creditList.map(c => '<tr><td><strong>' + c.name + '</strong></td><td style="font-size:11px">' + c.phone + '</td><td class="text-right">Rs.' + c.total.toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + c.paid.toLocaleString() + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + c.due.toLocaleString() + '</td><td class="text-right">' + c.invoices + '</td></tr>').join('') + '</tbody></table></div>' : ''}
+<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:20px 0 8px;text-transform:uppercase;letter-spacing:1px">Customer Breakdown (${customerRows.length})</h3>
+<table><thead><tr>
+  <th>Customer</th><th>Phone</th>
+  <th class="text-right">Invoices</th>
+  <th class="text-right">Total Sales</th>
+  <th class="text-right">Paid</th>
+  <th class="text-right">Balance Due</th>
+</tr></thead><tbody>
+${customerRows.map(c => `<tr>
+  <td><strong>${c.name}</strong></td>
+  <td style="font-size:11px;color:#64748b">${c.phone}</td>
+  <td class="text-right">${c.invoices}</td>
+  <td class="text-right">Rs.${c.total.toLocaleString()}</td>
+  <td class="text-right" style="color:#16a34a">Rs.${c.paid.toLocaleString()}</td>
+  <td class="text-right" style="color:${c.due > 0 ? '#dc2626' : '#94a3b8'};font-weight:${c.due > 0 ? '700' : '400'}">${c.due > 0 ? 'Rs.' + c.due.toLocaleString() : '—'}</td>
+</tr>`).join('')}
+<tr style="background:#f1f5f9">
+  <td colspan="3"><strong>TOTAL</strong></td>
+  <td class="text-right"><strong style="color:#ff6b35">Rs.${totalSales.toLocaleString()}</strong></td>
+  <td class="text-right"><strong style="color:#16a34a">Rs.${totalPaid.toLocaleString()}</strong></td>
+  <td class="text-right"><strong style="color:#dc2626">Rs.${totalCredit.toLocaleString()}</strong></td>
+</tr>
+</tbody></table>
 
 <div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
 
-    const win = window.open('', '_blank', 'width=850,height=700')
+    const win = window.open('', '_blank', 'width=900,height=700')
     if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
   }
 
