@@ -284,6 +284,8 @@ export default function VendorDashboard() {
   const [finalisePayAmt, setFinalisePayAmt] = useState('')
   const [finalisePayMethod, setFinalisePayMethod] = useState('cash')
   const [finaliseSaving, setFinaliseSaving] = useState(false)
+  const [posDraftId, setPosDraftId] = useState<string | null>(null)
+  const [posDraftInvoiceNo, setPosDraftInvoiceNo] = useState('')
 
   // Void sale modal
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
@@ -935,19 +937,38 @@ export default function VendorDashboard() {
   async function confirmCreateSale() {
     setPosLoading(true)
     try {
-      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        action: 'create_sale', customerId: posCustomer.id, customerName: posCustomer.name || 'Walk-in Customer', customerPhone: posCustomer.phone,
-        items: posCart.map(i => ({ productId: i.productId, productName: i.productName, productSku: i.productSku, quantity: i.quantity, unitPrice: i.unitPrice })),
-        discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0), notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
-      }) })
+      // If we're finalising a draft, use finalize_draft instead of create_sale
+      const action = posDraftId ? 'finalize_draft' : 'create_sale'
+      const body = posDraftId
+        ? {
+            action,
+            saleId: posDraftId,
+            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity })),
+            payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
+            discount: posDiscountAmt,
+            vehicleNo: posVehicleNo || null,
+            notes: posNotes || null,
+            saleDate: posDate,
+            customerName: posCustomer.name,
+            customerPhone: posCustomer.phone,
+          }
+        : {
+            action,
+            customerId: posCustomer.id, customerName: posCustomer.name || 'Walk-in Customer', customerPhone: posCustomer.phone,
+            items: posCart.map(i => ({ productId: i.productId, productName: i.productName, productSku: i.productSku, quantity: i.quantity, unitPrice: i.unitPrice })),
+            discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0), notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
+          }
+
+      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json()
       if (j.success) {
-        setPosReceipt({ sale: { ...j.sale, totalAmountDue: j.totalAmountDue || 0 }, vendor: data?.vendor, advanceUsed: j.advanceUsed, appliedToOutstanding: j.appliedToOutstanding, settledInvoices: j.settledInvoices, newAdvance: j.newAdvance })
+        setPosReceipt({ sale: { ...j.sale, totalAmountDue: j.totalAmountDue || 0 }, vendor: data?.vendor, advanceUsed: j.advanceUsed || 0, appliedToOutstanding: j.appliedToOutstanding || 0, settledInvoices: j.settledInvoices || [], newAdvance: j.newAdvance || 0 })
         showToast(j.message)
         setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
         setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false)
-        setPosPreview(false); await fetchData()
+        setPosDraftId(null); setPosDraftInvoiceNo('')
+        setPosPreview(false); await fetchData(); fetchSales()
       } else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
     setPosLoading(false)
@@ -2154,6 +2175,17 @@ ${customerRows.map(c => `<tr>
                 </button>
               )}
             </div>
+            {/* Draft mode banner */}
+            {posDraftId && (
+              <div className="mb-4 bg-amber-50 border-2 border-amber-400 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-0.5">Finalising On-Approval Draft</p>
+                  <p className="font-black text-amber-900 text-base">{posDraftInvoiceNo} · {posCustomer.name}</p>
+                  <p className="text-xs text-amber-600 mt-0.5">Edit prices, add vehicle number &amp; payment — then Complete Invoice</p>
+                </div>
+                <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo('') }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
+              </div>
+            )}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-6 pb-36 lg:pb-0">
                 <div className="lg:col-span-2 space-y-3 lg:space-y-4 order-last lg:order-none">
                   {/* Product Search */}
@@ -2253,10 +2285,14 @@ ${customerRows.map(c => `<tr>
                     {posOverpayment > 0 && posCustomer.outstanding <= 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">+Rs.{posOverpayment.toLocaleString()}</span></div>}
                     {posBalance > 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-red-300">On Credit</span><span className="text-red-300">Rs.{posBalance.toLocaleString()}</span></div>}
                   </div>
-                  <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-base py-3.5 rounded-xl disabled:opacity-50">
-                    {posLoading ? '…' : '📦 Send on Approval'}
+                  {!posDraftId && (
+                    <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-base py-3.5 rounded-xl disabled:opacity-50">
+                      {posLoading ? '…' : '📦 Send on Approval'}
+                    </button>
+                  )}
+                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">
+                    {posLoading ? 'Saving…' : posDraftId ? '✅ Complete Invoice — ' + posDraftInvoiceNo : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}
                   </button>
-                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">{posLoading ? 'Creating...' : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}</button>
                 </div>
               </div>
 
@@ -2271,11 +2307,13 @@ ${customerRows.map(c => `<tr>
                   <span className="text-xl font-black">Rs.{posTotal.toLocaleString()}</span>
                 </div>
                 <div className="flex">
-                  <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="flex-1 bg-amber-500 active:bg-amber-600 text-white font-black text-sm py-4 disabled:opacity-40">
-                    {posLoading ? '…' : '📦 Approval'}
-                  </button>
+                  {!posDraftId && (
+                    <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="flex-1 bg-amber-500 active:bg-amber-600 text-white font-black text-sm py-4 disabled:opacity-40">
+                      {posLoading ? '…' : '📦 Approval'}
+                    </button>
+                  )}
                   <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="flex-[2] bg-green-500 active:bg-green-600 text-white font-black text-sm py-4 disabled:opacity-40">
-                    {posLoading ? '…' : posBalance > 0 ? '💳 Complete (Credit Rs.' + posBalance.toLocaleString() + ')' : '💰 Complete Sale'}
+                    {posLoading ? '…' : posDraftId ? '✅ Complete Invoice' : posBalance > 0 ? '💳 Complete (Credit Rs.' + posBalance.toLocaleString() + ')' : '💰 Complete Sale'}
                   </button>
                 </div>
               </div>
@@ -2407,14 +2445,30 @@ ${customerRows.map(c => `<tr>
                                 </button>
                                 <button
                                   onClick={() => {
-                                    setFinaliseModal(draft)
-                                    setFinaliseItems((draft.items || []).map((i: any) => ({ ...i, unitPrice: i.unit_price || 0 })))
-                                    setFinalisePayAmt(draft.total > 0 ? String(Math.round(draft.total)) : '')
-                                    setFinalisePayMethod('cash')
+                                    // Load draft into POS for full editing (prices, vehicle, payment)
+                                    setPosCart((draft.items || []).map((i: any) => ({
+                                      productId: i.product_id,
+                                      productName: i.product_name,
+                                      productSku: i.product_sku || '',
+                                      quantity: i.quantity,
+                                      unitPrice: i.unit_price || 0,
+                                      unitCost: i.unit_cost || 0,
+                                      maxStock: 9999,
+                                      saleItemId: i.id,
+                                    })))
+                                    setPosCustomer({ id: draft.customer_id || null, name: draft.customer_name, phone: draft.customer_phone || '', advance: 0, outstanding: 0, require_vehicle_no: false })
+                                    setPosVehicleNo(draft.vehicle_no || '')
+                                    setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
+                                    setPosDiscount('')
+                                    setPosNotes('')
+                                    setPosPreview(false)
+                                    setPosDraftId(draft.id)
+                                    setPosDraftInvoiceNo(draft.invoice_no)
+                                    setTab('pos')
                                   }}
                                   className="flex-1 text-xs font-black text-green-700 border border-green-300 rounded-lg px-3 py-2 bg-green-50 hover:bg-green-100 active:bg-green-200"
                                 >
-                                  ✅ Finalise
+                                  ✅ Finalise →
                                 </button>
                               </div>
                             </div>

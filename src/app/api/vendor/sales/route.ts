@@ -755,7 +755,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'finalize_draft') {
-    const { saleId, items: finalItems, payments: paymentLines, discount, vehicleNo, notes } = body
+    const { saleId, items: finalItems, payments: paymentLines, discount, vehicleNo, notes, saleDate, customerName, customerPhone } = body
     const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
     if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
@@ -779,7 +779,7 @@ export async function POST(req: NextRequest) {
     if (balanceDue > 0 && paidAmount > 0) paymentStatus = 'partial'
     else if (balanceDue > 0 && paidAmount === 0) paymentStatus = 'credit'
 
-    // Use finalization date (today) so this sale lands in today's reports, not the draft creation date
+    // Stamp the finalization date (not draft creation date) so it lands in the right day's reports
     await admin.from('sales').update({
       subtotal, discount: discountAmt, total,
       paid_amount: paidAmount, balance_due: balanceDue,
@@ -787,7 +787,9 @@ export async function POST(req: NextRequest) {
       payment_method: paymentLines?.[0]?.method || (balanceDue > 0 ? 'credit' : 'cash'),
       vehicle_no: vehicleNo || draft.vehicle_no,
       notes: notes || draft.notes?.replace('ON APPROVAL\n', '').replace('ON APPROVAL', '').trim() || null,
-      created_at: new Date().toISOString(),
+      created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
+      customer_name: customerName || draft.customer_name,
+      customer_phone: customerPhone || draft.customer_phone,
     }).eq('id', saleId)
 
     for (const pl of (paymentLines || [])) {
