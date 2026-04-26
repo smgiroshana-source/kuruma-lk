@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
   const { data: sales } = await query.limit(500)
 
   const allSales = sales || []
-  const activeSales = allSales.filter((s: any) => s.payment_status !== 'voided')
+  const activeSales = allSales.filter((s: any) => s.payment_status !== 'voided' && s.payment_status !== 'draft')
   // Exclude opening balance entries from sales stats (they're past transaction records, not actual sales)
   const isOpeningBalance = (s: any) => (s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
   const realSales = activeSales.filter((s: any) => !isOpeningBalance(s))
@@ -677,6 +677,129 @@ export async function POST(req: NextRequest) {
       allReturned,
       message: 'Returned: ' + returnedDetails.join(', ') + '. Total value: Rs.' + totalRefund.toLocaleString() + (paidReduction > 0 ? (refundMethod === 'advance' ? ` | Rs.${paidReduction.toLocaleString()} added to advance` : ` | Rs.${paidReduction.toLocaleString()} cash back`) : '')
     })
+  }
+
+  if (action === 'create_draft') {
+    const { customerId, customerName, customerPhone, items, notes, vehicleNo } = body
+    if (!items || items.length === 0) return NextResponse.json({ error: 'No items' }, { status: 400 })
+
+    let resolvedCustomerId = customerId || null
+    if (!resolvedCustomerId && customerName?.trim()) {
+      if (customerPhone?.trim()) {
+        const { data: existing } = await admin.from('customers').select('id')
+          .eq('vendor_id', vendor.id).eq('phone', customerPhone.trim()).single()
+        if (existing) resolvedCustomerId = existing.id
+      }
+      if (!resolvedCustomerId) {
+        const { data: newCust } = await admin.from('customers').insert({
+          vendor_id: vendor.id, name: customerName.trim(),
+          phone: customerPhone?.trim() || null, whatsapp: customerPhone?.trim() || null,
+        }).select().single()
+        if (newCust) resolvedCustomerId = newCust.id
+      }
+    }
+
+    const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+    const subtotal = items.reduce((s: number, i: any) => s + (i.quantity * (i.unitPrice || 0)), 0)
+
+    const { data: draft, error } = await admin.from('sales').insert({
+      vendor_id: vendor.id, customer_id: resolvedCustomerId,
+      invoice_no: invoiceNo, customer_name: customerName || 'Walk-in Customer',
+      customer_phone: customerPhone || null, subtotal, discount: 0,
+      total: subtotal, paid_amount: 0, balance_due: 0,
+      payment_method: 'cash', payment_status: 'draft',
+      vehicle_no: vehicleNo || null,
+      notes: notes ? ('ON APPROVAL\n' + notes) : 'ON APPROVAL',
+    }).select().single()
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+    const saleItems = items.map((item: any) => ({
+      sale_id: draft.id, product_id: item.productId,
+      product_name: item.productName, product_sku: item.productSku || null,
+      quantity: item.quantity, unit_price: item.unitPrice || 0,
+      unit_cost: item.unitCost || null, total: item.quantity * (item.unitPrice || 0),
+    }))
+    await admin.from('sale_items').insert(saleItems)
+
+    // Reduce stock — items are physically leaving the shop
+    for (const item of items) {
+      if (item.productId) {
+        const { data: product } = await admin.from('products').select('quantity').eq('id', item.productId).eq('vendor_id', vendor.id).single()
+        if (product) await admin.from('products').update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq('id', item.productId).eq('vendor_id', vendor.id)
+      }
+    }
+
+    return NextResponse.json({ success: true, draft, invoiceNo, message: `Draft ${invoiceNo} created — stock reserved` })
+  }
+
+  if (action === 'return_draft') {
+    const { saleId } = body
+    const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
+    if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
+
+    // Restore stock for all items
+    for (const item of (draft.items || [])) {
+      if (item.product_id) {
+        const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
+        if (product) await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id)
+      }
+    }
+
+    await admin.from('sales').update({
+      payment_status: 'voided',
+      notes: (draft.notes || '') + '\nRETURNED: ' + new Date().toISOString() + ' — all items returned from on-approval',
+    }).eq('id', saleId)
+
+    return NextResponse.json({ success: true, message: 'All items returned and stock restored' })
+  }
+
+  if (action === 'finalize_draft') {
+    const { saleId, items: finalItems, payments: paymentLines, discount, vehicleNo, notes } = body
+    const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
+    if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
+
+    // Update each item with final negotiated price
+    for (const fi of (finalItems || [])) {
+      await admin.from('sale_items').update({
+        unit_price: fi.unitPrice,
+        total: fi.quantity * fi.unitPrice,
+      }).eq('id', fi.id).eq('sale_id', saleId)
+    }
+
+    const subtotal = (finalItems || []).reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0)
+    const discountAmt = discount || 0
+    const total = Math.max(0, subtotal - discountAmt)
+    const cashPaid = (paymentLines || []).reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
+    const paidAmount = Math.min(total, cashPaid)
+    const balanceDue = Math.max(0, total - paidAmount)
+
+    let paymentStatus = 'paid'
+    if (balanceDue > 0 && paidAmount > 0) paymentStatus = 'partial'
+    else if (balanceDue > 0 && paidAmount === 0) paymentStatus = 'credit'
+
+    await admin.from('sales').update({
+      subtotal, discount: discountAmt, total,
+      paid_amount: paidAmount, balance_due: balanceDue,
+      payment_status: paymentStatus,
+      payment_method: paymentLines?.[0]?.method || (balanceDue > 0 ? 'credit' : 'cash'),
+      vehicle_no: vehicleNo || draft.vehicle_no,
+      notes: notes || draft.notes?.replace('ON APPROVAL\n', '').replace('ON APPROVAL', '').trim() || null,
+    }).eq('id', saleId)
+
+    for (const pl of (paymentLines || [])) {
+      if (parseFloat(pl.amount) > 0) {
+        await admin.from('payments').insert({
+          sale_id: saleId, vendor_id: vendor.id, customer_id: draft.customer_id,
+          amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
+          bank_ref: pl.bankRef || null, cheque_number: pl.chequeNumber || null,
+        })
+      }
+    }
+
+    const { data: finalizedSale } = await admin.from('sales').select('*, items:sale_items(*), payments:payments(*)').eq('id', saleId).single()
+    return NextResponse.json({ success: true, sale: finalizedSale, message: `Invoice ${draft.invoice_no} finalized — ${paymentStatus}` })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

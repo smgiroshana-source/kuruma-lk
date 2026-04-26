@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
     ] = await Promise.all([
       admin.from('products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id),
       admin.from('products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('is_active', true),
-      admin.from('sales').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id),
+      admin.from('sales').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).neq('payment_status', 'draft'),
     ])
 
     // Get stock count and stock value with a simple query
@@ -46,6 +46,7 @@ export async function GET(req: NextRequest) {
       .select('total')
       .eq('vendor_id', vendor.id)
       .neq('payment_status', 'voided')
+      .neq('payment_status', 'draft')
 
     const totalSales = (salesTotals || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
 
@@ -88,7 +89,7 @@ export async function GET(req: NextRequest) {
   const totalStock = products.reduce((sum: number, p: any) => sum + (p.quantity || 0), 0)
   const stockValue = products.reduce((sum: number, p: any) => sum + ((p.price || 0) * (p.quantity || 0)), 0)
 
-  const { data: salesTotals } = await admin.from('sales').select('total').eq('vendor_id', vendor.id).neq('payment_status', 'voided')
+  const { data: salesTotals } = await admin.from('sales').select('total').eq('vendor_id', vendor.id).neq('payment_status', 'voided').neq('payment_status', 'draft')
   const totalSales = (salesTotals || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
   const totalSalesCount = (salesTotals || []).length
 
