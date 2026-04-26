@@ -2204,6 +2204,29 @@ ${customerRows.map(c => `<tr>
                   <div className="bg-white rounded-xl border border-red-200 mt-3">
                     <textarea value={posNotes} onChange={e => setPosNotes(e.target.value)} placeholder="Notes (printed on invoice)..." rows={2} className="w-full px-4 py-3 text-sm outline-none resize-none rounded-xl" />
                   </div>
+
+                  {/* Total + action buttons — desktop only, sits below cart/notes */}
+                  <div className="hidden lg:block rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 text-white">
+                    {posDiscountAmt > 0 && <div className="flex justify-between text-sm mb-1"><span className="text-red-300">Discount</span><span>-Rs.{posDiscountAmt.toLocaleString()}</span></div>}
+                    <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
+                    {posAdvanceApplied > 0 && <div className="flex justify-between text-sm mt-1"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
+                    {posOverpayment > 0 && posCustomer.outstanding > 0 && (
+                      <div className="mt-2 pt-2 border-t border-slate-600">
+                        <div className="flex justify-between text-sm"><span className="text-amber-300">→ To Outstanding</span><span className="text-amber-300">Rs.{Math.min(posOverpayment, posCustomer.outstanding).toLocaleString()}</span></div>
+                        {posOverpayment > posCustomer.outstanding && <div className="flex justify-between text-sm"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">Rs.{(posOverpayment - posCustomer.outstanding).toLocaleString()}</span></div>}
+                      </div>
+                    )}
+                    {posOverpayment > 0 && posCustomer.outstanding <= 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">+Rs.{posOverpayment.toLocaleString()}</span></div>}
+                    {posBalance > 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-red-300">On Credit</span><span className="text-red-300">Rs.{posBalance.toLocaleString()}</span></div>}
+                  </div>
+                  {!posDraftId && (
+                    <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-base py-3.5 rounded-xl disabled:opacity-50">
+                      {posLoading ? '…' : '📦 Send on Approval'}
+                    </button>
+                  )}
+                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">
+                    {posLoading ? 'Saving…' : posDraftId ? '✅ Complete Invoice — ' + posDraftInvoiceNo : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}
+                  </button>
                 </div>
 
                 {/* Right sidebar — shows first on mobile, sticky on desktop */}
@@ -2271,28 +2294,6 @@ ${customerRows.map(c => `<tr>
                     <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
                   </div>
 
-                  {/* Total + buttons — desktop only (inline in sidebar) */}
-                  <div className="hidden lg:block rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 text-white">
-                    {posDiscountAmt > 0 && <div className="flex justify-between text-sm mb-1"><span className="text-red-300">Discount</span><span>-Rs.{posDiscountAmt.toLocaleString()}</span></div>}
-                    <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
-                    {posAdvanceApplied > 0 && <div className="flex justify-between text-sm mt-1"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
-                    {posOverpayment > 0 && posCustomer.outstanding > 0 && (
-                      <div className="mt-2 pt-2 border-t border-slate-600">
-                        <div className="flex justify-between text-sm"><span className="text-amber-300">→ To Outstanding</span><span className="text-amber-300">Rs.{Math.min(posOverpayment, posCustomer.outstanding).toLocaleString()}</span></div>
-                        {posOverpayment > posCustomer.outstanding && <div className="flex justify-between text-sm"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">Rs.{(posOverpayment - posCustomer.outstanding).toLocaleString()}</span></div>}
-                      </div>
-                    )}
-                    {posOverpayment > 0 && posCustomer.outstanding <= 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">+Rs.{posOverpayment.toLocaleString()}</span></div>}
-                    {posBalance > 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-red-300">On Credit</span><span className="text-red-300">Rs.{posBalance.toLocaleString()}</span></div>}
-                  </div>
-                  {!posDraftId && (
-                    <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-base py-3.5 rounded-xl disabled:opacity-50">
-                      {posLoading ? '…' : '📦 Send on Approval'}
-                    </button>
-                  )}
-                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">
-                    {posLoading ? 'Saving…' : posDraftId ? '✅ Complete Invoice — ' + posDraftInvoiceNo : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}
-                  </button>
                 </div>
               </div>
 
