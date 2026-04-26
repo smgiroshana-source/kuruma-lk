@@ -779,6 +779,7 @@ export async function POST(req: NextRequest) {
     if (balanceDue > 0 && paidAmount > 0) paymentStatus = 'partial'
     else if (balanceDue > 0 && paidAmount === 0) paymentStatus = 'credit'
 
+    // Use finalization date (today) so this sale lands in today's reports, not the draft creation date
     await admin.from('sales').update({
       subtotal, discount: discountAmt, total,
       paid_amount: paidAmount, balance_due: balanceDue,
@@ -786,6 +787,7 @@ export async function POST(req: NextRequest) {
       payment_method: paymentLines?.[0]?.method || (balanceDue > 0 ? 'credit' : 'cash'),
       vehicle_no: vehicleNo || draft.vehicle_no,
       notes: notes || draft.notes?.replace('ON APPROVAL\n', '').replace('ON APPROVAL', '').trim() || null,
+      created_at: new Date().toISOString(),
     }).eq('id', saleId)
 
     for (const pl of (paymentLines || [])) {

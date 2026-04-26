@@ -2154,7 +2154,7 @@ ${customerRows.map(c => `<tr>
                 </button>
               )}
             </div>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-6 pb-48 lg:pb-0">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-6 pb-36 lg:pb-0">
                 <div className="lg:col-span-2 space-y-3 lg:space-y-4 order-last lg:order-none">
                   {/* Product Search */}
                   <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -2174,8 +2174,8 @@ ${customerRows.map(c => `<tr>
                   </div>
                 </div>
 
-                {/* Right sidebar — shows first on mobile */}
-                <div className="space-y-3 lg:space-y-4 order-first lg:order-none">
+                {/* Right sidebar — shows first on mobile, sticky on desktop */}
+                <div className="space-y-3 lg:space-y-4 order-first lg:order-none lg:sticky lg:top-4 lg:self-start">
                   {/* Customer */}
                   <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
                     <h3 className="font-bold text-slate-800 text-sm">Customer</h3>
@@ -2239,11 +2239,11 @@ ${customerRows.map(c => `<tr>
                     <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
                   </div>
 
-                  {/* Total — sticky on mobile */}
-                  <div className="lg:static fixed bottom-14 left-0 right-0 z-40 lg:rounded-xl rounded-none bg-gradient-to-br from-slate-800 to-slate-900 p-3 lg:p-4 text-white shadow-[0_-4px_12px_rgba(0,0,0,0.15)] lg:shadow-none">
+                  {/* Total + buttons — desktop only (inline in sidebar) */}
+                  <div className="hidden lg:block rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 text-white">
                     {posDiscountAmt > 0 && <div className="flex justify-between text-sm mb-1"><span className="text-red-300">Discount</span><span>-Rs.{posDiscountAmt.toLocaleString()}</span></div>}
                     <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
-                    {posAdvanceApplied > 0 && <div className="flex justify-between text-sm"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
+                    {posAdvanceApplied > 0 && <div className="flex justify-between text-sm mt-1"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
                     {posOverpayment > 0 && posCustomer.outstanding > 0 && (
                       <div className="mt-2 pt-2 border-t border-slate-600">
                         <div className="flex justify-between text-sm"><span className="text-amber-300">→ To Outstanding</span><span className="text-amber-300">Rs.{Math.min(posOverpayment, posCustomer.outstanding).toLocaleString()}</span></div>
@@ -2253,13 +2253,33 @@ ${customerRows.map(c => `<tr>
                     {posOverpayment > 0 && posCustomer.outstanding <= 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">+Rs.{posOverpayment.toLocaleString()}</span></div>}
                     {posBalance > 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-red-300">On Credit</span><span className="text-red-300">Rs.{posBalance.toLocaleString()}</span></div>}
                   </div>
-
-                  <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="lg:static fixed bottom-[64px] lg:bottom-auto left-0 right-0 z-40 w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-sm lg:text-base py-3 lg:py-3.5 lg:rounded-xl rounded-none disabled:opacity-50 shadow-lg">
+                  <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-base py-3.5 rounded-xl disabled:opacity-50">
                     {posLoading ? '…' : '📦 Send on Approval'}
                   </button>
-                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="lg:static fixed bottom-0 left-0 right-0 z-40 w-full bg-green-500 hover:bg-green-600 text-white font-black text-base lg:text-lg py-3.5 lg:py-4 lg:rounded-xl rounded-none disabled:opacity-50 shadow-lg">{posLoading ? 'Creating...' : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}</button>
+                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">{posLoading ? 'Creating...' : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}</button>
                 </div>
               </div>
+
+              {/* Mobile bottom bar — total + both buttons in one fixed strip */}
+              <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 flex flex-col shadow-[0_-4px_20px_rgba(0,0,0,0.18)]">
+                <div className="bg-gradient-to-r from-slate-800 to-slate-900 px-4 py-2.5 text-white flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-sm">
+                    {posDiscountAmt > 0 && <span className="text-red-300">-Rs.{posDiscountAmt.toLocaleString()}</span>}
+                    {posBalance > 0 && <span className="text-red-300">Credit Rs.{posBalance.toLocaleString()}</span>}
+                    {posAdvanceApplied > 0 && <span className="text-cyan-300">Adv Rs.{posAdvanceApplied.toLocaleString()}</span>}
+                  </div>
+                  <span className="text-xl font-black">Rs.{posTotal.toLocaleString()}</span>
+                </div>
+                <div className="flex">
+                  <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="flex-1 bg-amber-500 active:bg-amber-600 text-white font-black text-sm py-4 disabled:opacity-40">
+                    {posLoading ? '…' : '📦 Approval'}
+                  </button>
+                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="flex-[2] bg-green-500 active:bg-green-600 text-white font-black text-sm py-4 disabled:opacity-40">
+                    {posLoading ? '…' : posBalance > 0 ? '💳 Complete (Credit Rs.' + posBalance.toLocaleString() + ')' : '💰 Complete Sale'}
+                  </button>
+                </div>
+              </div>
+
             </div>
           )}
         </div>)}
