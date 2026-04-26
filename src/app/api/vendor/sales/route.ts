@@ -732,6 +732,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, draft, invoiceNo, message: `Draft ${invoiceNo} created — stock reserved` })
   }
 
+  if (action === 'return_draft_item') {
+    // Return a single item from a draft (on-approval) — restore its stock and remove it.
+    // If it was the last item, void the entire draft.
+    const { saleId, saleItemId } = body
+    const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
+    if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
+
+    const item = (draft.items || []).find((i: any) => i.id === saleItemId)
+    if (!item) return NextResponse.json({ error: 'Item not found in draft' }, { status: 404 })
+
+    // Restore stock for this item
+    if (item.product_id) {
+      const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
+      if (product) await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id)
+    }
+
+    // Remove this item from the draft
+    await admin.from('sale_items').delete().eq('id', saleItemId)
+
+    // Check if any items remain
+    const remainingItems = (draft.items || []).filter((i: any) => i.id !== saleItemId)
+    if (remainingItems.length === 0) {
+      // Last item — void the draft
+      await admin.from('sales').update({
+        payment_status: 'voided',
+        notes: (draft.notes || '') + '\nRETURNED: ' + new Date().toISOString() + ' — all items returned from on-approval',
+      }).eq('id', saleId)
+      return NextResponse.json({ success: true, voided: true, message: item.product_name + ' returned — draft voided (no items left)' })
+    } else {
+      // Update draft totals
+      const newSubtotal = remainingItems.reduce((s: number, i: any) => s + parseFloat(i.total || 0), 0)
+      await admin.from('sales').update({
+        subtotal: newSubtotal, total: newSubtotal,
+        notes: (draft.notes || '') + '\nITEM RETURNED: ' + item.product_name + ' ×' + item.quantity,
+      }).eq('id', saleId)
+      return NextResponse.json({ success: true, voided: false, message: item.product_name + ' ×' + item.quantity + ' returned — stock restored' })
+    }
+  }
+
   if (action === 'return_draft') {
     const { saleId } = body
     const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()

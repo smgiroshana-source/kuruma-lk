@@ -279,6 +279,7 @@ export default function VendorDashboard() {
 
   // Draft / On Approval
   const [draftReturning, setDraftReturning] = useState<string | null>(null)
+  const [returningItem, setReturningItem] = useState<string | null>(null)
   const [finaliseModal, setFinaliseModal] = useState<any | null>(null)
   const [finaliseItems, setFinaliseItems] = useState<any[]>([])
   const [finalisePayAmt, setFinalisePayAmt] = useState('')
@@ -2416,10 +2417,29 @@ ${customerRows.map(c => `<tr>
                                   <p className="text-xs text-slate-500">{(draft.items || []).length} item{(draft.items || []).length !== 1 ? 's' : ''}</p>
                                 </div>
                               </div>
-                              {/* Items list */}
-                              <div className="text-xs text-slate-600 bg-white rounded-lg px-3 py-2 mb-3 border border-amber-100">
-                                {(draft.items || []).map((item: any, idx: number) => (
-                                  <span key={idx}>{item.product_name} ×{item.quantity}{idx < (draft.items || []).length - 1 ? ', ' : ''}</span>
+                              {/* Items list — each item has its own ↩ Return button */}
+                              <div className="bg-white rounded-lg border border-amber-100 mb-3 divide-y divide-amber-50 overflow-hidden">
+                                {(draft.items || []).map((item: any) => (
+                                  <div key={item.id} className="flex items-center gap-2 px-3 py-2">
+                                    <span className="text-xs text-slate-700 flex-1 leading-snug">
+                                      {item.product_name} <span className="font-bold text-slate-900">×{item.quantity}</span>
+                                    </span>
+                                    <button
+                                      disabled={returningItem === item.id || isReturning}
+                                      onClick={async () => {
+                                        if (!confirm('Return ' + item.product_name + ' ×' + item.quantity + '?\nStock will be restored.')) return
+                                        setReturningItem(item.id)
+                                        const res = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'return_draft_item', saleId: draft.id, saleItemId: item.id }) })
+                                        const j = await res.json()
+                                        if (j.success) { showToast(j.message || '↩ Item returned'); fetchSales(); fetchData() }
+                                        else showToast(j.error || 'Error')
+                                        setReturningItem(null)
+                                      }}
+                                      className="text-[10px] font-black text-red-500 border border-red-200 rounded-md px-2 py-1 hover:bg-red-50 active:bg-red-100 disabled:opacity-40 shrink-0 whitespace-nowrap"
+                                    >
+                                      {returningItem === item.id ? '…' : '↩ Return'}
+                                    </button>
+                                  </div>
                                 ))}
                               </div>
                               {/* Action buttons */}
