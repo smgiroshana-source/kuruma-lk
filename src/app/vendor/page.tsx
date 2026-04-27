@@ -474,7 +474,16 @@ export default function VendorDashboard() {
     setLoading(false)
     setProductsLoading(false)
   }
-  async function fetchSales() { setSalesLoading(true); try { const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`); if (r.ok) setSalesData(await r.json()) } catch {} setSalesLoading(false) }
+  async function fetchSales() {
+    setSalesLoading(true)
+    try {
+      const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`)
+      if (r.ok) setSalesData(await r.json())
+      // Fire-and-forget: delete any old voided Rs.0 draft records from before the new delete-on-return behaviour
+      fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
+    } catch {}
+    setSalesLoading(false)
+  }
   async function fetchCreditCustomers() {
     setCreditLoading(true)
     try {
@@ -2178,7 +2187,7 @@ ${customerRows.map(c => `<tr>
               <div className="mb-4 bg-amber-50 border-2 border-amber-400 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-0.5">Finalising On-Approval Draft</p>
-                  <p className="font-black text-amber-900 text-base">{posDraftInvoiceNo} · {posCustomer.name}</p>
+                  <p className="font-black text-amber-900 text-base">{posCustomer.name}{posDraftInvoiceNo ? ' · ' + posDraftInvoiceNo : ''}</p>
                   <p className="text-xs text-amber-600 mt-0.5">Edit prices, add vehicle number &amp; payment — then Complete Invoice</p>
                 </div>
                 <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo('') }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
@@ -2223,7 +2232,7 @@ ${customerRows.map(c => `<tr>
                     </button>
                   )}
                   <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">
-                    {posLoading ? 'Saving…' : posDraftId ? '✅ Complete Invoice — ' + posDraftInvoiceNo : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}
+                    {posLoading ? 'Saving…' : posDraftId ? '✅ Complete Invoice' : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}
                   </button>
                 </div>
 
@@ -2398,7 +2407,7 @@ ${customerRows.map(c => `<tr>
                               <div className="flex items-start justify-between gap-2 mb-2">
                                 <div>
                                   <div className="flex items-center gap-2">
-                                    <span className="font-mono text-xs font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">{draft.invoice_no}</span>
+                                    <span className="font-mono text-xs font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">{draft.invoice_no || 'On Approval'}</span>
                                     <span className="text-xs text-slate-500">{daysAgo === 0 ? 'Today' : daysAgo + 'd ago'}</span>
                                     {daysAgo >= 3 && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">{daysAgo}d out</span>}
                                   </div>
@@ -2482,7 +2491,7 @@ ${customerRows.map(c => `<tr>
                                     setPosPreview(false)
                                     setPosDate(new Date().toISOString().split('T')[0])
                                     setPosDraftId(draft.id)
-                                    setPosDraftInvoiceNo(draft.invoice_no)
+                                    setPosDraftInvoiceNo(draft.invoice_no || '')
                                     setTab('pos')
                                     // Fetch real advance + outstanding for this customer (same as selectCustomer does)
                                     if (draft.customer_id) {

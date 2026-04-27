@@ -673,12 +673,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+    // No invoice number assigned yet — it will be assigned when the draft is finalised.
+    // Using null preserves the invoice number sequence (no gaps from returned drafts).
     const subtotal = items.reduce((s: number, i: any) => s + (i.quantity * (i.unitPrice || 0)), 0)
 
     const { data: draft, error } = await admin.from('sales').insert({
       vendor_id: vendor.id, customer_id: resolvedCustomerId,
-      invoice_no: invoiceNo, customer_name: customerName || 'Walk-in Customer',
+      invoice_no: null, customer_name: customerName || 'Walk-in Customer',
       customer_phone: customerPhone || null, subtotal, discount: 0,
       total: subtotal, paid_amount: 0, balance_due: 0,
       payment_method: 'cash', payment_status: 'draft',
@@ -703,7 +704,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, draft, invoiceNo, message: `Draft ${invoiceNo} created — stock reserved` })
+    return NextResponse.json({ success: true, draft, message: 'On Approval draft created — stock reserved' })
   }
 
   if (action === 'return_draft_item') {
@@ -729,12 +730,9 @@ export async function POST(req: NextRequest) {
     // Check if any items remain
     const remainingItems = (draft.items || []).filter((i: any) => i.id !== saleItemId)
     if (remainingItems.length === 0) {
-      // Last item — void the draft
-      await admin.from('sales').update({
-        payment_status: 'voided',
-        notes: (draft.notes || '') + '\nRETURNED: ' + new Date().toISOString() + ' — all items returned from on-approval',
-      }).eq('id', saleId)
-      return NextResponse.json({ success: true, voided: true, message: item.product_name + ' returned — draft voided (no items left)' })
+      // Last item — delete the draft entirely (no invoice was ever assigned, nothing to keep)
+      await admin.from('sales').delete().eq('id', saleId)
+      return NextResponse.json({ success: true, voided: true, message: item.product_name + ' returned — draft deleted (no items left)' })
     } else {
       // Update draft totals
       const newSubtotal = remainingItems.reduce((s: number, i: any) => s + parseFloat(i.total || 0), 0)
@@ -760,12 +758,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await admin.from('sales').update({
-      payment_status: 'voided',
-      notes: (draft.notes || '') + '\nRETURNED: ' + new Date().toISOString() + ' — all items returned from on-approval',
-    }).eq('id', saleId)
+    // Delete the draft entirely — no invoice was ever assigned so nothing to archive
+    await admin.from('sale_items').delete().eq('sale_id', saleId)
+    await admin.from('sales').delete().eq('id', saleId)
 
-    return NextResponse.json({ success: true, message: 'All items returned and stock restored' })
+    return NextResponse.json({ success: true, message: 'All items returned — draft deleted' })
+  }
+
+  if (action === 'cleanup_void_drafts') {
+    // One-time cleanup: delete voided On Approval records (total=0) that were created
+    // before the new delete-on-return behaviour was introduced. Safe to re-run.
+    const { data: oldVoids } = await admin
+      .from('sales')
+      .select('id')
+      .eq('vendor_id', vendor.id)
+      .eq('payment_status', 'voided')
+      .eq('total', 0)
+    if (oldVoids && oldVoids.length > 0) {
+      const ids = oldVoids.map((s: any) => s.id)
+      await admin.from('sale_items').delete().in('sale_id', ids)
+      await admin.from('sales').delete().in('id', ids)
+    }
+    return NextResponse.json({ success: true, deleted: oldVoids?.length || 0 })
   }
 
   if (action === 'finalize_draft') {
@@ -813,8 +827,12 @@ export async function POST(req: NextRequest) {
       ? paymentLines.sort((a: any, b: any) => (parseFloat(b.amount) || 0) - (parseFloat(a.amount) || 0))[0].method || 'cash'
       : (advanceUsedForBill > 0 ? 'advance' : billBalance > 0 ? 'credit' : 'cash')
 
+    // Assign the real invoice number now (draft had none)
+    const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+
     // Stamp the finalization date (not draft creation date) so it lands in today's reports
     await admin.from('sales').update({
+      invoice_no: invoiceNo,
       subtotal, discount: discountAmt, total,
       paid_amount: paidForThisBill, balance_due: billBalance,
       payment_status: paymentStatus,
@@ -904,7 +922,7 @@ export async function POST(req: NextRequest) {
       await admin.from('sales').update({ total_amount_due: totalAmountDue }).eq('id', saleId)
     }
 
-    let msg = `Invoice ${draft.invoice_no} finalized — ${paymentStatus}`
+    let msg = `Invoice ${invoiceNo} finalized — ${paymentStatus}`
     if (advanceUsedForBill > 0) msg += ` | Rs.${advanceUsedForBill.toLocaleString()} from advance`
     if (excessAppliedToOutstanding > 0) msg += ` | Rs.${excessAppliedToOutstanding.toLocaleString()} applied to old invoices`
     if (settledInvoices.length > 0) msg += ` (cleared: ${settledInvoices.join(', ')})`
