@@ -795,13 +795,16 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'finalize_draft') {
-    const { saleId, items: finalItems, payments: paymentLines, discount, vehicleNo, notes, saleDate, customerName, customerPhone } = body
+    const { saleId, customerId: bodyCustomerId, useAdvance, items: finalItems, payments: paymentLines, discount, vehicleNo, notes, saleDate, customerName, customerPhone } = body
     const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
     if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
 
+    const resolvedCustomerId = bodyCustomerId || draft.customer_id || null
+
     // Update each item with final negotiated price
     for (const fi of (finalItems || [])) {
+      if (!fi.id) continue
       await admin.from('sale_items').update({
         unit_price: fi.unitPrice,
         total: fi.quantity * fi.unitPrice,
@@ -811,20 +814,37 @@ export async function POST(req: NextRequest) {
     const subtotal = (finalItems || []).reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0)
     const discountAmt = discount || 0
     const total = Math.max(0, subtotal - discountAmt)
+
+    // Check customer advance (same logic as create_sale)
+    let customerAdvance = 0
+    if (resolvedCustomerId && useAdvance) {
+      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).single()
+      customerAdvance = parseFloat(cust?.advance_balance || 0)
+    }
+
     const cashPaid = (paymentLines || []).reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
-    const paidAmount = Math.min(total, cashPaid)
-    const balanceDue = Math.max(0, total - paidAmount)
+    const advanceUsedForBill = useAdvance && customerAdvance > 0
+      ? Math.min(customerAdvance, Math.max(0, total - cashPaid))
+      : 0
+
+    const paidForThisBill = Math.min(total, cashPaid + advanceUsedForBill)
+    const billBalance = Math.max(0, total - paidForThisBill)
+    const excessPayment = Math.max(0, (cashPaid + advanceUsedForBill) - total)
 
     let paymentStatus = 'paid'
-    if (balanceDue > 0 && paidAmount > 0) paymentStatus = 'partial'
-    else if (balanceDue > 0 && paidAmount === 0) paymentStatus = 'credit'
+    if (billBalance > 0 && paidForThisBill > 0) paymentStatus = 'partial'
+    else if (billBalance > 0 && paidForThisBill === 0) paymentStatus = 'credit'
 
-    // Stamp the finalization date (not draft creation date) so it lands in the right day's reports
+    const primaryMethod = paymentLines && paymentLines.length > 0
+      ? paymentLines.sort((a: any, b: any) => (parseFloat(b.amount) || 0) - (parseFloat(a.amount) || 0))[0].method || 'cash'
+      : (advanceUsedForBill > 0 ? 'advance' : billBalance > 0 ? 'credit' : 'cash')
+
+    // Stamp the finalization date (not draft creation date) so it lands in today's reports
     await admin.from('sales').update({
       subtotal, discount: discountAmt, total,
-      paid_amount: paidAmount, balance_due: balanceDue,
+      paid_amount: paidForThisBill, balance_due: billBalance,
       payment_status: paymentStatus,
-      payment_method: paymentLines?.[0]?.method || (balanceDue > 0 ? 'credit' : 'cash'),
+      payment_method: primaryMethod,
       vehicle_no: vehicleNo || draft.vehicle_no,
       notes: notes || draft.notes?.replace('ON APPROVAL\n', '').replace('ON APPROVAL', '').trim() || null,
       created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
@@ -832,18 +852,91 @@ export async function POST(req: NextRequest) {
       customer_phone: customerPhone || draft.customer_phone,
     }).eq('id', saleId)
 
+    // Record cash/cheque/bank payment lines
     for (const pl of (paymentLines || [])) {
       if (parseFloat(pl.amount) > 0) {
         await admin.from('payments').insert({
-          sale_id: saleId, vendor_id: vendor.id, customer_id: draft.customer_id,
+          sale_id: saleId, vendor_id: vendor.id, customer_id: resolvedCustomerId,
           amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
           bank_ref: pl.bankRef || null, cheque_number: pl.chequeNumber || null,
+          cheque_date: pl.chequeDate || null,
         })
       }
     }
 
+    // Record advance usage
+    if (advanceUsedForBill > 0) {
+      await admin.from('payments').insert({
+        sale_id: saleId, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+        amount: advanceUsedForBill, payment_method: 'advance',
+        notes: 'Used from advance balance',
+      })
+    }
+
+    // Handle overpayment: apply to outstanding invoices → remaining to advance
+    const settledInvoices: string[] = []
+    let excessAppliedToOutstanding = 0
+    if (resolvedCustomerId) {
+      if (excessPayment > 0) {
+        const { data: outstandingSales } = await admin
+          .from('sales')
+          .select('id, invoice_no, total, paid_amount, balance_due')
+          .eq('vendor_id', vendor.id)
+          .eq('customer_id', resolvedCustomerId)
+          .gt('balance_due', 0)
+          .neq('payment_status', 'voided')
+          .neq('id', saleId)
+          .order('created_at', { ascending: true })
+
+        let remaining = excessPayment
+        for (const oldSale of (outstandingSales || [])) {
+          if (remaining <= 0) break
+          const oldBalance = parseFloat(oldSale.balance_due)
+          const applyAmount = Math.min(remaining, oldBalance)
+          await admin.from('payments').insert({
+            sale_id: oldSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+            amount: applyAmount, payment_method: 'settlement',
+            notes: `Auto-applied from invoice ${draft.invoice_no}`,
+          })
+          const newOldPaid = parseFloat(oldSale.paid_amount) + applyAmount
+          const newOldBalance = Math.max(0, oldBalance - applyAmount)
+          await admin.from('sales').update({
+            paid_amount: newOldPaid, balance_due: newOldBalance,
+            payment_status: newOldBalance <= 0 ? 'paid' : 'partial',
+          }).eq('id', oldSale.id)
+          excessAppliedToOutstanding += applyAmount
+          remaining -= applyAmount
+          if (newOldBalance <= 0) settledInvoices.push(oldSale.invoice_no)
+        }
+        // Remaining excess + whatever advance wasn't used for the bill → new advance balance
+        const newAdvance = Math.max(0, customerAdvance - advanceUsedForBill) + remaining
+        await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
+      } else {
+        // No overpayment — just deduct the advance that was used
+        if (advanceUsedForBill > 0) {
+          const newAdvance = Math.max(0, customerAdvance - advanceUsedForBill)
+          await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
+        }
+      }
+    }
+
+    // Update total_amount_due snapshot on the sale
+    if (resolvedCustomerId) {
+      const { data: allCustomerSales } = await admin
+        .from('sales').select('balance_due')
+        .eq('vendor_id', vendor.id).eq('customer_id', resolvedCustomerId)
+        .neq('payment_status', 'voided').gt('balance_due', 0)
+      const totalAmountDue = (allCustomerSales || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
+      await admin.from('sales').update({ total_amount_due: totalAmountDue }).eq('id', saleId)
+    }
+
+    let msg = `Invoice ${draft.invoice_no} finalized — ${paymentStatus}`
+    if (advanceUsedForBill > 0) msg += ` | Rs.${advanceUsedForBill.toLocaleString()} from advance`
+    if (excessAppliedToOutstanding > 0) msg += ` | Rs.${excessAppliedToOutstanding.toLocaleString()} applied to old invoices`
+    if (settledInvoices.length > 0) msg += ` (cleared: ${settledInvoices.join(', ')})`
+
     const { data: finalizedSale } = await admin.from('sales').select('*, items:sale_items(*), payments:payments(*)').eq('id', saleId).single()
-    return NextResponse.json({ success: true, sale: finalizedSale, message: `Invoice ${draft.invoice_no} finalized — ${paymentStatus}` })
+    return NextResponse.json({ success: true, sale: finalizedSale, advanceUsed: advanceUsedForBill, appliedToOutstanding: excessAppliedToOutstanding, settledInvoices, message: msg })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

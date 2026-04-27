@@ -280,11 +280,6 @@ export default function VendorDashboard() {
   // Draft / On Approval
   const [draftReturning, setDraftReturning] = useState<string | null>(null)
   const [returningItem, setReturningItem] = useState<string | null>(null)
-  const [finaliseModal, setFinaliseModal] = useState<any | null>(null)
-  const [finaliseItems, setFinaliseItems] = useState<any[]>([])
-  const [finalisePayAmt, setFinalisePayAmt] = useState('')
-  const [finalisePayMethod, setFinalisePayMethod] = useState('cash')
-  const [finaliseSaving, setFinaliseSaving] = useState(false)
   const [posDraftId, setPosDraftId] = useState<string | null>(null)
   const [posDraftInvoiceNo, setPosDraftInvoiceNo] = useState('')
 
@@ -944,6 +939,8 @@ export default function VendorDashboard() {
         ? {
             action,
             saleId: posDraftId,
+            customerId: posCustomer.id || null,
+            useAdvance,
             items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity })),
             payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
             discount: posDiscountAmt,
@@ -2483,9 +2480,26 @@ ${customerRows.map(c => `<tr>
                                     setPosDiscount('')
                                     setPosNotes('')
                                     setPosPreview(false)
+                                    setPosDate(new Date().toISOString().split('T')[0])
                                     setPosDraftId(draft.id)
                                     setPosDraftInvoiceNo(draft.invoice_no)
                                     setTab('pos')
+                                    // Fetch real advance + outstanding for this customer (same as selectCustomer does)
+                                    if (draft.customer_id) {
+                                      fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_customer', customerId: draft.customer_id }) })
+                                        .then(r => r.json()).then(j => {
+                                          if (j.customer) {
+                                            const adv = parseFloat(j.customer.advance_balance || 0)
+                                            setPosCustomer((prev: any) => ({ ...prev, advance: adv, require_vehicle_no: j.customer.require_vehicle_no || false }))
+                                            if (adv > 0) setUseAdvance(true)
+                                          }
+                                        }).catch(() => {})
+                                      fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: draft.customer_id }) })
+                                        .then(r => r.json()).then(j => {
+                                          const outstanding = (j.sales || []).reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
+                                          setPosCustomer((prev: any) => ({ ...prev, outstanding }))
+                                        }).catch(() => {})
+                                    }
                                   }}
                                   className="flex-1 text-xs font-black text-green-700 border border-green-300 rounded-lg px-3 py-2 bg-green-50 hover:bg-green-100 active:bg-green-200"
                                 >
@@ -3380,113 +3394,6 @@ ${customerRows.map(c => `<tr>
               </div>
               <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex-shrink-0">
                 <button onClick={() => setReturnModal(null)} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Finalize Draft Modal */}
-        {finaliseModal && (
-          <div className="fixed inset-0 bg-black/60 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => !finaliseSaving && setFinaliseModal(null)}>
-            <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
-                <div>
-                  <h3 className="font-black text-slate-800">Finalise Invoice</h3>
-                  <p className="text-xs text-slate-500">{finaliseModal.invoice_no} · {finaliseModal.customer_name}</p>
-                </div>
-                <button onClick={() => setFinaliseModal(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold">✕</button>
-              </div>
-              <div className="p-5 space-y-4">
-                {/* Editable items */}
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Items — set final prices</p>
-                  <div className="space-y-2">
-                    {finaliseItems.map((item, idx) => (
-                      <div key={item.id} className="flex items-center gap-3 bg-slate-50 rounded-xl px-3 py-2.5">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-800 truncate">{item.product_name}</p>
-                          <p className="text-xs text-slate-400">×{item.quantity}</p>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-xs text-slate-400">Rs.</span>
-                          <input
-                            type="number"
-                            value={item.unitPrice || ''}
-                            placeholder="0"
-                            onChange={e => {
-                              const v = parseInt(e.target.value) || 0
-                              setFinaliseItems(prev => prev.map((it, i) => i === idx ? { ...it, unitPrice: v } : it))
-                            }}
-                            className="w-24 px-2 py-1.5 border-2 border-slate-200 rounded-lg text-sm font-bold text-right outline-none focus:border-orange-400"
-                          />
-                        </div>
-                        <div className="text-sm font-bold text-slate-700 w-20 text-right shrink-0">
-                          Rs.{(item.quantity * (item.unitPrice || 0)).toLocaleString()}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {/* Total */}
-                <div className="bg-orange-50 rounded-xl px-4 py-3 flex justify-between items-center">
-                  <span className="font-bold text-slate-700">Total</span>
-                  <span className="font-black text-orange-600 text-lg">Rs.{finaliseItems.reduce((s, i) => s + i.quantity * (i.unitPrice || 0), 0).toLocaleString()}</span>
-                </div>
-                {/* Payment */}
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Payment received</p>
-                  <div className="flex gap-2">
-                    <select value={finalisePayMethod} onChange={e => setFinalisePayMethod(e.target.value)} className="px-3 py-2.5 border-2 border-slate-200 rounded-xl text-sm outline-none">
-                      <option value="cash">💵 Cash</option>
-                      <option value="bank">🏦 Bank</option>
-                      <option value="cheque">📝 Cheque</option>
-                      <option value="card">💳 Card</option>
-                      <option value="">Credit (no payment)</option>
-                    </select>
-                    <input
-                      type="number"
-                      value={finalisePayAmt}
-                      placeholder="Amount (0 = full credit)"
-                      onChange={e => setFinalisePayAmt(e.target.value)}
-                      className="flex-1 px-3 py-2.5 border-2 border-slate-200 rounded-xl text-sm outline-none focus:border-orange-400"
-                    />
-                  </div>
-                  {(() => {
-                    const total = finaliseItems.reduce((s, i) => s + i.quantity * (i.unitPrice || 0), 0)
-                    const paid = Math.min(total, parseFloat(finalisePayAmt) || 0)
-                    const balance = total - paid
-                    if (balance > 0 && paid > 0) return <p className="text-xs text-amber-600 font-semibold mt-1">Partial — Rs.{balance.toLocaleString()} on credit</p>
-                    if (balance > 0 && paid === 0) return <p className="text-xs text-red-600 font-semibold mt-1">Full credit — Rs.{balance.toLocaleString()} due</p>
-                    if (total > 0 && paid >= total) return <p className="text-xs text-green-600 font-semibold mt-1">✓ Paid in full</p>
-                    return null
-                  })()}
-                </div>
-              </div>
-              <div className="px-5 pb-5 flex gap-3">
-                <button onClick={() => setFinaliseModal(null)} disabled={finaliseSaving} className="flex-1 border-2 border-slate-200 text-slate-700 font-bold py-3.5 rounded-xl">Cancel</button>
-                <button
-                  disabled={finaliseSaving}
-                  onClick={async () => {
-                    setFinaliseSaving(true)
-                    const total = finaliseItems.reduce((s, i) => s + i.quantity * (i.unitPrice || 0), 0)
-                    const payAmt = parseFloat(finalisePayAmt) || 0
-                    const paymentLines = finalisePayMethod && payAmt > 0 ? [{ method: finalisePayMethod, amount: payAmt }] : []
-                    const res = await fetch('/api/vendor/sales', {
-                      method: 'POST', headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ action: 'finalize_draft', saleId: finaliseModal.id, items: finaliseItems, payments: paymentLines, discount: 0 })
-                    })
-                    const j = await res.json()
-                    if (j.success) {
-                      showToast('✅ ' + (j.message || 'Invoice finalised'))
-                      setFinaliseModal(null)
-                      fetchSales(); fetchData()
-                    } else showToast(j.error || 'Error finalising')
-                    setFinaliseSaving(false)
-                  }}
-                  className="flex-2 flex-[2] bg-green-600 hover:bg-green-700 text-white font-black py-3.5 rounded-xl disabled:opacity-50"
-                >
-                  {finaliseSaving ? 'Saving…' : '✅ Complete Invoice'}
-                </button>
               </div>
             </div>
           </div>
