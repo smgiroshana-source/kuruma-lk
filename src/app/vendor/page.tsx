@@ -89,6 +89,22 @@ function creditAge(dateStr: string | null): { label: string; pill: string; dot: 
 }
 
 
+// Compute the cumulative TOTAL AMOUNT DUE for a sale from the in-memory sales list.
+// Invoices are sorted by invoice_no (ascending) so each invoice's value = running sum
+// of balance_due up to and including its position: SAK-00178 → 582k, SAK-00180 → 707k, etc.
+function calcTotalAmountDue(sale: any, salesData: any): number {
+  if (!sale.customer_id) return parseFloat(sale.total_amount_due || 0)
+  const peers = ((salesData?.sales || []) as any[])
+    .filter((s: any) => s.customer_id === sale.customer_id && s.payment_status !== 'voided' && s.payment_status !== 'draft')
+    .sort((a: any, b: any) => (a.invoice_no || '').localeCompare(b.invoice_no || ''))
+  let cumulative = 0
+  for (const s of peers) {
+    cumulative += parseFloat(s.balance_due || 0)
+    if (s.id === sale.id) return cumulative
+  }
+  return parseFloat(sale.total_amount_due || 0) // fallback to stored snapshot
+}
+
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
   const items = sale.items || []; const payments = sale.payments || []; const isThermal = format === 'thermal'; const w = isThermal ? 300 : 800
   const s = settings || {}
@@ -482,19 +498,6 @@ export default function VendorDashboard() {
       if (r.ok) setSalesData(await r.json())
       // Fire-and-forget background tasks
       fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
-      // One-time fix: correct total_amount_due using cumulative ordering.
-      // Runs once per device (localStorage key). Bump the version string to force a re-run.
-      const SNAP_VER = 'snapshot-cumulative-v2'
-      if (typeof window !== 'undefined' && window.localStorage.getItem('snap_fix') !== SNAP_VER) {
-        fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recalculate_amounts_due' }) })
-          .then(async () => {
-            window.localStorage.setItem('snap_fix', SNAP_VER)
-            // Re-fetch sales so the in-memory data picks up the corrected totals before printing
-            const r2 = await fetch(`/api/vendor/sales?period=${salesPeriod}`)
-            if (r2.ok) setSalesData(await r2.json())
-          })
-          .catch(() => {})
-      }
     } catch {}
     setSalesLoading(false)
   }
@@ -2785,8 +2788,8 @@ ${customerRows.map(c => `<tr>
                                       <div className="relative">
                                         <button onClick={e => { e.stopPropagation(); const el = document.getElementById('print-menu-' + sale.id); if (el) el.classList.toggle('hidden') }} className="text-[11px] font-semibold text-slate-600 px-3 py-1.5 rounded border border-slate-200 active:bg-slate-50">🖨️ Print ▾</button>
                                         <div id={'print-menu-' + sale.id} className="hidden absolute left-0 bottom-full mb-1 bg-white rounded-lg border border-slate-200 shadow-lg z-20 overflow-hidden min-w-[140px]">
-                                          <button onClick={() => { printInvoice(sale, salesData.vendor, 'thermal', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 border-b border-slate-100">🖨️ Thermal</button>
-                                          <button onClick={() => { printInvoice(sale, salesData.vendor, 'a4', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border-b border-slate-100">📄 A4 Print</button>
+                                          <button onClick={() => { printInvoice({ ...sale, total_amount_due: calcTotalAmountDue(sale, salesData) }, salesData.vendor, 'thermal', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 border-b border-slate-100">🖨️ Thermal</button>
+                                          <button onClick={() => { printInvoice({ ...sale, total_amount_due: calcTotalAmountDue(sale, salesData) }, salesData.vendor, 'a4', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border-b border-slate-100">📄 A4 Print</button>
                                           {(sale.customer_phone || sale.customer?.phone) && <button onClick={() => { sendWhatsAppBill(sale, salesData.vendor, sale.customer_phone || sale.customer?.phone); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-green-600 hover:bg-green-50">💬 WhatsApp</button>}
                                         </div>
                                       </div>
