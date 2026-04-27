@@ -939,27 +939,30 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'recalculate_amounts_due') {
-    // Background task: recalculate total_amount_due for every active sale so that
-    // re-printing old invoices shows the correct "TOTAL AMOUNT DUE" across all invoices.
-    // Safe to run repeatedly — idempotent.
+    // Fills total_amount_due ONLY on invoices where it was never set (null).
+    // Existing snapshots are preserved — each invoice's value reflects the
+    // customer's outstanding at the time that invoice was created/finalised.
     const { data: allSales } = await admin
-      .from('sales').select('id, customer_id, balance_due')
+      .from('sales').select('id, customer_id, balance_due, total_amount_due')
       .eq('vendor_id', vendor.id)
       .neq('payment_status', 'voided')
       .neq('payment_status', 'draft')
     if (!allSales || allSales.length === 0) return NextResponse.json({ success: true, updated: 0 })
 
-    // Sum current balance_due per customer
+    // Only act on sales that have no snapshot yet
+    const needsFill = allSales.filter((s: any) => s.customer_id && s.total_amount_due === null)
+    if (needsFill.length === 0) return NextResponse.json({ success: true, updated: 0 })
+
+    // Sum current balance_due per customer (best available estimate for historical invoices)
     const customerTotals: Record<string, number> = {}
     for (const s of allSales) {
       if (!s.customer_id) continue
       customerTotals[s.customer_id] = (customerTotals[s.customer_id] || 0) + parseFloat(s.balance_due || 0)
     }
 
-    // Update each sale with its customer's current total outstanding
+    // Fill only the null rows
     let updated = 0
-    for (const s of allSales) {
-      if (!s.customer_id) continue
+    for (const s of needsFill) {
       const customerTotal = customerTotals[s.customer_id] || 0
       await admin.from('sales').update({ total_amount_due: customerTotal }).eq('id', s.id)
       updated++

@@ -88,6 +88,7 @@ function creditAge(dateStr: string | null): { label: string; pill: string; dot: 
   return null
 }
 
+
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
   const items = sale.items || []; const payments = sale.payments || []; const isThermal = format === 'thermal'; const w = isThermal ? 300 : 800
   const s = settings || {}
@@ -481,7 +482,6 @@ export default function VendorDashboard() {
       if (r.ok) setSalesData(await r.json())
       // Fire-and-forget background tasks
       fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
-      fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recalculate_amounts_due' }) }).catch(() => {})
     } catch {}
     setSalesLoading(false)
   }
