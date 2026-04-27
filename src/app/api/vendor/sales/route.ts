@@ -939,33 +939,42 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'recalculate_amounts_due') {
-    // Fills total_amount_due ONLY on invoices where it was never set (null).
-    // Existing snapshots are preserved — each invoice's value reflects the
-    // customer's outstanding at the time that invoice was created/finalised.
+    // Recalculates total_amount_due for every active invoice using a time-ordered
+    // cumulative algorithm: each invoice gets the running sum of balance_due for
+    // all of that customer's invoices up to and including its position (by created_at).
+    //
+    // Example for Sisil Motors (sorted oldest→newest):
+    //   older invoices (389k outstanding)
+    //   SAK-00178 (193k)  → total_amount_due = 389k + 193k = 582k  ✓
+    //   SAK-00180 (125k)  → total_amount_due = 582k + 125k = 707k  ✓
+    //   SAK-00181 ( 55k)  → total_amount_due = 707k +  55k = 762k  ✓
+    //
+    // This produces unique, progressive values per invoice rather than a single flat total.
     const { data: allSales } = await admin
-      .from('sales').select('id, customer_id, balance_due, total_amount_due')
+      .from('sales').select('id, customer_id, balance_due, created_at')
       .eq('vendor_id', vendor.id)
       .neq('payment_status', 'voided')
       .neq('payment_status', 'draft')
+      .order('created_at', { ascending: true })
     if (!allSales || allSales.length === 0) return NextResponse.json({ success: true, updated: 0 })
 
-    // Only act on sales that have no snapshot yet
-    const needsFill = allSales.filter((s: any) => s.customer_id && s.total_amount_due === null)
-    if (needsFill.length === 0) return NextResponse.json({ success: true, updated: 0 })
-
-    // Sum current balance_due per customer (best available estimate for historical invoices)
-    const customerTotals: Record<string, number> = {}
+    // Group invoices by customer
+    const customerSales: Record<string, any[]> = {}
     for (const s of allSales) {
       if (!s.customer_id) continue
-      customerTotals[s.customer_id] = (customerTotals[s.customer_id] || 0) + parseFloat(s.balance_due || 0)
+      if (!customerSales[s.customer_id]) customerSales[s.customer_id] = []
+      customerSales[s.customer_id].push(s)
     }
 
-    // Fill only the null rows
+    // For each customer compute the cumulative balance_due (oldest → newest)
     let updated = 0
-    for (const s of needsFill) {
-      const customerTotal = customerTotals[s.customer_id] || 0
-      await admin.from('sales').update({ total_amount_due: customerTotal }).eq('id', s.id)
-      updated++
+    for (const sales of Object.values(customerSales)) {
+      let cumulative = 0
+      for (const s of sales) {
+        cumulative += parseFloat(s.balance_due || 0)
+        await admin.from('sales').update({ total_amount_due: cumulative }).eq('id', s.id)
+        updated++
+      }
     }
     return NextResponse.json({ success: true, updated })
   }

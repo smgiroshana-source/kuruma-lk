@@ -482,6 +482,14 @@ export default function VendorDashboard() {
       if (r.ok) setSalesData(await r.json())
       // Fire-and-forget background tasks
       fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
+      // One-time fix: correct total_amount_due using cumulative ordering.
+      // Runs once per device (localStorage key). Bump the version string to force a re-run.
+      const SNAP_VER = 'snapshot-cumulative-v1'
+      if (typeof window !== 'undefined' && window.localStorage.getItem('snap_fix') !== SNAP_VER) {
+        fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recalculate_amounts_due' }) })
+          .then(() => window.localStorage.setItem('snap_fix', SNAP_VER))
+          .catch(() => {})
+      }
     } catch {}
     setSalesLoading(false)
   }
