@@ -89,6 +89,22 @@ function creditAge(dateStr: string | null): { label: string; pill: string; dot: 
 }
 
 
+// Strip internal tracking notes that must not appear on printed customer invoices.
+function cleanPrintNotes(notes: string | null | undefined): string {
+  if (!notes) return ''
+  return notes
+    .split(/;\s*|\n/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0
+      && !s.startsWith('Cancelled SAK-')
+      && !s.startsWith('ON APPROVAL')
+      && !s.startsWith('VOIDED:')
+      && !s.startsWith('RETURN:')
+      && !s.startsWith('ITEM RETURNED:'))
+    .join('; ')
+    .trim()
+}
+
 // Fetch ALL of a customer's invoices from the DB (ordered by invoice_no ascending),
 // compute a running cumulative balance_due, and print with the correct total.
 // This works regardless of which period filter is active in the Sales tab.
@@ -154,7 +170,7 @@ ${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>Invoice: <
 <table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? i.product_sku + ' - ' : ''}${i.product_name}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? (isThermal ? `<div style="margin-top:6px"><div style="font-size:10px;font-weight:600;margin-bottom:3px">Payments</div>${paymentLines}</div>` : `<div class="payments-section"><div class="payments-label">Payments</div>${paymentLines}</div>`) : ''}
-${sale.notes ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${sale.notes}</div>` : `<div class="note-section">Note: ${sale.notes}</div>`) : ''}
+${cleanPrintNotes(sale.notes) ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${cleanPrintNotes(sale.notes)}</div>` : `<div class="note-section">Note: ${cleanPrintNotes(sale.notes)}</div>`) : ''}
 ${(() => {
   const totalDue = parseFloat(sale.total_amount_due || sale.totalAmountDue || 0)
   const currentInvoiceDue = parseFloat(sale.balance_due || 0)
