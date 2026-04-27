@@ -487,7 +487,12 @@ export default function VendorDashboard() {
       const SNAP_VER = 'snapshot-cumulative-v1'
       if (typeof window !== 'undefined' && window.localStorage.getItem('snap_fix') !== SNAP_VER) {
         fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recalculate_amounts_due' }) })
-          .then(() => window.localStorage.setItem('snap_fix', SNAP_VER))
+          .then(async () => {
+            window.localStorage.setItem('snap_fix', SNAP_VER)
+            // Re-fetch sales so the in-memory data picks up the corrected totals before printing
+            const r2 = await fetch(`/api/vendor/sales?period=${salesPeriod}`)
+            if (r2.ok) setSalesData(await r2.json())
+          })
           .catch(() => {})
       }
     } catch {}
