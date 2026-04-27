@@ -2613,19 +2613,26 @@ ${customerRows.map(c => `<tr>
                   {salesData.dailyRevenue && salesData.dailyRevenue.length > 1 && (
                     <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
                       <h3 className="font-bold text-sm mb-3">Daily Revenue</h3>
-                      <div className="flex items-end gap-1 h-32 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+                      {/* Bar chart: flex-1 spacer pushes each bar to the bottom; pixel heights avoid % issues in nested flex */}
+                      <div className="flex gap-0.5 overflow-x-auto" style={{ scrollbarWidth: 'none', height: '150px' }}>
                         {(() => {
                           const maxRev = Math.max(...salesData.dailyRevenue.map((d: any) => d.revenue))
+                          const MAX_BAR_PX = 110
                           return salesData.dailyRevenue.map((day: any) => {
-                            const h = maxRev > 0 ? (day.revenue / maxRev) * 100 : 0
+                            const barPx = maxRev > 0 ? Math.max((day.revenue / maxRev) * MAX_BAR_PX, 2) : 2
                             const dateStr = new Date(day.date + 'T00:00:00').toLocaleDateString('en-LK', { day: 'numeric', month: 'short' })
                             return (
-                              <div key={day.date} className="flex flex-col items-center gap-1 flex-1 min-w-[28px] group relative">
-                                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none z-10">
-                                  Rs.{day.revenue.toLocaleString()} ({day.count} sales)
+                              <div key={day.date} className="flex flex-col items-center flex-1 min-w-[26px] h-full group relative">
+                                {/* tooltip */}
+                                <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition pointer-events-none z-10 mt-1">
+                                  Rs.{day.revenue.toLocaleString()}<br/>{day.count} sale{day.count !== 1 ? 's' : ''}
                                 </div>
-                                <div className="w-full bg-gradient-to-t from-orange-500 to-orange-400 rounded-t-sm transition-all" style={{ height: `${Math.max(h, 2)}%` }} />
-                                <span className="text-[8px] text-slate-400 -rotate-45 origin-center whitespace-nowrap">{dateStr}</span>
+                                {/* spacer pushes bar down */}
+                                <div className="flex-1" />
+                                {/* bar */}
+                                <div className="w-full bg-gradient-to-t from-orange-500 to-orange-400 rounded-t-sm" style={{ height: `${barPx}px` }} />
+                                {/* date label */}
+                                <span className="text-[7px] text-slate-400 whitespace-nowrap mt-0.5" style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>{dateStr}</span>
                               </div>
                             )
                           })
