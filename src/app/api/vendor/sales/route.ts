@@ -951,11 +951,11 @@ export async function POST(req: NextRequest) {
     //
     // This produces unique, progressive values per invoice rather than a single flat total.
     const { data: allSales } = await admin
-      .from('sales').select('id, customer_id, balance_due, created_at')
+      .from('sales').select('id, customer_id, balance_due, invoice_no')
       .eq('vendor_id', vendor.id)
       .neq('payment_status', 'voided')
       .neq('payment_status', 'draft')
-      .order('created_at', { ascending: true })
+      .order('invoice_no', { ascending: true })
     if (!allSales || allSales.length === 0) return NextResponse.json({ success: true, updated: 0 })
 
     // Group invoices by customer
