@@ -266,32 +266,6 @@ export async function POST(req: NextRequest) {
 
     const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
 
-    // Check for voided invoices for this customer (to reference on this invoice)
-    let voidReference = ''
-    if (resolvedCustomerId) {
-      const { data: voidedSales } = await admin
-        .from('sales')
-        .select('invoice_no, total, notes, items:sale_items(product_name, quantity, unit_price)')
-        .eq('vendor_id', vendor.id)
-        .eq('customer_id', resolvedCustomerId)
-        .eq('payment_status', 'voided')
-        .order('created_at', { ascending: false })
-        .limit(5)
-      if (voidedSales && voidedSales.length > 0) {
-        const unreferenced = voidedSales.filter((v: any) => !(v.notes || '').includes('REFERENCED_ON:'))
-        if (unreferenced.length > 0) {
-          voidReference = unreferenced.map((v: any) => {
-            const items = (v.items || []).map((i: any) => `${i.product_name} x${i.quantity}`).join(', ')
-            return `Cancelled ${v.invoice_no} (Rs.${parseFloat(v.total).toLocaleString()}: ${items})`
-          }).join('; ')
-          // Mark as referenced
-          for (const v of unreferenced) {
-            await admin.from('sales').update({ notes: ((v.notes || '') + `\nREFERENCED_ON: ${invoiceNo}`).trim() }).eq('invoice_no', v.invoice_no).eq('vendor_id', vendor.id)
-          }
-        }
-      }
-    }
-
     const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0)
     const total = Math.max(0, subtotal - (discount || 0))
 
@@ -331,7 +305,7 @@ export async function POST(req: NextRequest) {
       customer_phone: customerPhone || null, subtotal, discount: discount || 0,
       total, paid_amount: paidForThisBill, balance_due: billBalance,
       payment_method: primaryMethod, payment_status: paymentStatus,
-      notes: [notes, voidReference].filter(Boolean).join('\n') || null,
+      notes: notes || null,
       vehicle_no: vehicleNo || null,
     }
     if (saleDate) saleRecord.created_at = new Date(saleDate).toISOString()
