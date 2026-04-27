@@ -917,18 +917,54 @@ export async function POST(req: NextRequest) {
       const { data: allCustomerSales } = await admin
         .from('sales').select('balance_due')
         .eq('vendor_id', vendor.id).eq('customer_id', resolvedCustomerId)
-        .neq('payment_status', 'voided').gt('balance_due', 0)
+        .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0)
       const totalAmountDue = (allCustomerSales || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
       await admin.from('sales').update({ total_amount_due: totalAmountDue }).eq('id', saleId)
     }
+
+    // Re-fetch after all updates so total_amount_due is included
+    const { data: finalizedSale } = await admin.from('sales').select('*, items:sale_items(*), payments:payments(*)').eq('id', saleId).single()
 
     let msg = `Invoice ${invoiceNo} finalized — ${paymentStatus}`
     if (advanceUsedForBill > 0) msg += ` | Rs.${advanceUsedForBill.toLocaleString()} from advance`
     if (excessAppliedToOutstanding > 0) msg += ` | Rs.${excessAppliedToOutstanding.toLocaleString()} applied to old invoices`
     if (settledInvoices.length > 0) msg += ` (cleared: ${settledInvoices.join(', ')})`
 
-    const { data: finalizedSale } = await admin.from('sales').select('*, items:sale_items(*), payments:payments(*)').eq('id', saleId).single()
-    return NextResponse.json({ success: true, sale: finalizedSale, advanceUsed: advanceUsedForBill, appliedToOutstanding: excessAppliedToOutstanding, settledInvoices, message: msg })
+    return NextResponse.json({
+      success: true, sale: finalizedSale,
+      totalAmountDue: finalizedSale?.total_amount_due || 0,
+      advanceUsed: advanceUsedForBill, appliedToOutstanding: excessAppliedToOutstanding,
+      settledInvoices, message: msg,
+    })
+  }
+
+  if (action === 'recalculate_amounts_due') {
+    // Background task: recalculate total_amount_due for every active sale so that
+    // re-printing old invoices shows the correct "TOTAL AMOUNT DUE" across all invoices.
+    // Safe to run repeatedly — idempotent.
+    const { data: allSales } = await admin
+      .from('sales').select('id, customer_id, balance_due')
+      .eq('vendor_id', vendor.id)
+      .neq('payment_status', 'voided')
+      .neq('payment_status', 'draft')
+    if (!allSales || allSales.length === 0) return NextResponse.json({ success: true, updated: 0 })
+
+    // Sum current balance_due per customer
+    const customerTotals: Record<string, number> = {}
+    for (const s of allSales) {
+      if (!s.customer_id) continue
+      customerTotals[s.customer_id] = (customerTotals[s.customer_id] || 0) + parseFloat(s.balance_due || 0)
+    }
+
+    // Update each sale with its customer's current total outstanding
+    let updated = 0
+    for (const s of allSales) {
+      if (!s.customer_id) continue
+      const customerTotal = customerTotals[s.customer_id] || 0
+      await admin.from('sales').update({ total_amount_due: customerTotal }).eq('id', s.id)
+      updated++
+    }
+    return NextResponse.json({ success: true, updated })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

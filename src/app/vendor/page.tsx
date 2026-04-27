@@ -479,8 +479,9 @@ export default function VendorDashboard() {
     try {
       const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`)
       if (r.ok) setSalesData(await r.json())
-      // Fire-and-forget: delete any old voided Rs.0 draft records from before the new delete-on-return behaviour
+      // Fire-and-forget background tasks
       fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
+      fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'recalculate_amounts_due' }) }).catch(() => {})
     } catch {}
     setSalesLoading(false)
   }
