@@ -89,20 +89,24 @@ function creditAge(dateStr: string | null): { label: string; pill: string; dot: 
 }
 
 
-// Compute the cumulative TOTAL AMOUNT DUE for a sale from the in-memory sales list.
-// Invoices are sorted by invoice_no (ascending) so each invoice's value = running sum
-// of balance_due up to and including its position: SAK-00178 → 582k, SAK-00180 → 707k, etc.
-function calcTotalAmountDue(sale: any, salesData: any): number {
-  if (!sale.customer_id) return parseFloat(sale.total_amount_due || 0)
-  const peers = ((salesData?.sales || []) as any[])
-    .filter((s: any) => s.customer_id === sale.customer_id && s.payment_status !== 'voided' && s.payment_status !== 'draft')
-    .sort((a: any, b: any) => (a.invoice_no || '').localeCompare(b.invoice_no || ''))
-  let cumulative = 0
-  for (const s of peers) {
-    cumulative += parseFloat(s.balance_due || 0)
-    if (s.id === sale.id) return cumulative
+// Fetch ALL of a customer's invoices from the DB (ordered by invoice_no ascending),
+// compute a running cumulative balance_due, and print with the correct total.
+// This works regardless of which period filter is active in the Sales tab.
+async function printWithTotal(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
+  let totalAmountDue = parseFloat(sale.total_amount_due || 0)
+  if (sale.customer_id) {
+    try {
+      const r = await fetch(`/api/vendor/sales?customer_id=${sale.customer_id}`)
+      const j = await r.json()
+      // API returns invoices ordered by invoice_no ascending (non-voided, non-draft)
+      let cumulative = 0
+      for (const s of (j.sales || [])) {
+        cumulative += parseFloat(s.balance_due || 0)
+        if (s.id === sale.id) { totalAmountDue = cumulative; break }
+      }
+    } catch {}
   }
-  return parseFloat(sale.total_amount_due || 0) // fallback to stored snapshot
+  printInvoice({ ...sale, total_amount_due: totalAmountDue }, vendor, format, settings)
 }
 
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
@@ -2788,8 +2792,8 @@ ${customerRows.map(c => `<tr>
                                       <div className="relative">
                                         <button onClick={e => { e.stopPropagation(); const el = document.getElementById('print-menu-' + sale.id); if (el) el.classList.toggle('hidden') }} className="text-[11px] font-semibold text-slate-600 px-3 py-1.5 rounded border border-slate-200 active:bg-slate-50">🖨️ Print ▾</button>
                                         <div id={'print-menu-' + sale.id} className="hidden absolute left-0 bottom-full mb-1 bg-white rounded-lg border border-slate-200 shadow-lg z-20 overflow-hidden min-w-[140px]">
-                                          <button onClick={() => { printInvoice({ ...sale, total_amount_due: calcTotalAmountDue(sale, salesData) }, salesData.vendor, 'thermal', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 border-b border-slate-100">🖨️ Thermal</button>
-                                          <button onClick={() => { printInvoice({ ...sale, total_amount_due: calcTotalAmountDue(sale, salesData) }, salesData.vendor, 'a4', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border-b border-slate-100">📄 A4 Print</button>
+                                          <button onClick={() => { printWithTotal(sale, salesData.vendor, 'thermal', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 border-b border-slate-100">🖨️ Thermal</button>
+                                          <button onClick={() => { printWithTotal(sale, salesData.vendor, 'a4', vendorSettings); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-600 hover:bg-blue-50 border-b border-slate-100">📄 A4 Print</button>
                                           {(sale.customer_phone || sale.customer?.phone) && <button onClick={() => { sendWhatsAppBill(sale, salesData.vendor, sale.customer_phone || sale.customer?.phone); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-green-600 hover:bg-green-50">💬 WhatsApp</button>}
                                         </div>
                                       </div>

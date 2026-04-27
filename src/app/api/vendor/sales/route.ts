@@ -65,8 +65,9 @@ export async function GET(req: NextRequest) {
       .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, cheque_number, created_at)')
       .eq('vendor_id', vendor.id)
       .eq('customer_id', customerId)
-      .order('created_at', { ascending: false })
-      .limit(100)
+      .neq('payment_status', 'voided')
+      .neq('payment_status', 'draft')
+      .order('invoice_no', { ascending: true })
     const { data: cust } = await admin.from('customers').select('*').eq('id', customerId).single()
     return NextResponse.json({ sales: custSales || [], customer: cust, vendor })
   }
