@@ -675,12 +675,14 @@ export async function POST(req: NextRequest) {
     }
 
     // No invoice number assigned yet — it will be assigned when the draft is finalised.
-    // Using null preserves the invoice number sequence (no gaps from returned drafts).
+    // Placeholder satisfies the NOT NULL constraint but ends in '-X' so generateInvoiceNo's
+    // /-(\d+)$/ regex ignores it (no gap in the sequence from returned drafts).
     const subtotal = items.reduce((s: number, i: any) => s + (i.quantity * (i.unitPrice || 0)), 0)
+    const draftPlaceholder = `DRAFT-${Date.now()}-X`
 
     const { data: draft, error } = await admin.from('sales').insert({
       vendor_id: vendor.id, customer_id: resolvedCustomerId,
-      invoice_no: null, customer_name: customerName || 'Walk-in Customer',
+      invoice_no: draftPlaceholder, customer_name: customerName || 'Walk-in Customer',
       customer_phone: customerPhone || null, subtotal, discount: 0,
       total: subtotal, paid_amount: 0, balance_due: 0,
       payment_method: 'cash', payment_status: 'draft',
