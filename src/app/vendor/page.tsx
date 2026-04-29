@@ -2553,13 +2553,13 @@ ${customerRows.map(c => `<tr>
                                   </a>
                                 )}
                                 <button
-                                  onClick={() => printInvoice({ ...draft, invoice_no: 'ON APPROVAL' }, salesData.vendor, 'thermal', vendorSettings)}
+                                  onClick={() => printInvoice(draft, salesData.vendor, 'thermal', vendorSettings)}
                                   className="flex items-center gap-1 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 active:bg-slate-100"
                                 >
                                   🖨️ Thermal
                                 </button>
                                 <button
-                                  onClick={() => printInvoice({ ...draft, invoice_no: 'ON APPROVAL' }, salesData.vendor, 'a4', vendorSettings)}
+                                  onClick={() => printInvoice(draft, salesData.vendor, 'a4', vendorSettings)}
                                   className="flex items-center gap-1 text-xs font-bold text-slate-600 border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 active:bg-slate-100"
                                 >
                                   📄 A4
