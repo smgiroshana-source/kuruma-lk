@@ -319,6 +319,7 @@ export default function VendorDashboard() {
   const [returningItem, setReturningItem] = useState<string | null>(null)
   const [posDraftId, setPosDraftId] = useState<string | null>(null)
   const [posDraftInvoiceNo, setPosDraftInvoiceNo] = useState('')
+  const [allDrafts, setAllDrafts] = useState<any[]>([])
 
   // Void sale modal
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
@@ -511,11 +512,26 @@ export default function VendorDashboard() {
     setLoading(false)
     setProductsLoading(false)
   }
+  async function fetchAllDrafts() {
+    try {
+      const r = await fetch('/api/vendor/sales?period=all')
+      if (r.ok) {
+        const j = await r.json()
+        setAllDrafts(
+          (j.sales || [])
+            .filter((s: any) => s.payment_status === 'draft')
+            .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+        )
+      }
+    } catch {}
+  }
+
   async function fetchSales() {
     setSalesLoading(true)
     try {
       const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`)
       if (r.ok) setSalesData(await r.json())
+      fetchAllDrafts()
       // Fire-and-forget background tasks
       fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
     } catch {}
@@ -2430,20 +2446,55 @@ ${customerRows.map(c => `<tr>
                   ))}
                 </div>
 
-                {/* On Approval Drafts */}
-                {(() => {
-                  const drafts = (salesData?.sales || []).filter((s: any) => s.payment_status === 'draft')
-                  if (drafts.length === 0) return null
-                  return (
-                    <div className="mb-4 bg-amber-50 border-2 border-amber-300 rounded-2xl overflow-hidden">
+
+                {/* ─── OVERVIEW ─── */}
+                {salesSubTab === 'overview' && (<div>
+                  {/* Stats cards — 2 cols mobile, 3 cols desktop */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-5">
+                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
+                      <p className="text-lg sm:text-xl font-black text-green-600">Rs.{(salesData.stats.totalRevenue - (salesData.stats.totalReturns || 0)).toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Net Revenue</p>
+                      {salesData.stats.totalReturns > 0 && <p className="text-[10px] text-red-500 mt-0.5">Returns: -Rs.{salesData.stats.totalReturns.toLocaleString()}</p>}
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
+                      <p className="text-lg sm:text-xl font-black text-emerald-600">Rs.{salesData.stats.totalPaid.toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Collected</p>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
+                      <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalCredit.toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Outstanding</p>
+                    </div>
+                    {salesData.stats.totalCollections > 0 && (
+                    <div className="bg-white rounded-xl border border-emerald-200 p-3.5 sm:p-4">
+                      <p className="text-lg sm:text-xl font-black text-teal-600">Rs.{salesData.stats.totalCollections.toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Credit Collections</p>
+                      {salesData.collectionsToday && (() => {
+                        const methods: Record<string, number> = {}
+                        salesData.collectionsToday.forEach((c: any) => { const m = (c.payment_method || 'cash'); methods[m] = (methods[m] || 0) + c.amount })
+                        return <div className="mt-1.5 space-y-0.5">{Object.entries(methods).map(([m, a]) => <p key={m} className="text-[10px] text-teal-700 font-semibold">{m.toUpperCase()}: Rs.{(a as number).toLocaleString()}</p>)}</div>
+                      })()}
+                    </div>
+                    )}
+                    {salesData.stats.totalReturns > 0 && (
+                    <div className="bg-white rounded-xl border border-red-200 p-3.5 sm:p-4">
+                      <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalReturns.toLocaleString()}</p>
+                      <p className="text-[11px] text-slate-400 font-semibold">Returns / Refunds</p>
+                      <p className="text-[10px] text-red-500 mt-0.5">{(salesData.returnsInPeriod || []).length} return(s)</p>
+                    </div>
+                    )}
+                  </div>
+
+                  {/* ─── On Approval — always shows ALL drafts, oldest first ─── */}
+                  {allDrafts.length > 0 && (
+                    <div className="mb-5 bg-amber-50 border-2 border-amber-300 rounded-2xl overflow-hidden">
                       <div className="flex items-center gap-2 px-4 py-3 bg-amber-100 border-b border-amber-200">
                         <span className="text-lg">📦</span>
                         <span className="font-black text-amber-900">On Approval</span>
-                        <span className="bg-amber-500 text-white text-xs font-black px-2 py-0.5 rounded-full">{drafts.length}</span>
+                        <span className="bg-amber-500 text-white text-xs font-black px-2 py-0.5 rounded-full">{allDrafts.length}</span>
                         <span className="text-xs text-amber-700 ml-1">Sent out — awaiting decision</span>
                       </div>
                       <div className="divide-y divide-amber-200">
-                        {drafts.map((draft: any) => {
+                        {allDrafts.map((draft: any) => {
                           const isReturning = draftReturning === draft.id
                           const daysAgo = Math.floor((Date.now() - new Date(draft.created_at).getTime()) / 86400000)
                           const draftTotal = parseFloat(draft.total || 0)
@@ -2452,7 +2503,6 @@ ${customerRows.map(c => `<tr>
                               <div className="flex items-start justify-between gap-2 mb-2">
                                 <div>
                                   <div className="flex items-center gap-2">
-                                    <span className="font-mono text-xs font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">{draft.invoice_no || 'On Approval'}</span>
                                     <span className="text-xs text-slate-500">{daysAgo === 0 ? 'Today' : daysAgo + 'd ago'}</span>
                                     {daysAgo >= 3 && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">{daysAgo}d out</span>}
                                   </div>
@@ -2468,7 +2518,7 @@ ${customerRows.map(c => `<tr>
                                   <p className="text-xs text-slate-500">{(draft.items || []).length} item{(draft.items || []).length !== 1 ? 's' : ''}</p>
                                 </div>
                               </div>
-                              {/* Items list — each item has its own ↩ Return button */}
+                              {/* Items list */}
                               <div className="bg-white rounded-lg border border-amber-100 mb-3 divide-y divide-amber-50 overflow-hidden">
                                 {(draft.items || []).map((item: any) => (
                                   <div key={item.id} className="flex items-center gap-2 px-3 py-2">
@@ -2529,28 +2579,19 @@ ${customerRows.map(c => `<tr>
                                 </button>
                                 <button
                                   onClick={() => {
-                                    // Load draft into POS for full editing (prices, vehicle, payment)
                                     setPosCart((draft.items || []).map((i: any) => ({
-                                      productId: i.product_id,
-                                      productName: i.product_name,
-                                      productSku: i.product_sku || '',
-                                      quantity: i.quantity,
-                                      unitPrice: i.unit_price || 0,
-                                      unitCost: i.unit_cost || 0,
-                                      maxStock: 9999,
-                                      saleItemId: i.id,
+                                      productId: i.product_id, productName: i.product_name,
+                                      productSku: i.product_sku || '', quantity: i.quantity,
+                                      unitPrice: i.unit_price || 0, unitCost: i.unit_cost || 0,
+                                      maxStock: 9999, saleItemId: i.id,
                                     })))
                                     setPosCustomer({ id: draft.customer_id || null, name: draft.customer_name, phone: draft.customer_phone || '', advance: 0, outstanding: 0, require_vehicle_no: false })
                                     setPosVehicleNo(draft.vehicle_no || '')
                                     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-                                    setPosDiscount('')
-                                    setPosNotes('')
-                                    setPosPreview(false)
+                                    setPosDiscount(''); setPosNotes(''); setPosPreview(false)
                                     setPosDate(new Date().toISOString().split('T')[0])
-                                    setPosDraftId(draft.id)
-                                    setPosDraftInvoiceNo(draft.invoice_no || '')
+                                    setPosDraftId(draft.id); setPosDraftInvoiceNo(draft.invoice_no || '')
                                     setTab('pos')
-                                    // Fetch real advance + outstanding for this customer (same as selectCustomer does)
                                     if (draft.customer_id) {
                                       fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_customer', customerId: draft.customer_id }) })
                                         .then(r => r.json()).then(j => {
@@ -2577,57 +2618,7 @@ ${customerRows.map(c => `<tr>
                         })}
                       </div>
                     </div>
-                  )
-                })()}
-
-                {/* ─── OVERVIEW ─── */}
-                {salesSubTab === 'overview' && (<div>
-                  {/* Stats cards — 2 cols mobile, 3 cols desktop */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-5">
-                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-green-600">Rs.{(salesData.stats.totalRevenue - (salesData.stats.totalReturns || 0)).toLocaleString()}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Net Revenue</p>
-                      {salesData.stats.totalReturns > 0 && <p className="text-[10px] text-red-500 mt-0.5">Returns: -Rs.{salesData.stats.totalReturns.toLocaleString()}</p>}
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-emerald-600">Rs.{salesData.stats.totalPaid.toLocaleString()}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Collected</p>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalCredit.toLocaleString()}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Outstanding</p>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-blue-600">{salesData.stats.totalSales}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Invoices</p>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-purple-600">{salesData.stats.totalItems}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Items Sold</p>
-                    </div>
-                    <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-orange-600">Rs.{Math.round(salesData.stats.avgSale).toLocaleString()}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Avg Invoice</p>
-                    </div>
-                    {salesData.stats.totalCollections > 0 && (
-                    <div className="bg-white rounded-xl border border-emerald-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-teal-600">Rs.{salesData.stats.totalCollections.toLocaleString()}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Credit Collections</p>
-                      {salesData.collectionsToday && (() => {
-                        const methods: Record<string, number> = {}
-                        salesData.collectionsToday.forEach((c: any) => { const m = (c.payment_method || 'cash'); methods[m] = (methods[m] || 0) + c.amount })
-                        return <div className="mt-1.5 space-y-0.5">{Object.entries(methods).map(([m, a]) => <p key={m} className="text-[10px] text-teal-700 font-semibold">{m.toUpperCase()}: Rs.{(a as number).toLocaleString()}</p>)}</div>
-                      })()}
-                    </div>
-                    )}
-                    {salesData.stats.totalReturns > 0 && (
-                    <div className="bg-white rounded-xl border border-red-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalReturns.toLocaleString()}</p>
-                      <p className="text-[11px] text-slate-400 font-semibold">Returns / Refunds</p>
-                      <p className="text-[10px] text-red-500 mt-0.5">{(salesData.returnsInPeriod || []).length} return(s)</p>
-                    </div>
-                    )}
-                  </div>
+                  )}
 
                   {/* Revenue chart — simple bar chart with CSS */}
                   {salesData.dailyRevenue && salesData.dailyRevenue.length > 1 && (
