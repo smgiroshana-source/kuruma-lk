@@ -19,7 +19,8 @@ async function generateInvoiceNo(vendorId: string, vendorName: string) {
   const admin = createAdminClient()
   const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
 
-  // Find the highest invoice number across ALL sales for this vendor
+  // Find the highest invoice number across ALL sales for this vendor.
+  // Skip On Approval draft numbers (contain '-OP-') to avoid sequence conflicts.
   const { data: allSales } = await admin
     .from('sales')
     .select('invoice_no')
@@ -28,7 +29,9 @@ async function generateInvoiceNo(vendorId: string, vendorName: string) {
   let maxNum = 0
   if (allSales) {
     for (const sale of allSales) {
-      const match = (sale.invoice_no || '').match(/-(\d+)$/)
+      const inv = sale.invoice_no || ''
+      if (inv.includes('-OP-')) continue  // skip draft numbers
+      const match = inv.match(/-(\d+)$/)
       if (match) {
         const num = parseInt(match[1])
         if (num > maxNum) maxNum = num
@@ -37,6 +40,31 @@ async function generateInvoiceNo(vendorId: string, vendorName: string) {
   }
 
   return `${prefix}-${String(maxNum + 1).padStart(5, '0')}`
+}
+
+async function generateDraftNo(vendorId: string, vendorName: string) {
+  const admin = createAdminClient()
+  const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
+
+  // Find the highest On Approval number (format: SAK-OP-0001) for this vendor
+  const { data: allSales } = await admin
+    .from('sales')
+    .select('invoice_no')
+    .eq('vendor_id', vendorId)
+    .ilike('invoice_no', '%-OP-%')
+
+  let maxNum = 0
+  if (allSales) {
+    for (const sale of allSales) {
+      const match = (sale.invoice_no || '').match(/-OP-(\d+)$/)
+      if (match) {
+        const num = parseInt(match[1])
+        if (num > maxNum) maxNum = num
+      }
+    }
+  }
+
+  return `${prefix}-OP-${String(maxNum + 1).padStart(4, '0')}`
 }
 
 export async function GET(req: NextRequest) {
@@ -674,15 +702,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // No invoice number assigned yet — it will be assigned when the draft is finalised.
-    // Placeholder satisfies the NOT NULL constraint but ends in '-X' so generateInvoiceNo's
-    // /-(\d+)$/ regex ignores it (no gap in the sequence from returned drafts).
+    // Assign a dedicated On Approval sequence number (e.g. SAK-OP-0001).
+    // generateInvoiceNo skips '-OP-' numbers so the two sequences never collide.
     const subtotal = items.reduce((s: number, i: any) => s + (i.quantity * (i.unitPrice || 0)), 0)
-    const draftPlaceholder = `DRAFT-${Date.now()}-X`
+    const draftNo = await generateDraftNo(vendor.id, vendor.name)
 
     const { data: draft, error } = await admin.from('sales').insert({
       vendor_id: vendor.id, customer_id: resolvedCustomerId,
-      invoice_no: draftPlaceholder, customer_name: customerName || 'Walk-in Customer',
+      invoice_no: draftNo, customer_name: customerName || 'Walk-in Customer',
       customer_phone: customerPhone || null, subtotal, discount: 0,
       total: subtotal, paid_amount: 0, balance_due: 0,
       payment_method: 'cash', payment_status: 'draft',

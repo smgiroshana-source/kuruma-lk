@@ -520,7 +520,7 @@ export default function VendorDashboard() {
         setAllDrafts(
           (j.sales || [])
             .filter((s: any) => s.payment_status === 'draft')
-            .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
         )
       }
     } catch {}
@@ -2502,7 +2502,8 @@ ${customerRows.map(c => `<tr>
                             <div key={draft.id} className="p-4">
                               <div className="flex items-start justify-between gap-2 mb-2">
                                 <div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-mono text-xs font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">{draft.invoice_no}</span>
                                     <span className="text-xs text-slate-500">{daysAgo === 0 ? 'Today' : daysAgo + 'd ago'}</span>
                                     {daysAgo >= 3 && <span className="text-[10px] font-bold text-red-500 bg-red-50 px-1.5 py-0.5 rounded-full">{daysAgo}d out</span>}
                                   </div>
@@ -2523,6 +2524,7 @@ ${customerRows.map(c => `<tr>
                                 {(draft.items || []).map((item: any) => (
                                   <div key={item.id} className="flex items-center gap-2 px-3 py-2">
                                     <span className="text-xs text-slate-700 flex-1 leading-snug">
+                                      {item.product_sku && <span className="font-mono text-[10px] text-slate-400 mr-1">{item.product_sku}</span>}
                                       {item.product_name} <span className="font-bold text-slate-900">×{item.quantity}</span>
                                     </span>
                                     <button
