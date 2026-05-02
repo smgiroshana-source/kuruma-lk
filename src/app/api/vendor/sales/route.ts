@@ -19,24 +19,22 @@ async function generateInvoiceNo(vendorId: string, vendorName: string) {
   const admin = createAdminClient()
   const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
 
-  // Find the highest invoice number across ALL sales for this vendor.
-  // Skip On Approval draft numbers (contain '-OP-') to avoid sequence conflicts.
-  const { data: allSales } = await admin
+  // Fetch only the single highest regular invoice (zero-padded numbers sort correctly
+  // lexicographically). Exclude On Approval drafts (-OP-) so the two sequences
+  // never interfere. One row read instead of a full table scan.
+  const { data } = await admin
     .from('sales')
     .select('invoice_no')
     .eq('vendor_id', vendorId)
+    .not('invoice_no', 'ilike', '%-OP-%')
+    .not('invoice_no', 'ilike', 'DRAFT-%')
+    .order('invoice_no', { ascending: false })
+    .limit(1)
 
   let maxNum = 0
-  if (allSales) {
-    for (const sale of allSales) {
-      const inv = sale.invoice_no || ''
-      if (inv.includes('-OP-')) continue  // skip draft numbers
-      const match = inv.match(/-(\d+)$/)
-      if (match) {
-        const num = parseInt(match[1])
-        if (num > maxNum) maxNum = num
-      }
-    }
+  if (data && data[0]) {
+    const match = (data[0].invoice_no || '').match(/-(\d+)$/)
+    if (match) maxNum = parseInt(match[1])
   }
 
   return `${prefix}-${String(maxNum + 1).padStart(5, '0')}`
@@ -46,22 +44,19 @@ async function generateDraftNo(vendorId: string, vendorName: string) {
   const admin = createAdminClient()
   const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
 
-  // Find the highest On Approval number (format: SAK-OP-0001) for this vendor
-  const { data: allSales } = await admin
+  // Fetch only the single highest On Approval number. One row read.
+  const { data } = await admin
     .from('sales')
     .select('invoice_no')
     .eq('vendor_id', vendorId)
     .ilike('invoice_no', '%-OP-%')
+    .order('invoice_no', { ascending: false })
+    .limit(1)
 
   let maxNum = 0
-  if (allSales) {
-    for (const sale of allSales) {
-      const match = (sale.invoice_no || '').match(/-OP-(\d+)$/)
-      if (match) {
-        const num = parseInt(match[1])
-        if (num > maxNum) maxNum = num
-      }
-    }
+  if (data && data[0]) {
+    const match = (data[0].invoice_no || '').match(/-OP-(\d+)$/)
+    if (match) maxNum = parseInt(match[1])
   }
 
   return `${prefix}-OP-${String(maxNum + 1).padStart(4, '0')}`
