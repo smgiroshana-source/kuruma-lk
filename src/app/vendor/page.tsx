@@ -1300,11 +1300,15 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
     })
     const dayCollections = collections || []
     const totalCollections = dayCollections.reduce((s: number, c: any) => s + c.amount, 0)
-    const dayReturnsForCalc = returns || []
-    const totalReturnAmount = dayReturnsForCalc.reduce((s: number, r: any) => s + r.amount, 0)
 
-    const grossSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
-    const totalSales = grossSales - totalReturnAmount
+    // credit_return is already baked into sale.total (the DB total is reduced when items are returned).
+    // Only actual cash/advance refunds are real money out — separate them for display.
+    const allReturns = returns || []
+    const cashReturns = allReturns.filter((r: any) => r.payment_method !== 'credit_return')
+    const totalCashReturnAmount = cashReturns.reduce((s: number, r: any) => s + r.amount, 0)
+
+    // sale.total is already post-return — this IS the net figure, no further deduction needed
+    const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
 
@@ -1338,7 +1342,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
 
 <div class="summary">
-<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Gross: Rs.' + grossSales.toLocaleString() + '<br/>Returns: -Rs.' + totalReturnAmount.toLocaleString() + '</div>' : ''}</div>
+<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalCashReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Cash refunded: -Rs.' + totalCashReturnAmount.toLocaleString() + '</div>' : ''}</div>
 <div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
@@ -1355,7 +1359,11 @@ ${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="co
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Transactions (${filtered.length})</h3>
 <table><thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr></thead><tbody>
-${filtered.map((s: any) => '<tr><td><strong>' + s.invoice_no + '</strong></td><td>' + (s.customer_name || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + (s.items || []).map((i: any) => i.product_name).join(', ') + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>').join('')}
+${filtered.map((s: any) => {
+      const activeItems = (s.items || []).filter((i: any) => (i.returned_quantity || 0) < i.quantity)
+      const itemNames = activeItems.map((i: any) => i.product_name).join(', ')
+      return '<tr><td><strong>' + s.invoice_no + '</strong></td><td>' + (s.customer_name || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + itemNames + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>'
+    }).join('')}
 </tbody></table>
 
 ${dayCollections.length > 0 ? (() => {
@@ -1371,12 +1379,13 @@ ${dayCollections.length > 0 ? (() => {
     })() : ''}
 
 ${(() => {
-      const dayReturns = returns || []
-      if (dayReturns.length === 0) return ''
-      const totalReturnAmt = dayReturns.reduce((s: number, r: any) => s + r.amount, 0)
-      return '<h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Returns / Refunds (' + dayReturns.length + ') — Rs.' + totalReturnAmt.toLocaleString() + '</h3>' +
-        '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Details</th><th class="text-right">Refund</th></tr></thead><tbody>' +
-        dayReturns.map((r: any) => '<tr><td><strong>' + (r.invoice_no || '-') + '</strong></td><td>' + r.customer_name + '</td><td style="font-size:11px;color:#666">' + (r.notes || r.payment_method?.toUpperCase() || '') + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + r.amount.toLocaleString() + '</td></tr>').join('') +
+      // Only show actual cash/advance refunds — credit_return entries are balance adjustments
+      // already reflected in sale.total and don't represent cash moving out
+      if (cashReturns.length === 0) return ''
+      const totalReturnAmt = cashReturns.reduce((s: number, r: any) => s + r.amount, 0)
+      return '<h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Cash Refunds (' + cashReturns.length + ') — Rs.' + totalReturnAmt.toLocaleString() + '</h3>' +
+        '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Method</th><th class="text-right">Refund</th></tr></thead><tbody>' +
+        cashReturns.map((r: any) => '<tr><td><strong>' + (r.invoice_no || '-') + '</strong></td><td>' + r.customer_name + '</td><td style="font-size:11px;color:#666">' + (r.payment_method || 'cash').toUpperCase() + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + r.amount.toLocaleString() + '</td></tr>').join('') +
         '</tbody></table>'
     })()}
 
