@@ -126,7 +126,16 @@ async function printWithTotal(sale: any, vendor: any, format: 'a4' | 'thermal', 
 }
 
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
-  const items = sale.items || []; const payments = sale.payments || []; const isThermal = format === 'thermal'; const w = isThermal ? 300 : 800
+  // Exclude fully-returned items; adjust qty/total for partial returns
+  const items = (sale.items || [])
+    .filter((i: any) => (i.returned_quantity || 0) < i.quantity)
+    .map((i: any) => {
+      const displayQty = i.quantity - (i.returned_quantity || 0)
+      return { ...i, quantity: displayQty, total: displayQty * parseFloat(i.unit_price) }
+    })
+  // credit_return is an internal balance-adjustment record — hide it from the printout
+  const payments = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
+  const isThermal = format === 'thermal'; const w = isThermal ? 300 : 800
   const s = settings || {}
   const shopName = s.invoice_title || vendor?.name || 'kuruma.lk'
   const logoHtml = (s.logo_url && s.invoice_show_logo !== false && !isThermal) ? `<img src="${s.logo_url}" style="height:${isThermal ? '30px' : '60px'};max-width:${isThermal ? '60px' : '120px'};object-fit:contain;margin-bottom:4px" />` : ''
