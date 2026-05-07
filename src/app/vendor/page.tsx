@@ -1375,10 +1375,17 @@ ${filtered.map((s: any) => {
 
 ${dayCollections.length > 0 ? (() => {
       const colMethodMap: Record<string, number> = {}
-      dayCollections.forEach((c: any) => { const m = (c.payment_method || 'cash').toUpperCase(); colMethodMap[m] = (colMethodMap[m] || 0) + c.amount })
+      let advanceCollected = 0
+      dayCollections.forEach((c: any) => {
+        const m = (c.payment_method || 'cash').toUpperCase()
+        const amt = parseFloat(c.amount || 0)
+        if (m === 'ADVANCE') { advanceCollected += amt } // advance = pre-collected, exclude from today's cash summary
+        else { colMethodMap[m] = (colMethodMap[m] || 0) + amt }
+      })
+      const cashCollectionsTotal = totalCollections - advanceCollected
       const methodIcons: Record<string, string> = { CASH: '💵', CHEQUE: '📝', BANK: '🏦', CARD: '💳', SETTLEMENT: '🔄' }
       const methodSummary = Object.entries(colMethodMap).map(([m, a]) => '<span style="margin-right:15px">' + (methodIcons[m] || '') + ' ' + m + ': <strong>Rs.' + a.toLocaleString() + '</strong></span>').join('')
-      return '<h3 style="font-size:13px;font-weight:800;color:#059669;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Credit Collections (' + dayCollections.length + ') — Rs.' + totalCollections.toLocaleString() + '</h3>' +
+      return '<h3 style="font-size:13px;font-weight:800;color:#059669;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Credit Collections (' + dayCollections.length + ') — Rs.' + cashCollectionsTotal.toLocaleString() + '</h3>' +
         '<div style="margin-bottom:10px;font-size:12px;color:#333">' + methodSummary + '</div>' +
         '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Method</th><th class="text-right">Amount</th></tr></thead><tbody>' +
         dayCollections.map((c: any) => '<tr><td><strong>' + (c.invoice_no || '-') + '</strong></td><td>' + c.customer_name + '</td><td>' + (c.payment_method || 'cash').toUpperCase() + (c.cheque_number ? ' #' + c.cheque_number : '') + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') +
