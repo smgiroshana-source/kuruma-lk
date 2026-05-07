@@ -1309,23 +1309,31 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
 
     // sale.total is already post-return — this IS the net figure, no further deduction needed
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
-    const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
 
-    // Payment method breakdown from actual payments
-    const methodTotals: Record<string, number> = { cash: 0, cheque: 0, bank: 0, card: 0, advance: 0 }
+    // Payment method breakdown from actual payments.
+    // Advance is pre-collected money (received on a prior day) — track it separately so it
+    // doesn't inflate today's "Collected" cash figure or appear in Payment Methods.
+    const methodTotals: Record<string, number> = { cash: 0, cheque: 0, bank: 0, card: 0 }
+    let totalAdvanceApplied = 0
     filtered.forEach((sale: any) => {
       if (sale.payments && sale.payments.length > 0) {
         sale.payments.forEach((p: any) => {
           const method = p.payment_method || 'cash'
-          methodTotals[method] = (methodTotals[method] || 0) + parseFloat(p.amount || 0)
+          const amt = parseFloat(p.amount || 0)
+          if (amt <= 0) return // skip negative (refund) entries
+          if (method === 'advance') { totalAdvanceApplied += amt }
+          else if (['cash','cheque','bank','card'].includes(method)) { methodTotals[method] = (methodTotals[method] || 0) + amt }
         })
       } else if (parseFloat(sale.paid_amount || 0) > 0) {
-        // Fallback: use sale-level payment_method
         const method = sale.payment_method || 'cash'
-        methodTotals[method] = (methodTotals[method] || 0) + parseFloat(sale.paid_amount || 0)
+        const amt = parseFloat(sale.paid_amount || 0)
+        if (method === 'advance') { totalAdvanceApplied += amt }
+        else { methodTotals[method] = (methodTotals[method] || 0) + amt }
       }
     })
+    // Collected = actual new cash/cheque/bank received today (excludes advance draw-downs)
+    const totalCashCollected = Object.values(methodTotals).reduce((s, v) => s + v, 0)
 
     const shopName = settings?.invoice_title || vendorInfo?.name || 'kuruma.lk'
     const dateStr = new Date(reportDate).toLocaleDateString('en-LK', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
@@ -1343,7 +1351,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 
 <div class="summary">
 <div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalCashReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Cash refunded: -Rs.' + totalCashReturnAmount.toLocaleString() + '</div>' : ''}</div>
-<div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
+<div class="summary-box"><div class="val green">Rs.${totalCashCollected.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
 </div>
@@ -1354,7 +1362,6 @@ ${methodTotals.cash > 0 ? '<div class="method-box"><div class="val green">Rs.' +
 ${methodTotals.cheque > 0 ? '<div class="method-box"><div class="val blue">Rs.' + methodTotals.cheque.toLocaleString() + '</div><div class="lbl">📝 Cheque</div></div>' : ''}
 ${methodTotals.bank > 0 ? '<div class="method-box"><div class="val" style="color:#7c3aed">Rs.' + methodTotals.bank.toLocaleString() + '</div><div class="lbl">🏦 Bank Transfer</div></div>' : ''}
 ${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color:#0891b2">Rs.' + methodTotals.card.toLocaleString() + '</div><div class="lbl">💳 Card</div></div>' : ''}
-${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="color:#059669">Rs.' + methodTotals.advance.toLocaleString() + '</div><div class="lbl">💰 From Advance</div></div>' : ''}
 </div>
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Transactions (${filtered.length})</h3>
