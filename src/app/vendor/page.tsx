@@ -1037,7 +1037,7 @@ export default function VendorDashboard() {
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
         setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false)
         setPosDraftId(null); setPosDraftInvoiceNo('')
-        setPosPreview(false); await fetchData(); fetchSales()
+        setPosPreview(false); await fetchData(); fetchSales(); fetchCreditCustomers()
       } else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
     setPosLoading(false)
@@ -1063,7 +1063,7 @@ export default function VendorDashboard() {
       if (j.success) {
         showToast('📦 ' + j.invoiceNo + ' sent on approval')
         setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo('')
-        await fetchData(); fetchSales()
+        await fetchData(); fetchSales(); fetchCreditCustomers()
       } else showToast(j.error || 'Error')
     } catch { showToast('Network error') }
     setPosLoading(false)
