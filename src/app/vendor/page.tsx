@@ -2001,37 +2001,29 @@ ${customerRows.map(c => `<tr>
                 }
               })
 
-              // All containers found, sorted
-              const allContainers = ([...new Set(parsed.map(p => p.container))] as string[]).sort((a,b) => parseInt(a)-parseInt(b))
-              const defaultContainer = allContainers.length ? allContainers[allContainers.length - 1] : ''
-              const activeCont = sheetContainer || defaultContainer
-
-              // Used base numbers in active container (a slot is used if base OR any sub-item exists)
-              const usedBases = new Set(parsed.filter(p => p.container === activeCont).map(p => p.seq))
-              const maxSeq = usedBases.size ? Math.max(...usedBases) : 0
-              const missingSKUs: string[] = []
-              for (let i = 1; i <= maxSeq; i++) {
-                if (!usedBases.has(i)) missingSKUs.push(detectedPrefix + activeCont + String(i).padStart(3,'0'))
-              }
-              const isContainerFull = maxSeq >= 999
-              const nextContNum = String(parseInt(activeCont) + 1)
-              const nextSKU = isContainerFull
-                ? detectedPrefix + nextContNum.padStart(3,'0') + '001'
-                : detectedPrefix + activeCont + String(maxSeq + 1).padStart(3,'0')
-
-              // Sub-item checker — given a 6-digit base, find next available suffix
-              const subBase = subItemCheck.replace(/\D/g,'').slice(0,6)
-              let subNextSuffix = ''
-              let subExisting: string[] = []
-              if (subBase.length === 6) {
-                const subCont = subBase.slice(0,3)
-                const subSeq = parseInt(subBase.slice(3,6))
-                subExisting = parsed
-                  .filter(p => p.container === subCont && p.seq === subSeq && p.suffix !== '')
-                  .map(p => p.suffix).sort()
-                const usedSuffixes = new Set(subExisting)
-                const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-                for (const l of letters) { if (!usedSuffixes.has(l)) { subNextSuffix = l; break } }
+              // Gap finder: user types a prefix (e.g. "145") → find missing SKUs starting with those digits
+              const gapPrefix = sheetContainer.replace(/\D/g,'')  // digits only
+              let missingSKUs: string[] = []
+              let gapNextSKU = ''
+              if (gapPrefix.length >= 1) {
+                // All base numbers (no suffix) whose string starts with gapPrefix
+                const matchingBases = parsed
+                  .filter(p => (p.container + String(p.seq).padStart(3,'0')).startsWith(gapPrefix) && p.suffix === '')
+                  .map(p => parseInt(p.container + String(p.seq).padStart(3,'0')))
+                // Also count bases that only exist as sub-items (parent was sold, A/B/C remain)
+                const subOnlyBases = parsed
+                  .filter(p => (p.container + String(p.seq).padStart(3,'0')).startsWith(gapPrefix) && p.suffix !== '')
+                  .map(p => parseInt(p.container + String(p.seq).padStart(3,'0')))
+                const usedNums = new Set([...matchingBases, ...subOnlyBases])
+                if (usedNums.size > 0) {
+                  const allNums = [...usedNums].sort((a,b) => a - b)
+                  const minNum = allNums[0]
+                  const maxNum = allNums[allNums.length - 1]
+                  for (let i = minNum; i <= maxNum; i++) {
+                    if (!usedNums.has(i)) missingSKUs.push(detectedPrefix + String(i))
+                  }
+                  gapNextSKU = detectedPrefix + String(maxNum + 1)
+                }
               }
 
               // Build filter options
@@ -2083,95 +2075,42 @@ ${customerRows.map(c => `<tr>
 
               return (
                 <div>
-                  {/* ── SKU Finder Panel ── */}
-                  <div className="mb-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
-                    {/* Container selector + Next SKU */}
-                    <div className="p-3 flex flex-wrap gap-4 items-start border-b border-slate-100">
-                      {/* Container picker */}
+                  {/* ── SKU Gap Finder ── */}
+                  <div className="mb-3 bg-white rounded-xl border border-slate-200 p-3 flex flex-wrap items-start gap-4">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Container</p>
-                        <div className="flex gap-1 flex-wrap">
-                          {allContainers.map(c => (
-                            <button key={c} onClick={() => setSheetContainer(c)}
-                              className={'px-2.5 py-1 rounded-lg text-xs font-bold border transition ' + (activeCont === c ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300')}>
-                              {detectedPrefix}{c}xxx
-                            </button>
-                          ))}
-                        </div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Find Missing SKUs</label>
+                        <input
+                          type="text" value={sheetContainer} maxLength={6}
+                          onChange={e => setSheetContainer(e.target.value.replace(/\D/g,''))}
+                          placeholder="e.g. 145"
+                          className="w-32 px-3 py-1.5 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400"
+                        />
                       </div>
-                      {/* Next SKU */}
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
-                          {isContainerFull ? '⚠️ Container Full — Next Container' : 'Next New SKU'}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => { navigator.clipboard?.writeText(nextSKU); showToast('Copied: ' + nextSKU) }}
-                            className={'font-mono font-black text-base px-3 py-1.5 rounded-lg border transition active:scale-95 ' + (isContainerFull ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100')}
-                            title="Click to copy">
-                            {nextSKU} 📋
-                          </button>
-                          <span className="text-[11px] text-slate-400">
-                            {usedBases.size}/{isContainerFull ? '999 — full' : '999 slots used'}
-                          </span>
-                        </div>
-                      </div>
-                      {/* Sub-item checker */}
-                      <div className="flex-1 min-w-[220px]">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Sub-Item Checker</p>
-                        <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-0 border-2 border-slate-200 rounded-lg overflow-hidden focus-within:border-orange-400">
-                            <span className="px-2 text-xs font-bold text-slate-400 bg-slate-50 border-r border-slate-200 py-1.5 font-mono">{detectedPrefix || 'SAK-'}</span>
-                            <input
-                              type="text" maxLength={6} value={subItemCheck}
-                              onChange={e => setSubItemCheck(e.target.value.replace(/\D/g,'').slice(0,6))}
-                              placeholder="145847"
-                              className="w-24 px-2 py-1.5 text-xs font-mono outline-none bg-white"
-                            />
-                          </div>
-                          {subBase.length === 6 && (
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {subExisting.length > 0 && (
-                                <div className="flex gap-1">
-                                  {subExisting.map(x => (
-                                    <span key={x} className="font-mono text-xs font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded line-through">{x}</span>
-                                  ))}
-                                </div>
-                              )}
-                              {subNextSuffix ? (
-                                <button onClick={() => { const sk = detectedPrefix + subBase + subNextSuffix; navigator.clipboard?.writeText(sk); showToast('Copied: ' + sk) }}
-                                  className="font-mono font-black text-sm bg-blue-50 text-blue-700 border border-blue-300 px-3 py-1 rounded-lg hover:bg-blue-100 active:scale-95 transition" title="Click to copy">
-                                  {detectedPrefix}{subBase}{subNextSuffix} 📋
-                                </button>
-                              ) : (
-                                <span className="text-[11px] text-slate-400">All suffixes used (A–Z)</span>
-                              )}
-                            </div>
-                          )}
-                          {subBase.length > 0 && subBase.length < 6 && (
-                            <span className="text-[11px] text-slate-400">Enter 6 digits</span>
-                          )}
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Type a 6-digit base number to find next sub-item suffix</p>
-                      </div>
-                    </div>
-
-                    {/* Missing SKUs */}
-                    <div className="px-3 py-2">
-                      {missingSKUs.length === 0 ? (
-                        <p className="text-[11px] text-emerald-600 font-semibold">✅ No gaps in container {activeCont} — sequence is complete (1–{maxSeq})</p>
-                      ) : (
+                      {gapNextSKU && (
                         <div>
-                          <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-1.5">
-                            {missingSKUs.length} gap{missingSKUs.length > 1 ? 's' : ''} in container {activeCont} — click any to copy
-                          </p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Next After Last</p>
+                          <button onClick={() => { navigator.clipboard?.writeText(gapNextSKU); showToast('Copied: ' + gapNextSKU) }}
+                            className="font-mono font-bold text-sm bg-emerald-50 text-emerald-700 border border-emerald-300 px-3 py-1.5 rounded-lg hover:bg-emerald-100 active:scale-95 transition">
+                            {gapNextSKU} 📋
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {gapPrefix.length === 0 && <p className="text-xs text-slate-400">Type digits above to find gaps — e.g. type <span className="font-mono font-bold">145</span> to see all missing SKUs in 145xxx</p>}
+                      {gapPrefix.length > 0 && missingSKUs.length === 0 && gapNextSKU && <p className="text-sm text-emerald-600 font-semibold">✅ No gaps found in {gapPrefix}xxx</p>}
+                      {missingSKUs.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-1.5">{missingSKUs.length} missing — click to copy</p>
                           <div className="flex flex-wrap gap-1">
-                            {missingSKUs.slice(0, 30).map(sk => (
+                            {missingSKUs.slice(0, 50).map(sk => (
                               <button key={sk} onClick={() => { navigator.clipboard?.writeText(sk); showToast('Copied: ' + sk) }}
                                 className="font-mono text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded hover:bg-amber-100 active:scale-95 transition">
                                 {sk}
                               </button>
                             ))}
-                            {missingSKUs.length > 30 && <span className="text-[11px] text-amber-400 self-center">+{missingSKUs.length - 30} more</span>}
+                            {missingSKUs.length > 50 && <span className="text-[11px] text-amber-400 self-center">+{missingSKUs.length - 50} more</span>}
                           </div>
                         </div>
                       )}
