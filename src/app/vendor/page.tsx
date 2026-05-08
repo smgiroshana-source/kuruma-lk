@@ -232,6 +232,8 @@ export default function VendorDashboard() {
   const [productsViewMode, setProductsViewMode] = useState<'grid'|'sheet'>('grid')
   const [sheetSort, setSheetSort] = useState<{col:string;dir:'asc'|'desc'}>({col:'sku',dir:'asc'})
   const [sheetFilters, setSheetFilters] = useState({category:'',make:'',condition:'',status:''})
+  const [sheetContainer, setSheetContainer] = useState<string>('')       // selected container e.g. "145"
+  const [subItemCheck, setSubItemCheck] = useState('')                   // base number to check sub-items for
 
   const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'' })
   const [productImages, setProductImages] = useState<File[]>([])
@@ -1983,33 +1985,61 @@ ${customerRows.map(c => `<tr>
 
             {/* ─── SPREADSHEET VIEW ─── */}
             {productsViewMode === 'sheet' && (() => {
-              // SKU gap finder — detect prefix+number pattern from all SKUs
-              const skuPattern = /^([A-Za-z]+-?)(\d+)$/
-              const skuEntries: number[] = []
+              // SAK-CCCSSSX format: prefix + 3-digit container + 3-digit sequence + optional A/B/C suffix
+              // e.g. SAK-145847, SAK-145847A, SAK-145847B
+              const skuRe = /^([A-Za-z]+-?)(\d{3})(\d{3})([A-Z]*)$/
+
+              // Parse all SKUs
+              type ParsedSKU = { prefix: string; container: string; seq: number; suffix: string; full: string }
+              const parsed: ParsedSKU[] = []
               let detectedPrefix = ''
-              let detectedPadding = 4
               products.forEach((p: any) => {
-                const m = (p.sku || '').match(skuPattern)
+                const m = (p.sku || '').match(skuRe)
                 if (m) {
-                  if (!detectedPrefix) { detectedPrefix = m[1]; detectedPadding = m[2].length }
-                  if (m[1] === detectedPrefix) skuEntries.push(parseInt(m[2]))
+                  if (!detectedPrefix) detectedPrefix = m[1]
+                  parsed.push({ prefix: m[1], container: m[2], seq: parseInt(m[3]), suffix: m[4], full: p.sku })
                 }
               })
-              skuEntries.sort((a, b) => a - b)
-              const maxSku = skuEntries.length ? skuEntries[skuEntries.length - 1] : 0
-              const skuSet = new Set(skuEntries)
-              const missingSKUs: string[] = []
-              for (let i = 1; i <= maxSku; i++) {
-                if (!skuSet.has(i)) missingSKUs.push(detectedPrefix + String(i).padStart(detectedPadding, '0'))
-              }
-              const nextSKU = detectedPrefix ? detectedPrefix + String(maxSku + 1).padStart(detectedPadding, '0') : null
 
-              // Build filter options from all products
+              // All containers found, sorted
+              const allContainers = ([...new Set(parsed.map(p => p.container))] as string[]).sort((a,b) => parseInt(a)-parseInt(b))
+              const defaultContainer = allContainers.length ? allContainers[allContainers.length - 1] : ''
+              const activeCont = sheetContainer || defaultContainer
+
+              // Used base numbers in active container (a slot is used if base OR any sub-item exists)
+              const usedBases = new Set(parsed.filter(p => p.container === activeCont).map(p => p.seq))
+              const maxSeq = usedBases.size ? Math.max(...usedBases) : 0
+              const missingSKUs: string[] = []
+              for (let i = 1; i <= maxSeq; i++) {
+                if (!usedBases.has(i)) missingSKUs.push(detectedPrefix + activeCont + String(i).padStart(3,'0'))
+              }
+              const isContainerFull = maxSeq >= 999
+              const nextContNum = String(parseInt(activeCont) + 1)
+              const nextSKU = isContainerFull
+                ? detectedPrefix + nextContNum.padStart(3,'0') + '001'
+                : detectedPrefix + activeCont + String(maxSeq + 1).padStart(3,'0')
+
+              // Sub-item checker — given a 6-digit base, find next available suffix
+              const subBase = subItemCheck.replace(/\D/g,'').slice(0,6)
+              let subNextSuffix = ''
+              let subExisting: string[] = []
+              if (subBase.length === 6) {
+                const subCont = subBase.slice(0,3)
+                const subSeq = parseInt(subBase.slice(3,6))
+                subExisting = parsed
+                  .filter(p => p.container === subCont && p.seq === subSeq && p.suffix !== '')
+                  .map(p => p.suffix).sort()
+                const usedSuffixes = new Set(subExisting)
+                const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+                for (const l of letters) { if (!usedSuffixes.has(l)) { subNextSuffix = l; break } }
+              }
+
+              // Build filter options
               const cats = ([...new Set(products.map((p: any) => p.category).filter(Boolean))] as string[]).sort()
               const makes = ([...new Set(products.map((p: any) => p.make).filter(Boolean))] as string[]).sort()
               const conds = ([...new Set(products.map((p: any) => p.condition).filter(Boolean))] as string[]).sort()
 
-              // Apply sheet filters + existing search
+              // Apply sheet filters + search
               const s = productSearch.toLowerCase()
               let sheetRows = products.filter((p: any) => {
                 if (!showSoldOut && p.quantity <= 0 && !productSearch) return false
@@ -2023,16 +2053,20 @@ ${customerRows.map(c => `<tr>
                 return true
               })
 
-              // Sort
+              // Sort — SKU sort groups sub-items with parent: sort by container → seq → suffix
               sheetRows = [...sheetRows].sort((a, b) => {
                 const col = sheetSort.col
                 const dir = sheetSort.dir === 'asc' ? 1 : -1
                 let av: any, bv: any
                 if (col === 'sku') {
-                  // Sort SKUs by embedded number if possible, else lexically
-                  const am = (a.sku||'').match(skuPattern); const bm = (b.sku||'').match(skuPattern)
-                  av = am ? parseInt(am[2]) : a.sku||''
-                  bv = bm ? parseInt(bm[2]) : b.sku||''
+                  const am = (a.sku||'').match(skuRe); const bm = (b.sku||'').match(skuRe)
+                  // Sort by container, then seq, then suffix so sub-items stay with parent
+                  if (am && bm) {
+                    const cmp = (parseInt(am[2])*1000 + parseInt(am[3])) - (parseInt(bm[2])*1000 + parseInt(bm[3]))
+                    if (cmp !== 0) return cmp * dir
+                    return (am[4] < bm[4] ? -1 : am[4] > bm[4] ? 1 : 0) * dir
+                  }
+                  av = a.sku||''; bv = b.sku||''
                 } else if (col === 'price') { av = a.price||0; bv = b.price||0 }
                 else if (col === 'cost') { av = a.cost||0; bv = b.cost||0 }
                 else if (col === 'qty') { av = a.quantity||0; bv = b.quantity||0 }
@@ -2041,7 +2075,7 @@ ${customerRows.map(c => `<tr>
               })
 
               const SortTh = ({ col, label }: { col: string; label: string }) => (
-                <th onClick={() => setSheetSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' })}
+                <th onClick={() => setSheetSort(prev => prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' })}
                   className="px-3 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide cursor-pointer select-none whitespace-nowrap hover:bg-slate-100 group">
                   {label}{sheetSort.col === col ? (sheetSort.dir === 'asc' ? ' ↑' : ' ↓') : <span className="opacity-0 group-hover:opacity-30"> ↕</span>}
                 </th>
@@ -2049,35 +2083,100 @@ ${customerRows.map(c => `<tr>
 
               return (
                 <div>
-                  {/* SKU Gap Finder */}
-                  {nextSKU && (
-                    <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-start gap-4">
+                  {/* ── SKU Finder Panel ── */}
+                  <div className="mb-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
+                    {/* Container selector + Next SKU */}
+                    <div className="p-3 flex flex-wrap gap-4 items-start border-b border-slate-100">
+                      {/* Container picker */}
                       <div>
-                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide mb-0.5">Next SKU</p>
-                        <button onClick={() => { navigator.clipboard?.writeText(nextSKU); showToast('Copied: ' + nextSKU) }}
-                          className="font-mono font-black text-lg text-emerald-700 hover:text-emerald-900 active:scale-95 transition" title="Click to copy">
-                          {nextSKU} 📋
-                        </button>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Container</p>
+                        <div className="flex gap-1 flex-wrap">
+                          {allContainers.map(c => (
+                            <button key={c} onClick={() => setSheetContainer(c)}
+                              className={'px-2.5 py-1 rounded-lg text-xs font-bold border transition ' + (activeCont === c ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300')}>
+                              {detectedPrefix}{c}xxx
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                      {missingSKUs.length > 0 && (
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-1">
-                            {missingSKUs.length} Missing SKU{missingSKUs.length > 1 ? 's' : ''} (gaps in sequence)
+                      {/* Next SKU */}
+                      <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+                          {isContainerFull ? '⚠️ Container Full — Next Container' : 'Next New SKU'}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => { navigator.clipboard?.writeText(nextSKU); showToast('Copied: ' + nextSKU) }}
+                            className={'font-mono font-black text-base px-3 py-1.5 rounded-lg border transition active:scale-95 ' + (isContainerFull ? 'bg-amber-50 text-amber-700 border-amber-300' : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100')}
+                            title="Click to copy">
+                            {nextSKU} 📋
+                          </button>
+                          <span className="text-[11px] text-slate-400">
+                            {usedBases.size}/{isContainerFull ? '999 — full' : '999 slots used'}
+                          </span>
+                        </div>
+                      </div>
+                      {/* Sub-item checker */}
+                      <div className="flex-1 min-w-[220px]">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Sub-Item Checker</p>
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-0 border-2 border-slate-200 rounded-lg overflow-hidden focus-within:border-orange-400">
+                            <span className="px-2 text-xs font-bold text-slate-400 bg-slate-50 border-r border-slate-200 py-1.5 font-mono">{detectedPrefix || 'SAK-'}</span>
+                            <input
+                              type="text" maxLength={6} value={subItemCheck}
+                              onChange={e => setSubItemCheck(e.target.value.replace(/\D/g,'').slice(0,6))}
+                              placeholder="145847"
+                              className="w-24 px-2 py-1.5 text-xs font-mono outline-none bg-white"
+                            />
+                          </div>
+                          {subBase.length === 6 && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {subExisting.length > 0 && (
+                                <div className="flex gap-1">
+                                  {subExisting.map(x => (
+                                    <span key={x} className="font-mono text-xs font-bold bg-slate-100 text-slate-500 px-2 py-0.5 rounded line-through">{x}</span>
+                                  ))}
+                                </div>
+                              )}
+                              {subNextSuffix ? (
+                                <button onClick={() => { const sk = detectedPrefix + subBase + subNextSuffix; navigator.clipboard?.writeText(sk); showToast('Copied: ' + sk) }}
+                                  className="font-mono font-black text-sm bg-blue-50 text-blue-700 border border-blue-300 px-3 py-1 rounded-lg hover:bg-blue-100 active:scale-95 transition" title="Click to copy">
+                                  {detectedPrefix}{subBase}{subNextSuffix} 📋
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-slate-400">All suffixes used (A–Z)</span>
+                              )}
+                            </div>
+                          )}
+                          {subBase.length > 0 && subBase.length < 6 && (
+                            <span className="text-[11px] text-slate-400">Enter 6 digits</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Type a 6-digit base number to find next sub-item suffix</p>
+                      </div>
+                    </div>
+
+                    {/* Missing SKUs */}
+                    <div className="px-3 py-2">
+                      {missingSKUs.length === 0 ? (
+                        <p className="text-[11px] text-emerald-600 font-semibold">✅ No gaps in container {activeCont} — sequence is complete (1–{maxSeq})</p>
+                      ) : (
+                        <div>
+                          <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-1.5">
+                            {missingSKUs.length} gap{missingSKUs.length > 1 ? 's' : ''} in container {activeCont} — click any to copy
                           </p>
                           <div className="flex flex-wrap gap-1">
-                            {missingSKUs.slice(0, 20).map(s => (
-                              <button key={s} onClick={() => { navigator.clipboard?.writeText(s); showToast('Copied: ' + s) }}
-                                className="font-mono text-[11px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded hover:bg-amber-200 active:scale-95 transition" title="Click to copy">
-                                {s}
+                            {missingSKUs.slice(0, 30).map(sk => (
+                              <button key={sk} onClick={() => { navigator.clipboard?.writeText(sk); showToast('Copied: ' + sk) }}
+                                className="font-mono text-[11px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded hover:bg-amber-100 active:scale-95 transition">
+                                {sk}
                               </button>
                             ))}
-                            {missingSKUs.length > 20 && <span className="text-[11px] text-amber-500 self-center">+{missingSKUs.length - 20} more</span>}
+                            {missingSKUs.length > 30 && <span className="text-[11px] text-amber-400 self-center">+{missingSKUs.length - 30} more</span>}
                           </div>
                         </div>
                       )}
-                      {missingSKUs.length === 0 && <p className="text-[11px] text-emerald-600 self-center">✅ No gaps — sequence is complete</p>}
                     </div>
-                  )}
+                  </div>
 
                   {/* Filter row */}
                   <div className="flex flex-wrap gap-2 mb-3">
@@ -2106,7 +2205,7 @@ ${customerRows.map(c => `<tr>
                     {(sheetFilters.category || sheetFilters.make || sheetFilters.condition || sheetFilters.status) && (
                       <button onClick={() => setSheetFilters({category:'',make:'',condition:'',status:''})}
                         className="px-3 py-1.5 rounded-lg border border-red-200 text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100">
-                        ✕ Clear Filters
+                        ✕ Clear
                       </button>
                     )}
                     <span className="text-xs text-slate-400 self-center ml-auto">{sheetRows.length} of {products.length} products</span>
@@ -2139,12 +2238,23 @@ ${customerRows.map(c => `<tr>
                         <tbody>
                           {sheetRows.map((p: any, i: number) => {
                             const loc = [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ')
-                            const rowBg = i % 2 === 0 ? '' : 'bg-slate-50/60'
+                            const pm = (p.sku||'').match(skuRe)
+                            const isSubItem = pm && pm[4] !== ''   // has A/B/C suffix
                             const qtyColor = p.quantity <= 0 ? 'text-red-600 font-bold' : p.quantity <= 2 ? 'text-amber-600 font-bold' : 'text-slate-700'
+                            const rowBg = isSubItem ? 'bg-blue-50/40' : i % 2 === 0 ? '' : 'bg-slate-50/50'
                             return (
                               <tr key={p.id} className={'border-b border-slate-100 hover:bg-orange-50/40 transition-colors ' + rowBg}>
                                 <td className="px-3 py-2 text-slate-300 font-mono text-[10px]">{i + 1}</td>
-                                <td className="px-3 py-2 font-mono font-bold text-slate-800 whitespace-nowrap">{p.sku || '—'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  {isSubItem ? (
+                                    <span className="font-mono font-bold text-blue-700">
+                                      <span className="text-slate-400">└ </span>{p.sku}
+                                      <span className="ml-1 text-[9px] font-bold bg-blue-100 text-blue-600 px-1 rounded">SUB</span>
+                                    </span>
+                                  ) : (
+                                    <span className="font-mono font-bold text-slate-800">{p.sku || '—'}</span>
+                                  )}
+                                </td>
                                 <td className="px-3 py-2 font-semibold text-slate-900 max-w-[200px]"><div className="truncate" title={p.name}>{p.name}</div></td>
                                 <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{p.category || '—'}</td>
                                 <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.make || '—'}</td>
@@ -2161,7 +2271,7 @@ ${customerRows.map(c => `<tr>
                                 <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-[10px]">{loc || '—'}</td>
                                 <td className="px-3 py-2 whitespace-nowrap">
                                   <span className={'text-[10px] font-bold px-1.5 py-0.5 rounded-full ' + (p.quantity <= 0 ? 'bg-red-100 text-red-600' : p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500')}>
-                                    {p.quantity <= 0 ? 'SOLD OUT' : p.is_active ? 'ACTIVE' : 'HIDDEN'}
+                                    {p.quantity <= 0 ? 'SOLD' : p.is_active ? 'ACTIVE' : 'HIDDEN'}
                                   </span>
                                 </td>
                                 <td className="px-3 py-2 sticky right-0 bg-white border-l border-slate-100">
