@@ -181,7 +181,7 @@ export async function GET(req: NextRequest) {
     customerMap[id].spent += parseFloat(s.total || 0)
     customerMap[id].count += 1
   })
-  const topCustomers = Object.values(customerMap).sort((a, b) => b.spent - a.spent).slice(0, 10)
+  const topCustomers = Object.values(customerMap).sort((a, b) => b.spent - a.spent)
 
   // Fetch credit collections received in this period (payments on older invoices)
   let collectionsToday: any[] = []
