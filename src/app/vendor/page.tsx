@@ -228,6 +228,10 @@ export default function VendorDashboard() {
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [productSearch, setProductSearch] = useState('')
   const [showSoldOut, setShowSoldOut] = useState(false)
+  // Spreadsheet view
+  const [productsViewMode, setProductsViewMode] = useState<'grid'|'sheet'>('grid')
+  const [sheetSort, setSheetSort] = useState<{col:string;dir:'asc'|'desc'}>({col:'sku',dir:'asc'})
+  const [sheetFilters, setSheetFilters] = useState({category:'',make:'',condition:'',status:''})
 
   const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'' })
   const [productImages, setProductImages] = useState<File[]>([])
@@ -1863,7 +1867,17 @@ ${customerRows.map(c => `<tr>
 
         {/* PRODUCTS */}
         {tab === 'products' && (<div>
-          <div className="flex items-center justify-between mb-4 flex-wrap gap-3"><h1 className="text-2xl font-black text-slate-900">Products</h1><div className="flex gap-2"><button onClick={() => setTab('add')} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">+ Add</button></div></div>
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <h1 className="text-2xl font-black text-slate-900">Products</h1>
+            <div className="flex gap-2 items-center">
+              {/* View toggle */}
+              <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                <button onClick={() => setProductsViewMode('grid')} className={'px-3 py-1.5 rounded-md text-xs font-bold transition ' + (productsViewMode === 'grid' ? 'bg-white shadow text-slate-800' : 'text-slate-400')}>⊞ Grid</button>
+                <button onClick={() => setProductsViewMode('sheet')} className={'px-3 py-1.5 rounded-md text-xs font-bold transition ' + (productsViewMode === 'sheet' ? 'bg-white shadow text-slate-800' : 'text-slate-400')}>📊 Sheet</button>
+              </div>
+              <button onClick={() => setTab('add')} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">+ Add</button>
+            </div>
+          </div>
           {/* Feature 3: Selection toolbar */}
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <div className="flex items-center gap-3">
@@ -1930,40 +1944,243 @@ ${customerRows.map(c => `<tr>
             </div>
           </div><div className="flex gap-2 mt-5"><button onClick={() => productAction('update', editingProduct.id, { sku: editingProduct.sku, name: editingProduct.name, description: editingProduct.description, price: editingProduct.price, quantity: editingProduct.quantity, make: editingProduct.make, model: editingProduct.model, year: editingProduct.year, model_code: editingProduct.model_code, condition: editingProduct.condition, side: editingProduct.side, color: editingProduct.color, oem_code: editingProduct.oem_code, cost: editingProduct.cost, category: editingProduct.category, show_price: editingProduct.show_price, loc_store: editingProduct.loc_store || null, loc_floor: editingProduct.loc_floor || null, loc_sub1: editingProduct.loc_sub1 || null, loc_sub2: editingProduct.loc_sub2 || null })} disabled={actionLoading === editingProduct.id} className="bg-orange-500 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button><button onClick={() => setEditingProduct(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button></div></div></div>)}
           {products.length === 0 ? (productsLoading ? <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><div className="w-8 h-8 border-3 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div><p className="text-slate-400 font-semibold">Loading products...</p></div> : <div className="text-center py-16 bg-white rounded-xl border border-slate-200"><p className="text-4xl mb-3">📦</p><p className="text-slate-500 font-semibold">No products</p></div>) : (<>
-            {/* Mobile: Grid of image cards with tap-to-reveal actions */}
-            <div className="sm:hidden grid grid-cols-3 gap-1.5">
-              {filteredProducts.map((p: any) => { const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]; const isActive = mobileActiveProduct === p.id; return (
-                <div key={p.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                  <div className="aspect-square bg-slate-100 relative" onClick={() => setMobileActiveProduct(isActive ? null : p.id)}>
-                    {img ? <img src={img.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-2xl opacity-20">🔧</div>}
-                    {/* Action overlay on tap */}
-                    {isActive && (
-                      <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1.5 p-1.5" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-blue-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-blue-600">✏️ Edit</button>
-                        <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-orange-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-orange-600">🖼️ Primary</button>
-                        {p.quantity > 0 && <button onClick={() => { addToCart(p); setTab('pos'); setMobileActiveProduct(null); showToast('Added to POS') }} className="w-full bg-green-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-green-600">🛒 POS</button>}
-                        <button onClick={() => setMobileActiveProduct(null)} className="w-full text-white/70 text-[10px] font-semibold py-1">Cancel</button>
-                      </div>
-                    )}
-                    {/* Status badge */}
-                    {p.quantity <= 0 && <span className="absolute top-1 left-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">SOLD</span>}
-                    {!p.is_active && p.quantity > 0 && <span className="absolute top-1 left-1 bg-slate-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">HIDDEN</span>}
-                  </div>
-                  <div className="px-1.5 py-1">
-                    <p className="text-[10px] font-bold text-slate-800 leading-tight line-clamp-1">{p.name}</p>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</span>
-                      <span className="text-[9px] text-slate-400 font-mono">{p.sku}</span>
+
+            {/* ─── GRID VIEW ─── */}
+            {productsViewMode === 'grid' && (<>
+              {/* Mobile: Grid of image cards with tap-to-reveal actions */}
+              <div className="sm:hidden grid grid-cols-3 gap-1.5">
+                {filteredProducts.map((p: any) => { const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]; const isActive = mobileActiveProduct === p.id; return (
+                  <div key={p.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                    <div className="aspect-square bg-slate-100 relative" onClick={() => setMobileActiveProduct(isActive ? null : p.id)}>
+                      {img ? <img src={img.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-2xl opacity-20">🔧</div>}
+                      {isActive && (
+                        <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1.5 p-1.5" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-blue-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-blue-600">✏️ Edit</button>
+                          <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-orange-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-orange-600">🖼️ Primary</button>
+                          {p.quantity > 0 && <button onClick={() => { addToCart(p); setTab('pos'); setMobileActiveProduct(null); showToast('Added to POS') }} className="w-full bg-green-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-green-600">🛒 POS</button>}
+                          <button onClick={() => setMobileActiveProduct(null)} className="w-full text-white/70 text-[10px] font-semibold py-1">Cancel</button>
+                        </div>
+                      )}
+                      {p.quantity <= 0 && <span className="absolute top-1 left-1 bg-red-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">SOLD</span>}
+                      {!p.is_active && p.quantity > 0 && <span className="absolute top-1 left-1 bg-slate-500 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">HIDDEN</span>}
                     </div>
-                    {locLabel(p) && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 px-1 rounded truncate block">📍 {locLabel(p)}</span>}
+                    <div className="px-1.5 py-1">
+                      <p className="text-[10px] font-bold text-slate-800 leading-tight line-clamp-1">{p.name}</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</span>
+                        <span className="text-[9px] text-slate-400 font-mono">{p.sku}</span>
+                      </div>
+                      {locLabel(p) && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 px-1 rounded truncate block">📍 {locLabel(p)}</span>}
+                    </div>
+                  </div>
+                ) })}
+              </div>
+              {/* Desktop: Full table */}
+              <div className="hidden sm:block bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500 hidden lg:table-cell">Location</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
+                {filteredProducts.map((p: any, i: number) => { const sortedImages = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)); const pendingChange = primaryChanges.get(p.id); const effectivePrimaryId = pendingChange ? pendingChange.imageId : sortedImages[0]?.id; return (<tr key={p.id} className={'border-t border-slate-100 ' + (pendingChange ? 'bg-blue-50/50' : selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5"><div className={'flex gap-1.5 overflow-x-auto ' + (primaryMode ? 'max-w-[420px]' : 'max-w-[300px]')}>{sortedImages.length > 0 ? sortedImages.slice(0, 6).map((img: any) => { const isPrimary = img.id === effectivePrimaryId; const size = primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14'; return (<img key={img.id} src={img.url} alt="" loading="lazy" title={isPrimary ? 'Primary image' : primaryMode ? 'Click to set as primary' : ''} onClick={() => { if (primaryMode && !isPrimary) markAsPrimary(p.id, img.id, p.images) }} className={size + ' rounded-lg object-cover shrink-0 transition-all ' + (isPrimary ? 'ring-2 ring-orange-500' : 'border border-slate-200') + (primaryMode && !isPrimary ? ' cursor-pointer hover:ring-2 hover:ring-blue-400 active:scale-95 active:ring-2 active:ring-blue-400' : '')} />) }) : <div className={(primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14') + ' rounded-lg bg-slate-100 flex items-center justify-center text-lg'}>🔧</div>}{sortedImages.length > 6 && <span className="text-[10px] text-slate-400 self-center shrink-0">+{sortedImages.length - 6}</span>}</div></td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 hidden lg:table-cell">{locLabel(p) ? <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">📍 {locLabel(p)}</span> : <span className="text-xs text-slate-300">—</span>}</td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className={'px-4 py-2.5 font-semibold ' + (p.quantity <= 0 ? 'text-red-500' : '')}>{p.quantity <= 0 ? <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">0 - Sold</span> : p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
+              </tbody></table></div></div>
+            </>)}
+
+            {/* ─── SPREADSHEET VIEW ─── */}
+            {productsViewMode === 'sheet' && (() => {
+              // SKU gap finder — detect prefix+number pattern from all SKUs
+              const skuPattern = /^([A-Za-z]+-?)(\d+)$/
+              const skuEntries: number[] = []
+              let detectedPrefix = ''
+              let detectedPadding = 4
+              products.forEach((p: any) => {
+                const m = (p.sku || '').match(skuPattern)
+                if (m) {
+                  if (!detectedPrefix) { detectedPrefix = m[1]; detectedPadding = m[2].length }
+                  if (m[1] === detectedPrefix) skuEntries.push(parseInt(m[2]))
+                }
+              })
+              skuEntries.sort((a, b) => a - b)
+              const maxSku = skuEntries.length ? skuEntries[skuEntries.length - 1] : 0
+              const skuSet = new Set(skuEntries)
+              const missingSKUs: string[] = []
+              for (let i = 1; i <= maxSku; i++) {
+                if (!skuSet.has(i)) missingSKUs.push(detectedPrefix + String(i).padStart(detectedPadding, '0'))
+              }
+              const nextSKU = detectedPrefix ? detectedPrefix + String(maxSku + 1).padStart(detectedPadding, '0') : null
+
+              // Build filter options from all products
+              const cats = ([...new Set(products.map((p: any) => p.category).filter(Boolean))] as string[]).sort()
+              const makes = ([...new Set(products.map((p: any) => p.make).filter(Boolean))] as string[]).sort()
+              const conds = ([...new Set(products.map((p: any) => p.condition).filter(Boolean))] as string[]).sort()
+
+              // Apply sheet filters + existing search
+              const s = productSearch.toLowerCase()
+              let sheetRows = products.filter((p: any) => {
+                if (!showSoldOut && p.quantity <= 0 && !productSearch) return false
+                if (productSearch && !p.name.toLowerCase().includes(s) && !(p.sku||'').toLowerCase().includes(s) && !(p.make||'').toLowerCase().includes(s) && !(p.oem_code||'').toLowerCase().includes(s)) return false
+                if (sheetFilters.category && p.category !== sheetFilters.category) return false
+                if (sheetFilters.make && p.make !== sheetFilters.make) return false
+                if (sheetFilters.condition && p.condition !== sheetFilters.condition) return false
+                if (sheetFilters.status === 'active' && !p.is_active) return false
+                if (sheetFilters.status === 'hidden' && p.is_active) return false
+                if (sheetFilters.status === 'soldout' && p.quantity > 0) return false
+                return true
+              })
+
+              // Sort
+              sheetRows = [...sheetRows].sort((a, b) => {
+                const col = sheetSort.col
+                const dir = sheetSort.dir === 'asc' ? 1 : -1
+                let av: any, bv: any
+                if (col === 'sku') {
+                  // Sort SKUs by embedded number if possible, else lexically
+                  const am = (a.sku||'').match(skuPattern); const bm = (b.sku||'').match(skuPattern)
+                  av = am ? parseInt(am[2]) : a.sku||''
+                  bv = bm ? parseInt(bm[2]) : b.sku||''
+                } else if (col === 'price') { av = a.price||0; bv = b.price||0 }
+                else if (col === 'cost') { av = a.cost||0; bv = b.cost||0 }
+                else if (col === 'qty') { av = a.quantity||0; bv = b.quantity||0 }
+                else { av = (a[col]||'').toString().toLowerCase(); bv = (b[col]||'').toString().toLowerCase() }
+                return av < bv ? -dir : av > bv ? dir : 0
+              })
+
+              const SortTh = ({ col, label }: { col: string; label: string }) => (
+                <th onClick={() => setSheetSort(s => s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' })}
+                  className="px-3 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide cursor-pointer select-none whitespace-nowrap hover:bg-slate-100 group">
+                  {label}{sheetSort.col === col ? (sheetSort.dir === 'asc' ? ' ↑' : ' ↓') : <span className="opacity-0 group-hover:opacity-30"> ↕</span>}
+                </th>
+              )
+
+              return (
+                <div>
+                  {/* SKU Gap Finder */}
+                  {nextSKU && (
+                    <div className="mb-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-start gap-4">
+                      <div>
+                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide mb-0.5">Next SKU</p>
+                        <button onClick={() => { navigator.clipboard?.writeText(nextSKU); showToast('Copied: ' + nextSKU) }}
+                          className="font-mono font-black text-lg text-emerald-700 hover:text-emerald-900 active:scale-95 transition" title="Click to copy">
+                          {nextSKU} 📋
+                        </button>
+                      </div>
+                      {missingSKUs.length > 0 && (
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] font-bold text-amber-600 uppercase tracking-wide mb-1">
+                            {missingSKUs.length} Missing SKU{missingSKUs.length > 1 ? 's' : ''} (gaps in sequence)
+                          </p>
+                          <div className="flex flex-wrap gap-1">
+                            {missingSKUs.slice(0, 20).map(s => (
+                              <button key={s} onClick={() => { navigator.clipboard?.writeText(s); showToast('Copied: ' + s) }}
+                                className="font-mono text-[11px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded hover:bg-amber-200 active:scale-95 transition" title="Click to copy">
+                                {s}
+                              </button>
+                            ))}
+                            {missingSKUs.length > 20 && <span className="text-[11px] text-amber-500 self-center">+{missingSKUs.length - 20} more</span>}
+                          </div>
+                        </div>
+                      )}
+                      {missingSKUs.length === 0 && <p className="text-[11px] text-emerald-600 self-center">✅ No gaps — sequence is complete</p>}
+                    </div>
+                  )}
+
+                  {/* Filter row */}
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <select value={sheetFilters.category} onChange={e => setSheetFilters(f => ({...f, category: e.target.value}))}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold bg-white outline-none focus:border-orange-400">
+                      <option value="">All Categories</option>
+                      {cats.map((c: string) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <select value={sheetFilters.make} onChange={e => setSheetFilters(f => ({...f, make: e.target.value}))}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold bg-white outline-none focus:border-orange-400">
+                      <option value="">All Makes</option>
+                      {makes.map((m: string) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <select value={sheetFilters.condition} onChange={e => setSheetFilters(f => ({...f, condition: e.target.value}))}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold bg-white outline-none focus:border-orange-400">
+                      <option value="">All Conditions</option>
+                      {conds.map((c: string) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <select value={sheetFilters.status} onChange={e => setSheetFilters(f => ({...f, status: e.target.value}))}
+                      className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold bg-white outline-none focus:border-orange-400">
+                      <option value="">All Status</option>
+                      <option value="active">Active</option>
+                      <option value="hidden">Hidden</option>
+                      <option value="soldout">Sold Out</option>
+                    </select>
+                    {(sheetFilters.category || sheetFilters.make || sheetFilters.condition || sheetFilters.status) && (
+                      <button onClick={() => setSheetFilters({category:'',make:'',condition:'',status:''})}
+                        className="px-3 py-1.5 rounded-lg border border-red-200 text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100">
+                        ✕ Clear Filters
+                      </button>
+                    )}
+                    <span className="text-xs text-slate-400 self-center ml-auto">{sheetRows.length} of {products.length} products</span>
+                  </div>
+
+                  {/* Spreadsheet table */}
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="text-xs border-collapse" style={{minWidth:'1100px'}}>
+                        <thead>
+                          <tr className="bg-slate-50 border-b-2 border-slate-200 text-left">
+                            <th className="px-3 py-2.5 text-[11px] font-bold text-slate-400 w-8">#</th>
+                            <SortTh col="sku" label="SKU" />
+                            <SortTh col="name" label="Name" />
+                            <SortTh col="category" label="Category" />
+                            <SortTh col="make" label="Make" />
+                            <SortTh col="model" label="Model" />
+                            <SortTh col="year" label="Year" />
+                            <SortTh col="condition" label="Condition" />
+                            <SortTh col="side" label="Side" />
+                            <SortTh col="oem_code" label="OEM Code" />
+                            <SortTh col="cost" label="Cost" />
+                            <SortTh col="price" label="Price" />
+                            <SortTh col="qty" label="Qty" />
+                            <th className="px-3 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Location</th>
+                            <SortTh col="is_active" label="Status" />
+                            <th className="px-3 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide sticky right-0 bg-slate-50">Edit</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sheetRows.map((p: any, i: number) => {
+                            const loc = [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ')
+                            const rowBg = i % 2 === 0 ? '' : 'bg-slate-50/60'
+                            const qtyColor = p.quantity <= 0 ? 'text-red-600 font-bold' : p.quantity <= 2 ? 'text-amber-600 font-bold' : 'text-slate-700'
+                            return (
+                              <tr key={p.id} className={'border-b border-slate-100 hover:bg-orange-50/40 transition-colors ' + rowBg}>
+                                <td className="px-3 py-2 text-slate-300 font-mono text-[10px]">{i + 1}</td>
+                                <td className="px-3 py-2 font-mono font-bold text-slate-800 whitespace-nowrap">{p.sku || '—'}</td>
+                                <td className="px-3 py-2 font-semibold text-slate-900 max-w-[200px]"><div className="truncate" title={p.name}>{p.name}</div></td>
+                                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{p.category || '—'}</td>
+                                <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.make || '—'}</td>
+                                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{p.model || '—'}</td>
+                                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{p.year || '—'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  {p.condition ? <span className={'text-[10px] font-bold px-1.5 py-0.5 rounded ' + (p.condition === 'New' ? 'bg-blue-50 text-blue-700' : p.condition === 'Reconditioned' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600')}>{p.condition}</span> : '—'}
+                                </td>
+                                <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{p.side || '—'}</td>
+                                <td className="px-3 py-2 font-mono text-slate-500 whitespace-nowrap">{p.oem_code || '—'}</td>
+                                <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.cost ? 'Rs.' + Number(p.cost).toLocaleString() : '—'}</td>
+                                <td className="px-3 py-2 font-bold text-orange-600 whitespace-nowrap">{p.price ? 'Rs.' + Number(p.price).toLocaleString() : 'Ask'}</td>
+                                <td className={'px-3 py-2 whitespace-nowrap ' + qtyColor}>{p.quantity}</td>
+                                <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-[10px]">{loc || '—'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  <span className={'text-[10px] font-bold px-1.5 py-0.5 rounded-full ' + (p.quantity <= 0 ? 'bg-red-100 text-red-600' : p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500')}>
+                                    {p.quantity <= 0 ? 'SOLD OUT' : p.is_active ? 'ACTIVE' : 'HIDDEN'}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 sticky right-0 bg-white border-l border-slate-100">
+                                  <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }}
+                                    className="text-[11px] font-semibold text-blue-600 px-2.5 py-1 rounded border border-blue-200 hover:bg-blue-50 whitespace-nowrap">
+                                    ✏️ Edit
+                                  </button>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              ) })}
-            </div>
-            {/* Desktop: Full table */}
-            <div className="hidden sm:block bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500 hidden lg:table-cell">Location</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
-              {filteredProducts.map((p: any, i: number) => { const sortedImages = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)); const pendingChange = primaryChanges.get(p.id); const effectivePrimaryId = pendingChange ? pendingChange.imageId : sortedImages[0]?.id; return (<tr key={p.id} className={'border-t border-slate-100 ' + (pendingChange ? 'bg-blue-50/50' : selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5"><div className={'flex gap-1.5 overflow-x-auto ' + (primaryMode ? 'max-w-[420px]' : 'max-w-[300px]')}>{sortedImages.length > 0 ? sortedImages.slice(0, 6).map((img: any) => { const isPrimary = img.id === effectivePrimaryId; const size = primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14'; return (<img key={img.id} src={img.url} alt="" loading="lazy" title={isPrimary ? 'Primary image' : primaryMode ? 'Click to set as primary' : ''} onClick={() => { if (primaryMode && !isPrimary) markAsPrimary(p.id, img.id, p.images) }} className={size + ' rounded-lg object-cover shrink-0 transition-all ' + (isPrimary ? 'ring-2 ring-orange-500' : 'border border-slate-200') + (primaryMode && !isPrimary ? ' cursor-pointer hover:ring-2 hover:ring-blue-400 active:scale-95 active:ring-2 active:ring-blue-400' : '')} />) }) : <div className={(primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14') + ' rounded-lg bg-slate-100 flex items-center justify-center text-lg'}>🔧</div>}{sortedImages.length > 6 && <span className="text-[10px] text-slate-400 self-center shrink-0">+{sortedImages.length - 6}</span>}</div></td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{p.make && p.make + ' ' + (p.model || '')}</div></td><td className="px-4 py-2.5 hidden lg:table-cell">{locLabel(p) ? <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">📍 {locLabel(p)}</span> : <span className="text-xs text-slate-300">—</span>}</td><td className="px-4 py-2.5 font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</td><td className={'px-4 py-2.5 font-semibold ' + (p.quantity <= 0 ? 'text-red-500' : '')}>{p.quantity <= 0 ? <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">0 - Sold</span> : p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button><button onClick={() => { if (confirm('Delete?')) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button></div></td></tr>) })}
-            </tbody></table></div></div>
+              )
+            })()}
+
           </>)}
         </div>)}
 
