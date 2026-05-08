@@ -2034,7 +2034,9 @@ ${customerRows.map(c => `<tr>
               // Apply sheet filters + search
               const s = productSearch.toLowerCase()
               let sheetRows = products.filter((p: any) => {
-                if (!showSoldOut && p.quantity <= 0 && !productSearch) return false
+                if (!showSoldOut && p.quantity <= 0 && !productSearch && !gapPrefix) return false
+                // When SKU prefix is typed, filter table to matching SKUs only
+                if (gapPrefix && !(p.sku||'').startsWith(gapPrefix)) return false
                 if (productSearch && !p.name.toLowerCase().includes(s) && !(p.sku||'').toLowerCase().includes(s) && !(p.make||'').toLowerCase().includes(s) && !(p.oem_code||'').toLowerCase().includes(s)) return false
                 if (sheetFilters.category && p.category !== sheetFilters.category) return false
                 if (sheetFilters.make && p.make !== sheetFilters.make) return false
