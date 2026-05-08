@@ -234,6 +234,8 @@ export default function VendorDashboard() {
   const [sheetFilters, setSheetFilters] = useState({category:'',make:'',condition:'',status:''})
   const [sheetContainer, setSheetContainer] = useState<string>('')       // selected container e.g. "145"
   const [subItemCheck, setSubItemCheck] = useState('')                   // base number to check sub-items for
+  const [soldProductInfo, setSoldProductInfo] = useState<Record<string, any>>({})
+  const [soldInfoLoaded, setSoldInfoLoaded] = useState(false)
 
   const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'' })
   const [productImages, setProductImages] = useState<File[]>([])
@@ -2075,6 +2077,15 @@ ${customerRows.map(c => `<tr>
                 </th>
               )
 
+              // Fetch sold info lazily when showSoldOut is enabled
+              if (showSoldOut && !soldInfoLoaded) {
+                setSoldInfoLoaded(true)
+                fetch('/api/vendor/products/sold-info')
+                  .then(r => r.json())
+                  .then(j => { if (j.soldInfo) setSoldProductInfo(j.soldInfo) })
+                  .catch(() => {})
+              }
+
               return (
                 <div>
                   {/* ── SKU Gap Finder ── */}
@@ -2173,6 +2184,9 @@ ${customerRows.map(c => `<tr>
                             <SortTh col="qty" label="Qty" />
                             <th className="px-3 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide whitespace-nowrap">Location</th>
                             <SortTh col="is_active" label="Status" />
+                            {showSoldOut && <th className="px-3 py-2.5 text-[11px] font-bold text-purple-500 uppercase tracking-wide whitespace-nowrap bg-purple-50">Sold Date</th>}
+                            {showSoldOut && <th className="px-3 py-2.5 text-[11px] font-bold text-purple-500 uppercase tracking-wide whitespace-nowrap bg-purple-50">Sold Price</th>}
+                            {showSoldOut && <th className="px-3 py-2.5 text-[11px] font-bold text-purple-500 uppercase tracking-wide whitespace-nowrap bg-purple-50">Customer</th>}
                             <th className="px-3 py-2.5 text-[11px] font-bold text-slate-500 uppercase tracking-wide sticky right-0 bg-slate-50">Edit</th>
                           </tr>
                         </thead>
@@ -2215,6 +2229,15 @@ ${customerRows.map(c => `<tr>
                                     {p.quantity <= 0 ? 'SOLD' : p.is_active ? 'ACTIVE' : 'HIDDEN'}
                                   </span>
                                 </td>
+                                {showSoldOut && (() => {
+                                  const si = soldProductInfo[p.id]
+                                  const soldDate = si?.sold_date ? new Date(si.sold_date).toLocaleDateString('en-LK', {day:'2-digit',month:'short',year:'numeric'}) : '—'
+                                  return (<>
+                                    <td className="px-3 py-2 whitespace-nowrap text-[11px] text-purple-700 bg-purple-50/40">{soldDate}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap text-[11px] font-bold text-purple-700 bg-purple-50/40">{si?.sold_price ? 'Rs.' + Number(si.sold_price).toLocaleString() : '—'}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap text-[11px] text-purple-600 bg-purple-50/40 max-w-[140px]"><div className="truncate">{si?.customer_name || '—'}</div></td>
+                                  </>)
+                                })()}
                                 <td className="px-3 py-2 sticky right-0 bg-white border-l border-slate-100">
                                   <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }}
                                     className="text-[11px] font-semibold text-blue-600 px-2.5 py-1 rounded border border-blue-200 hover:bg-blue-50 whitespace-nowrap">
