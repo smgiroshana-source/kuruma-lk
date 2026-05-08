@@ -1985,9 +1985,9 @@ ${customerRows.map(c => `<tr>
 
             {/* ─── SPREADSHEET VIEW ─── */}
             {productsViewMode === 'sheet' && (() => {
-              // SAK-CCCSSSX format: prefix + 3-digit container + 3-digit sequence + optional A/B/C suffix
-              // e.g. SAK-145847, SAK-145847A, SAK-145847B
-              const skuRe = /^([A-Za-z]+-?)(\d{3})(\d{3})([A-Z]*)$/
+              // Format: [optional prefix] + 3-digit container + 3-digit sequence + optional A/B/C suffix
+              // e.g. 145847, 145847A, 145847B  OR  SAK-145847, SAK-145847A
+              const skuRe = /^([A-Za-z\-]*)(\d{3})(\d{3})([A-Z]*)$/
 
               // Parse all SKUs
               type ParsedSKU = { prefix: string; container: string; seq: number; suffix: string; full: string }
