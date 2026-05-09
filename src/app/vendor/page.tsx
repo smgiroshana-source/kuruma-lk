@@ -1,7 +1,7 @@
 'use client'
 import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constants'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, startTransition } from 'react'
 
 type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
@@ -1837,7 +1837,7 @@ ${customerRows.map(c => `<tr>
       <div className="bg-white border-b border-slate-200"><div className="max-w-7xl mx-auto px-2 sm:px-4 flex gap-0 overflow-x-auto scrollbar-hide" style={{WebkitOverflowScrolling:'touch'}}>
         {([{key:'overview' as VendorTab,l:'Overview'},{key:'products' as VendorTab,l:'Products'},{key:'add' as VendorTab,l:'+ Add'},{key:'bulk' as VendorTab,l:'Bulk'},{key:'pos' as VendorTab,l:'POS'},{key:'sales' as VendorTab,l:'Sales'},{key:'credit' as VendorTab,l:'Credit'},{key:'stocktake' as VendorTab,l:'📦 Stock'},{key:'settings' as VendorTab,l:'⚙️'}])
         .filter((t) => staffRole === 'cashier' ? t.key === 'pos' : true).map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} className={`px-3 sm:px-4 py-4 text-xs sm:text-sm font-bold border-b-2 transition whitespace-nowrap ${tab === t.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 hover:text-slate-700'} ${t.key === 'bulk' ? 'hidden sm:inline-block' : ''}`}>{t.l}</button>
+          <button key={t.key} onClick={() => startTransition(() => setTab(t.key))} className={`px-3 sm:px-4 py-4 text-xs sm:text-sm font-bold border-b-2 transition whitespace-nowrap ${tab === t.key ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-400 hover:text-slate-700'} ${t.key === 'bulk' ? 'hidden sm:inline-block' : ''}`}>{t.l}</button>
         ))}
       </div></div>
 
@@ -1855,10 +1855,10 @@ ${customerRows.map(c => `<tr>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl border border-slate-200 p-5"><h3 className="font-bold text-slate-900 mb-3">Quick Actions</h3><div className="space-y-2">
-              <button onClick={() => setTab('pos')} className="w-full text-left px-4 py-3 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 font-semibold text-sm">🧾 Open POS</button>
-              <button onClick={() => setTab('credit')} className="w-full text-left px-4 py-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-sm">💳 Credit & Settlements</button>
-              <button onClick={() => setTab('add')} className="w-full text-left px-4 py-3 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-sm">+ Add Product</button>
-              <button onClick={() => setTab('sales')} className="w-full text-left px-4 py-3 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold text-sm">📊 Sales History</button>
+              <button onClick={() => startTransition(() => setTab('pos'))} className="w-full text-left px-4 py-3 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 font-semibold text-sm">🧾 Open POS</button>
+              <button onClick={() => startTransition(() => setTab('credit'))} className="w-full text-left px-4 py-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold text-sm">💳 Credit & Settlements</button>
+              <button onClick={() => startTransition(() => setTab('add'))} className="w-full text-left px-4 py-3 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-sm">+ Add Product</button>
+              <button onClick={() => startTransition(() => setTab('sales'))} className="w-full text-left px-4 py-3 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold text-sm">📊 Sales History</button>
             </div></div>
             <div className="bg-white rounded-xl border border-slate-200 p-5"><h3 className="font-bold text-slate-900 mb-3">Shop Info</h3><div className="space-y-2 text-sm">
               <p><span className="text-slate-400">Name:</span> <span className="font-semibold">{vendor.name}</span></p>
