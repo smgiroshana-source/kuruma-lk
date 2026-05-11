@@ -1366,10 +1366,12 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
 
 <div class="summary">
-<div class="summary-box">${totalCashReturnAmount > 0 ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px;margin-bottom:4px">Gross Sales</div><div class="val orange" style="font-size:18px">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:10px;color:#dc2626;margin:4px 0;border-top:1px dashed #fca5a5;padding-top:4px">Returns/Credits: &minus;Rs.' + totalCashReturnAmount.toLocaleString() + '</div><div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Net Sales</div><div class="val orange">Rs.' + netSales.toLocaleString() + '</div>' : '<div class="val orange">Rs.' + totalSales.toLocaleString() + '</div><div class="lbl">Net Sales</div>'}</div>
+<div class="summary-box">${totalCashReturnAmount > 0
+  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange" style="font-size:20px;margin:2px 0">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;border-top:1px dashed #fca5a5;padding-top:6px;margin-top:6px">&minus; Rs.' + totalCashReturnAmount.toLocaleString() + ' Returns/Credits</div><div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px;margin-top:6px;border-top:2px solid #ff6b35;padding-top:6px">Net Sales</div><div class="val orange">Rs.' + netSales.toLocaleString() + '</div>'
+  : '<div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div>'
+}</div>
 <div class="summary-box"><div class="val green">Rs.${totalCashCollected.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
-<div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
 </div>
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
