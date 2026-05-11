@@ -5,6 +5,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
       loc_sub1: pd.loc_sub1 || null, loc_sub2: pd.loc_sub2 || null,
     }).select().single()
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
+    revalidatePath('/')
     return NextResponse.json({ success: true, product, message: 'Product created (ID: ' + sku + ')' })
   }
 
@@ -136,6 +138,8 @@ export async function POST(req: NextRequest) {
       results.push({ id, ...updateData })
     }
 
+    // Revalidate home page once for the bulk import (not per-product)
+    if (toInsert.length > 0) revalidatePath('/')
     return NextResponse.json({
       success: true, count: results.length, products: results, skipped,
       skippedCount: skipped.length, updatedCount: toUpdate.length,
@@ -151,6 +155,8 @@ export async function POST(req: NextRequest) {
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     const { error } = await admin.from('products').update(updateData).eq('id', productId)
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
+    // Revalidate only this product's public page — no timer needed
+    revalidatePath(`/product/${productId}`)
     return NextResponse.json({ success: true, message: 'Product updated' })
   }
 
@@ -160,6 +166,8 @@ export async function POST(req: NextRequest) {
     const { data: existing } = await admin.from('products').select('vendor_id, is_active').eq('id', productId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     await admin.from('products').update({ is_active: !existing.is_active }).eq('id', productId)
+    revalidatePath(`/product/${productId}`)
+    revalidatePath('/')
     return NextResponse.json({ success: true, message: existing.is_active ? 'Product hidden' : 'Product visible' })
   }
 
@@ -177,6 +185,7 @@ export async function POST(req: NextRequest) {
     }
     await admin.from('product_images').delete().eq('product_id', productId)
     await admin.from('products').delete().eq('id', productId)
+    revalidatePath('/')
     return NextResponse.json({ success: true, message: 'Product deleted' })
   }
 

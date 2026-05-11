@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import { createAdminClient } from '@/lib/supabase/admin'
 import ProductDetailClient from './ProductDetail'
 
-// Cache product pages for 6 hours — product details rarely change
-export const revalidate = 21600
+// Cache product pages for 24 hours — revalidated on-demand when product is updated via API
+export const revalidate = 86400
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://kuruma.lk'
 
