@@ -735,6 +735,46 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, draft, message: 'On Approval draft created — stock reserved' })
   }
 
+  // Move a Rs.0 item from a finalized invoice back into an existing on-approval draft.
+  // Stock is NOT touched — the item is still physically with the customer.
+  if (action === 'move_to_approval') {
+    const { saleId, saleItemId } = body
+    const { data: sale } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!sale) return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
+    const item = (sale.items || []).find((i: any) => i.id === saleItemId)
+    if (!item) return NextResponse.json({ error: 'Item not found' }, { status: 404 })
+    if (parseFloat(item.unit_price || 0) !== 0) return NextResponse.json({ error: 'Only Rs.0 items can be moved to on-approval' }, { status: 400 })
+
+    // Find the most recent open draft for this customer
+    let targetDraftId: string | null = null
+    let targetDraftNo: string | null = null
+    if (sale.customer_id) {
+      const { data: existing } = await admin.from('sales')
+        .select('id, invoice_no').eq('vendor_id', vendor.id).eq('customer_id', sale.customer_id)
+        .eq('payment_status', 'draft').order('created_at', { ascending: false }).limit(1).maybeSingle()
+      if (existing) { targetDraftId = existing.id; targetDraftNo = existing.invoice_no }
+    }
+
+    // No existing draft — create one
+    if (!targetDraftId) {
+      const newDraftNo = await generateDraftNo(vendor.id, vendor.name)
+      const { data: newDraft } = await admin.from('sales').insert({
+        vendor_id: vendor.id, customer_id: sale.customer_id,
+        invoice_no: newDraftNo, customer_name: sale.customer_name, customer_phone: sale.customer_phone,
+        subtotal: 0, discount: 0, total: 0, paid_amount: 0, balance_due: 0,
+        payment_status: 'draft', notes: 'ON APPROVAL',
+      }).select().single()
+      if (newDraft) { targetDraftId = newDraft.id; targetDraftNo = newDraftNo }
+    }
+
+    if (!targetDraftId) return NextResponse.json({ error: 'Could not find or create draft' }, { status: 500 })
+
+    // Re-parent the item — no stock change
+    await admin.from('sale_items').update({ sale_id: targetDraftId }).eq('id', saleItemId)
+
+    return NextResponse.json({ success: true, draftInvoiceNo: targetDraftNo, message: `Item moved to on-approval ${targetDraftNo}` })
+  }
+
   if (action === 'return_draft_item') {
     // Return a single item from a draft (on-approval) — restore its stock and remove it.
     // If it was the last item, void the entire draft.
