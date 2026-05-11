@@ -2801,7 +2801,11 @@ ${customerRows.map(c => `<tr>
                       <p className="text-[11px] text-slate-400 font-semibold">Credit Collections</p>
                       {salesData.collectionsToday && (() => {
                         const methods: Record<string, number> = {}
-                        salesData.collectionsToday.forEach((c: any) => { const m = (c.payment_method || 'cash'); methods[m] = (methods[m] || 0) + c.amount })
+                        salesData.collectionsToday.forEach((c: any) => {
+                          const m = (c.payment_method || 'cash').toLowerCase()
+                          if (m === 'advance') return // advance is internal offset, not real collection
+                          methods[m] = (methods[m] || 0) + c.amount
+                        })
                         return <div className="mt-1.5 space-y-0.5">{Object.entries(methods).map(([m, a]) => <p key={m} className="text-[10px] text-teal-700 font-semibold">{m.toUpperCase()}: Rs.{(a as number).toLocaleString()}</p>)}</div>
                       })()}
                     </div>

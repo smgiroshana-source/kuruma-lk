@@ -200,6 +200,9 @@ export async function GET(req: NextRequest) {
     collectionsToday = (periodPayments || []).filter((p: any) => {
       const saleDate = p.sales?.created_at
       if (!saleDate) return false
+      // Exclude advance payment records — these are internal offset entries, not new money received.
+      // The actual cash/bank was already captured when the advance was originally deposited.
+      if ((p.payment_method || '').toLowerCase() === 'advance') return false
       // Check if this is an Opening Balance invoice
       const isOpeningBalance = (p.sales?.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
       if (isOpeningBalance) return true // Opening balance payments always count as collections
