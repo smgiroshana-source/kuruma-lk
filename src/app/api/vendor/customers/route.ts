@@ -121,6 +121,39 @@ export async function POST(req: NextRequest) {
   // Get all outstanding sales for a customer
   if (action === 'get_outstanding') {
     const { customerId } = body
+
+    // Auto-offset: apply any existing advance balance against outstanding before returning
+    const { data: custForOffset } = await admin
+      .from('customers').select('advance_balance').eq('id', customerId).eq('vendor_id', vendor.id).single()
+    const existingAdvance = parseFloat(custForOffset?.advance_balance || 0)
+    if (existingAdvance > 0) {
+      const { data: pendingSales } = await admin
+        .from('sales').select('id, invoice_no, paid_amount, balance_due')
+        .eq('vendor_id', vendor.id).eq('customer_id', customerId)
+        .gt('balance_due', 0).neq('payment_status', 'voided')
+        .order('created_at', { ascending: true })
+      let remaining = existingAdvance
+      for (const sale of (pendingSales || [])) {
+        if (remaining <= 0) break
+        const bal = parseFloat(sale.balance_due)
+        const apply = Math.min(remaining, bal)
+        await admin.from('payments').insert({
+          sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
+          amount: apply, payment_method: 'advance', notes: 'Auto-offset from advance balance',
+        })
+        const newPaid = parseFloat(sale.paid_amount) + apply
+        const newBal = Math.max(0, bal - apply)
+        await admin.from('sales').update({
+          paid_amount: newPaid, balance_due: newBal,
+          payment_status: newBal <= 0 ? 'paid' : 'partial',
+        }).eq('id', sale.id)
+        remaining -= apply
+      }
+      if (remaining !== existingAdvance) {
+        await admin.from('customers').update({ advance_balance: Math.max(0, remaining) }).eq('id', customerId)
+      }
+    }
+
     const { data: sales } = await admin
       .from('sales')
       .select('*, items:sale_items(*), payments:payments(*)')
@@ -396,7 +429,43 @@ export async function POST(req: NextRequest) {
       bank_ref: bankRef || null, notes: advNotes || 'Advance payment',
     })
 
-    return NextResponse.json({ success: true, message: `Rs.${advAmount.toLocaleString()} added. New advance: Rs.${newAdvance.toLocaleString()}` })
+    // Auto-offset: immediately apply advance against oldest outstanding invoices
+    const { data: outstandingSales } = await admin
+      .from('sales')
+      .select('id, invoice_no, paid_amount, balance_due')
+      .eq('vendor_id', vendor.id).eq('customer_id', customerId)
+      .gt('balance_due', 0).neq('payment_status', 'voided')
+      .order('created_at', { ascending: true })
+
+    let remaining = newAdvance
+    const cleared: string[] = []
+    for (const sale of (outstandingSales || [])) {
+      if (remaining <= 0) break
+      const bal = parseFloat(sale.balance_due)
+      const apply = Math.min(remaining, bal)
+      await admin.from('payments').insert({
+        sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
+        amount: apply, payment_method: 'advance', notes: 'Auto-offset from advance payment',
+      })
+      const newPaid = parseFloat(sale.paid_amount) + apply
+      const newBal = Math.max(0, bal - apply)
+      await admin.from('sales').update({
+        paid_amount: newPaid, balance_due: newBal,
+        payment_status: newBal <= 0 ? 'paid' : 'partial',
+      }).eq('id', sale.id)
+      remaining -= apply
+      cleared.push(sale.invoice_no)
+    }
+    await admin.from('customers').update({ advance_balance: Math.max(0, remaining) }).eq('id', customerId)
+
+    let msg = `Rs.${advAmount.toLocaleString()} advance added.`
+    if (cleared.length > 0) {
+      msg += ` Auto-applied to: ${cleared.join(', ')}.`
+      msg += remaining > 0 ? ` Remaining advance: Rs.${remaining.toLocaleString()}.` : ' Advance fully offset.'
+    } else {
+      msg += ` Advance balance: Rs.${remaining.toLocaleString()}.`
+    }
+    return NextResponse.json({ success: true, advance: remaining, message: msg })
   }
 
   // Refund advance (return money to customer)

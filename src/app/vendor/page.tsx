@@ -1138,15 +1138,6 @@ export default function VendorDashboard() {
     setEditCustomerLoading(false)
   }
 
-  async function handleAutoOffset(customerId: string) {
-    if (!confirm('Apply advance balance against outstanding invoices (oldest first)?')) return
-    try {
-      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'auto_offset', customerId }) })
-      const j = await r.json()
-      if (j.success) { showToast(j.message); fetchCreditCustomers(); if (selectedCreditCustomer?.id === customerId) loadOutstanding(selectedCreditCustomer) }
-      else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-  }
 
   const [bulkSettleMode, setBulkSettleMode] = useState(false)
   const [bulkSettlePayments, setBulkSettlePayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
@@ -1205,6 +1196,8 @@ export default function VendorDashboard() {
 
   function printCreditReport(customer: any, sales: any[], vendorInfo: any) {
     const totalDue = sales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
+    const advanceBalance = parseFloat(customer.advance_balance || 0)
+    const netDue = Math.max(0, totalDue - advanceBalance)
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Credit Report - ${customer.name}</title>
 <style>
   @page { size: A4; margin: 15mm; }
@@ -1223,14 +1216,18 @@ export default function VendorDashboard() {
   .text-right { text-align: right; }
   .amount-due { color: #dc2626; font-weight: 800; }
   .amount-paid { color: #16a34a; }
-  .total-box { background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
-  .total-label { font-size: 16px; font-weight: 700; color: #dc2626; }
-  .total-amount { font-size: 28px; font-weight: 900; color: #dc2626; }
+  .total-box { background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px 8px 0 0; padding: 12px 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: none; }
+  .total-label { font-size: 14px; font-weight: 700; color: #dc2626; }
+  .total-amount { font-size: 22px; font-weight: 900; color: #dc2626; }
   .footer { text-align: center; padding: 20px 0; color: #94a3b8; font-size: 11px; border-top: 1px solid #e2e8f0; margin-top: 30px; }
   .date-generated { font-size: 11px; color: #94a3b8; text-align: right; margin-bottom: 15px; }
-  .advance-box { background: #ecfdf5; border: 2px solid #10b981; border-radius: 8px; padding: 12px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; }
-  .advance-label { font-size: 14px; font-weight: 700; color: #059669; }
-  .advance-amount { font-size: 20px; font-weight: 900; color: #059669; }
+  .advance-deduct-box { background: #ecfdf5; border: 2px solid #dc2626; border-top: 1px dashed #dc2626; border-bottom: none; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; }
+  .advance-deduct-label { font-size: 13px; font-weight: 700; color: #059669; }
+  .advance-deduct-amount { font-size: 18px; font-weight: 900; color: #059669; }
+  .net-box { background: #dc2626; border: 2px solid #dc2626; border-radius: 0 0 8px 8px; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
+  .net-label { font-size: 16px; font-weight: 700; color: #fff; }
+  .net-amount { font-size: 30px; font-weight: 900; color: #fff; }
+  .standalone-total-box { background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style></head><body>
 <div class="header">
@@ -1261,8 +1258,11 @@ ${sales.length > 0 ? `
   </tbody>
 </table>
 ` : '<p style="text-align:center;color:#94a3b8;padding:20px">No outstanding invoices</p>'}
+${advanceBalance > 0 ? `
 <div class="total-box"><span class="total-label">TOTAL OUTSTANDING</span><span class="total-amount">Rs. ${totalDue.toLocaleString()}</span></div>
-${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><span class="advance-label">ADVANCE BALANCE</span><span class="advance-amount">Rs. ${parseFloat(customer.advance_balance || 0).toLocaleString()}</span></div>` : ''}
+<div class="advance-deduct-box"><span class="advance-deduct-label">Less: Advance Balance</span><span class="advance-deduct-amount">( Rs. ${advanceBalance.toLocaleString()} )</span></div>
+<div class="net-box"><span class="net-label">NET AMOUNT DUE</span><span class="net-amount">Rs. ${netDue.toLocaleString()}</span></div>
+` : `<div class="standalone-total-box"><span class="total-label" style="font-size:16px">TOTAL OUTSTANDING</span><span class="total-amount" style="font-size:28px">Rs. ${totalDue.toLocaleString()}</span></div>`}
 <div class="footer">
   <p>This is a computer-generated statement. Please settle outstanding amounts at your earliest convenience.</p>
   <p style="margin-top:5px">Contact: ${vendorInfo?.phone || ''} ${vendorInfo?.whatsapp ? '| WhatsApp: ' + vendorInfo.whatsapp : ''}</p>
@@ -1279,14 +1279,22 @@ ${parseFloat(customer.advance_balance || 0) > 0 ? `<div class="advance-box"><spa
     if (!rawPhone) { showToast('No phone number for this customer'); return }
     const phone = toWhatsAppNumber(rawPhone)
 
+    const advanceBalance = parseFloat(customer.advance_balance || 0)
+    const netDue = Math.max(0, totalDue - advanceBalance)
     let msg = `*CREDIT STATEMENT*%0A${vendorInfo?.name || 'kuruma.lk'}%0ADate: ${new Date().toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })}%0A%0ADear ${customer.name},%0A%0AHere is your outstanding balance:%0A`
     sales.forEach((s: any) => {
       msg += `%0A📋 *${s.invoice_no}* (${formatDateShort(s.created_at)})%0A`
       msg += `   Total: Rs.${parseFloat(s.total).toLocaleString()} | Paid: Rs.${parseFloat(s.paid_amount).toLocaleString()}%0A`
       msg += `   *Due: Rs.${parseFloat(s.balance_due).toLocaleString()}*%0A`
     })
-    msg += `%0A━━━━━━━━━━━━━━━━%0A*TOTAL OUTSTANDING: Rs.${totalDue.toLocaleString()}*%0A`
-    if (parseFloat(customer.advance_balance || 0) > 0) msg += `Advance Balance: Rs.${parseFloat(customer.advance_balance || 0).toLocaleString()}%0A`
+    msg += `%0A━━━━━━━━━━━━━━━━%0A`
+    if (advanceBalance > 0) {
+      msg += `Total Outstanding: Rs.${totalDue.toLocaleString()}%0A`
+      msg += `Less Advance Balance: (Rs.${advanceBalance.toLocaleString()})%0A`
+      msg += `━━━━━━━━━━━━━━━━%0A*NET AMOUNT DUE: Rs.${netDue.toLocaleString()}*%0A`
+    } else {
+      msg += `*TOTAL OUTSTANDING: Rs.${totalDue.toLocaleString()}*%0A`
+    }
     msg += `%0APlease settle at your earliest convenience.%0AThank you! - ${vendorInfo?.name || 'kuruma.lk'}`
 
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
@@ -3477,9 +3485,6 @@ ${customerRows.map(c => `<tr>
                     <div className="flex gap-2 mb-4 flex-wrap">
                       <button onClick={() => printCreditReport(selectedCreditCustomer, outstandingSales, data?.vendor)} className="text-xs font-semibold text-slate-600 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">📄 Print Statement</button>
                       <button onClick={() => sendWhatsAppCreditReport(selectedCreditCustomer, outstandingSales, data?.vendor)} className="text-xs font-semibold text-green-600 px-3 py-2 rounded-lg border border-green-200 hover:bg-green-50">💬 WhatsApp Statement</button>
-                      {selectedCreditCustomer.advance > 0 && selectedCreditCustomer.credit?.balance > 0 && (
-                        <button onClick={() => handleAutoOffset(selectedCreditCustomer.id)} className="text-xs font-semibold text-cyan-700 px-3 py-2 rounded-lg border border-cyan-300 bg-cyan-50 hover:bg-cyan-100">⚡ Auto-Offset (Apply Rs.{Math.min(selectedCreditCustomer.advance, selectedCreditCustomer.credit.balance).toLocaleString()} advance)</button>
-                      )}
                       <button onClick={() => setBulkSettleMode(!bulkSettleMode)} className="text-xs font-semibold text-purple-700 px-3 py-2 rounded-lg border border-purple-300 bg-purple-50 hover:bg-purple-100">{bulkSettleMode ? '✕ Cancel' : '💰 Lump Payment'}</button>
                     </div>
                   )}
