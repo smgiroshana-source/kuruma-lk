@@ -1367,9 +1367,10 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 
 <div class="summary">
 <div class="summary-box">${totalCashReturnAmount > 0
-  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange" style="font-size:20px;margin:2px 0">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;border-top:1px dashed #fca5a5;padding-top:6px;margin-top:6px">&minus; Rs.' + totalCashReturnAmount.toLocaleString() + ' Returns/Credits</div><div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px;margin-top:6px;border-top:2px solid #ff6b35;padding-top:6px">Net Sales</div><div class="val orange">Rs.' + netSales.toLocaleString() + '</div>'
+  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;margin-top:6px">&minus; Rs.' + totalCashReturnAmount.toLocaleString() + ' Returns/Credits</div>'
   : '<div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div>'
 }</div>
+${totalCashReturnAmount > 0 ? '<div class="summary-box" style="border:2px solid #ff6b35"><div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div></div>' : ''}
 <div class="summary-box"><div class="val green">Rs.${totalCashCollected.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 </div>
