@@ -2809,7 +2809,7 @@ ${customerRows.map(c => `<tr>
                           if (m === 'advance') return // advance is internal offset, not real collection
                           methods[m] = (methods[m] || 0) + c.amount
                         })
-                        return <div className="mt-1.5 space-y-0.5">{Object.entries(methods).map(([m, a]) => <p key={m} className="text-[10px] text-teal-700 font-semibold">{m.toUpperCase()}: Rs.{(a as number).toLocaleString()}</p>)}</div>
+                        return <p className="mt-1.5 text-[10px] text-teal-700 font-semibold leading-relaxed">{Object.entries(methods).map(([m, a]) => `${m.toUpperCase()}: Rs.${(a as number).toLocaleString()}`).join(' · ')}</p>
                       })()}
                     </div>
                     )}
