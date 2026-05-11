@@ -1366,7 +1366,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
 
 <div class="summary">
-<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalCashReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Cash refunded: -Rs.' + totalCashReturnAmount.toLocaleString() + '</div>' : ''}</div>
+<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Net Sales</div>${totalCashReturnAmount > 0 ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">Returns/Credits: -Rs.' + totalCashReturnAmount.toLocaleString() + '</div>' : ''}</div>
 <div class="summary-box"><div class="val green">Rs.${totalCashCollected.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
