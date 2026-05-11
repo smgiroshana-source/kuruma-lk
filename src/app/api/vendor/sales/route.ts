@@ -818,6 +818,86 @@ export async function POST(req: NextRequest) {
 
     const resolvedCustomerId = bodyCustomerId || draft.customer_id || null
 
+    // ── Partial finalization: peel confirmed items into a new invoice, leave draft intact ──
+    const confirmedItems = (finalItems || []).filter((fi: any) => parseFloat(fi.unitPrice || 0) > 0)
+    const pendingItems   = (finalItems || []).filter((fi: any) => parseFloat(fi.unitPrice || 0) === 0)
+
+    if (confirmedItems.length === 0)
+      return NextResponse.json({ error: 'No priced items to finalize. Enter a price for at least one item.' }, { status: 400 })
+
+    if (pendingItems.length > 0) {
+      // ── PARTIAL PATH: create a brand-new invoice for confirmed items only ──
+      const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+      const partialSubtotal = confirmedItems.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0)
+      const discountAmt = discount || 0
+      const partialTotal = Math.max(0, partialSubtotal - discountAmt)
+
+      let customerAdvance = 0
+      if (resolvedCustomerId && useAdvance) {
+        const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).single()
+        customerAdvance = parseFloat(cust?.advance_balance || 0)
+      }
+      const cashPaid = (paymentLines || []).reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
+      const advanceUsed = useAdvance && customerAdvance > 0 ? Math.min(customerAdvance, Math.max(0, partialTotal - cashPaid)) : 0
+      const paidAmt = Math.min(partialTotal, cashPaid + advanceUsed)
+      const balanceDue = Math.max(0, partialTotal - paidAmt)
+      const pStatus = balanceDue > 0 && paidAmt > 0 ? 'partial' : balanceDue > 0 ? 'credit' : 'paid'
+      const primaryMethod = paymentLines && paymentLines.length > 0
+        ? paymentLines.sort((a: any, b: any) => (parseFloat(b.amount) || 0) - (parseFloat(a.amount) || 0))[0].method || 'cash'
+        : (advanceUsed > 0 ? 'advance' : balanceDue > 0 ? 'credit' : 'cash')
+
+      // Create the new real invoice
+      const { data: newSale, error: newSaleErr } = await admin.from('sales').insert({
+        vendor_id: vendor.id, customer_id: resolvedCustomerId,
+        invoice_no: invoiceNo,
+        customer_name: customerName || draft.customer_name,
+        customer_phone: customerPhone || draft.customer_phone,
+        subtotal: partialSubtotal, discount: discountAmt, total: partialTotal,
+        paid_amount: paidAmt, balance_due: balanceDue,
+        payment_status: pStatus, payment_method: primaryMethod,
+        vehicle_no: vehicleNo || draft.vehicle_no,
+        notes: notes || null,
+        created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
+      }).select().single()
+      if (newSaleErr || !newSale) return NextResponse.json({ error: newSaleErr?.message || 'Failed to create invoice' }, { status: 400 })
+
+      // Move confirmed sale_items to new invoice and update their prices
+      for (const fi of confirmedItems) {
+        if (!fi.id) continue
+        await admin.from('sale_items').update({
+          sale_id: newSale.id, unit_price: fi.unitPrice, total: fi.quantity * fi.unitPrice,
+        }).eq('id', fi.id)
+      }
+
+      // Record payments on new invoice
+      for (const pl of (paymentLines || [])) {
+        if (parseFloat(pl.amount) > 0) {
+          await admin.from('payments').insert({
+            sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+            amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
+            bank_ref: pl.bankRef || null, cheque_number: pl.chequeNumber || null, cheque_date: pl.chequeDate || null,
+          })
+        }
+      }
+      if (advanceUsed > 0) {
+        await admin.from('payments').insert({
+          sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+          amount: advanceUsed, payment_method: 'advance', notes: 'Used from advance balance',
+        })
+        await admin.from('customers').update({ advance_balance: Math.max(0, customerAdvance - advanceUsed) }).eq('id', resolvedCustomerId)
+      }
+
+      // Update the original draft: remove confirmed items' prices, zero out totals
+      await admin.from('sales').update({ subtotal: 0, total: 0, paid_amount: 0, balance_due: 0 }).eq('id', saleId)
+
+      return NextResponse.json({
+        success: true, sale: newSale,
+        remainingDraft: { id: saleId, invoice_no: draft.invoice_no, pendingCount: pendingItems.length },
+        message: `Invoice ${invoiceNo} created for ${confirmedItems.length} item(s). ${pendingItems.length} item(s) remain on approval as ${draft.invoice_no}.`,
+      })
+    }
+    // ── FULL PATH (all items priced): existing behaviour below ──
+
     // Update each item with final negotiated price
     for (const fi of (finalItems || [])) {
       if (!fi.id) continue
