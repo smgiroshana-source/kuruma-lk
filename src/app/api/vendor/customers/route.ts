@@ -443,9 +443,13 @@ export async function POST(req: NextRequest) {
       if (remaining <= 0) break
       const bal = parseFloat(sale.balance_due)
       const apply = Math.min(remaining, bal)
+      // Use the actual payment method so this shows correctly in credit collections report.
+      // This is real money received — the customer physically paid cash/bank/cheque.
       await admin.from('payments').insert({
         sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
-        amount: apply, payment_method: 'advance', notes: 'Auto-offset from advance payment',
+        amount: apply, payment_method: paymentMethod || 'cash',
+        cheque_number: chequeNumber || null, cheque_date: chequeDate || null,
+        bank_ref: bankRef || null, notes: advNotes || 'Settlement from advance payment',
       })
       const newPaid = parseFloat(sale.paid_amount) + apply
       const newBal = Math.max(0, bal - apply)
