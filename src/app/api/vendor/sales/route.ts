@@ -641,8 +641,10 @@ export async function POST(req: NextRequest) {
     }).eq('id', saleId)
 
     // 3. Handle refund to customer
-    if (sale.customer_id && totalRefund > 0) {
-      if (refundMethod === 'advance') {
+    // Always record payment entries for reporting — even if customer_id is null.
+    // Advance balance update still requires a linked customer.
+    if (totalRefund > 0) {
+      if (sale.customer_id && refundMethod === 'advance') {
         const { data: customer } = await admin.from('customers').select('advance_balance').eq('id', sale.customer_id).single()
         if (customer) {
           // Only add the portion that was actually paid (not the portion that just cancels outstanding debt)
@@ -651,11 +653,11 @@ export async function POST(req: NextRequest) {
           }).eq('id', sale.customer_id)
         }
       }
-      // Record refund payments for ALL portions
+      // Record refund payments for ALL portions (always, for audit + report visibility)
       // Cash/advance portion (money that needs to move back)
       if (paidReduction > 0) {
         await admin.from('payments').insert({
-          sale_id: saleId, vendor_id: vendor.id,
+          sale_id: saleId, vendor_id: vendor.id, customer_id: sale.customer_id || null,
           amount: -paidReduction,
           payment_method: refundMethod === 'advance' ? 'advance' : 'cash',
           notes: 'RETURN: ' + returnedDetails.join(', ')
@@ -664,7 +666,7 @@ export async function POST(req: NextRequest) {
       // Credit portion (balance that was owed but now cancelled — no money moves)
       if (balanceReduction > 0) {
         await admin.from('payments').insert({
-          sale_id: saleId, vendor_id: vendor.id,
+          sale_id: saleId, vendor_id: vendor.id, customer_id: sale.customer_id || null,
           amount: -balanceReduction,
           payment_method: 'credit_return',
           notes: 'RETURN (credit cancelled): ' + returnedDetails.join(', ')
