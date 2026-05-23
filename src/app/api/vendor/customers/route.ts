@@ -122,35 +122,49 @@ export async function POST(req: NextRequest) {
   if (action === 'get_outstanding') {
     const { customerId } = body
 
-    // Auto-offset: apply any existing advance balance against outstanding before returning
+    // Auto-offset: apply any existing advance balance against outstanding before returning.
+    // Use an atomic conditional update on advance_balance to prevent duplicate offsets
+    // when two requests race (e.g. rapid double-click / concurrent tab opens).
     const { data: custForOffset } = await admin
       .from('customers').select('advance_balance').eq('id', customerId).eq('vendor_id', vendor.id).single()
     const existingAdvance = parseFloat(custForOffset?.advance_balance || 0)
     if (existingAdvance > 0) {
-      const { data: pendingSales } = await admin
-        .from('sales').select('id, invoice_no, paid_amount, balance_due')
-        .eq('vendor_id', vendor.id).eq('customer_id', customerId)
-        .gt('balance_due', 0).neq('payment_status', 'voided')
-        .order('created_at', { ascending: true })
-      let remaining = existingAdvance
-      for (const sale of (pendingSales || [])) {
-        if (remaining <= 0) break
-        const bal = parseFloat(sale.balance_due)
-        const apply = Math.min(remaining, bal)
-        await admin.from('payments').insert({
-          sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
-          amount: apply, payment_method: 'advance', notes: 'Auto-offset from advance balance',
-        })
-        const newPaid = parseFloat(sale.paid_amount) + apply
-        const newBal = Math.max(0, bal - apply)
-        await admin.from('sales').update({
-          paid_amount: newPaid, balance_due: newBal,
-          payment_status: newBal <= 0 ? 'paid' : 'partial',
-        }).eq('id', sale.id)
-        remaining -= apply
-      }
-      if (remaining !== existingAdvance) {
-        await admin.from('customers').update({ advance_balance: Math.max(0, remaining) }).eq('id', customerId)
+      // Atomically claim the advance balance by zeroing it first.
+      // If another concurrent request already zeroed it, this returns 0 rows → skip.
+      const { count } = await admin
+        .from('customers')
+        .update({ advance_balance: 0 })
+        .eq('id', customerId)
+        .eq('advance_balance', existingAdvance)   // only succeeds if value hasn't changed
+        .select('id', { count: 'exact', head: true })
+      if ((count ?? 0) > 0) {
+        // We won the race — now apply the offset
+        const { data: pendingSales } = await admin
+          .from('sales').select('id, invoice_no, paid_amount, balance_due')
+          .eq('vendor_id', vendor.id).eq('customer_id', customerId)
+          .gt('balance_due', 0).neq('payment_status', 'voided')
+          .order('created_at', { ascending: true })
+        let remaining = existingAdvance
+        for (const sale of (pendingSales || [])) {
+          if (remaining <= 0) break
+          const bal = parseFloat(sale.balance_due)
+          const apply = Math.min(remaining, bal)
+          await admin.from('payments').insert({
+            sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
+            amount: apply, payment_method: 'advance', notes: 'Auto-offset from advance balance',
+          })
+          const newPaid = parseFloat(sale.paid_amount) + apply
+          const newBal = Math.max(0, bal - apply)
+          await admin.from('sales').update({
+            paid_amount: newPaid, balance_due: newBal,
+            payment_status: newBal <= 0 ? 'paid' : 'partial',
+          }).eq('id', sale.id)
+          remaining -= apply
+        }
+        // Put any un-applied remainder back
+        if (remaining > 0) {
+          await admin.from('customers').update({ advance_balance: remaining }).eq('id', customerId)
+        }
       }
     }
 

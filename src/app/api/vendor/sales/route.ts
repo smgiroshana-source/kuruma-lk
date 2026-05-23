@@ -837,14 +837,16 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'cleanup_void_drafts') {
-    // One-time cleanup: delete voided On Approval records (total=0) that were created
-    // before the new delete-on-return behaviour was introduced. Safe to re-run.
+    // Cleanup: delete voided On Approval (-OP-) records with total=0 that were created
+    // before the new delete-on-return behaviour. ONLY targets On Approval invoices —
+    // never regular invoices (even if voided+total=0 after a full return).
     const { data: oldVoids } = await admin
       .from('sales')
       .select('id')
       .eq('vendor_id', vendor.id)
       .eq('payment_status', 'voided')
       .eq('total', 0)
+      .ilike('invoice_no', '%-OP-%')
     if (oldVoids && oldVoids.length > 0) {
       const ids = oldVoids.map((s: any) => s.id)
       await admin.from('sale_items').delete().in('sale_id', ids)
