@@ -131,13 +131,13 @@ export async function POST(req: NextRequest) {
     if (existingAdvance > 0) {
       // Atomically claim the advance balance by zeroing it first.
       // If another concurrent request already zeroed it, this returns 0 rows → skip.
-      const { count } = await admin
+      const { data: claimed } = await admin
         .from('customers')
         .update({ advance_balance: 0 })
         .eq('id', customerId)
         .eq('advance_balance', existingAdvance)   // only succeeds if value hasn't changed
-        .select('id', { count: 'exact', head: true })
-      if ((count ?? 0) > 0) {
+        .select('id')
+      if (claimed && claimed.length > 0) {
         // We won the race — now apply the offset
         const { data: pendingSales } = await admin
           .from('sales').select('id, invoice_no, paid_amount, balance_due')
