@@ -116,7 +116,7 @@ export async function GET(req: NextRequest) {
   if (fromDate) query = query.gte('created_at', new Date(fromDate).toISOString())
   if (toDate) { const end = new Date(toDate); end.setDate(end.getDate() + 1); query = query.lt('created_at', end.toISOString()) }
   if (!fromDate && dateFilter) query = query.gte('created_at', dateFilter)
-  const { data: sales } = await query.limit(500)
+  const { data: sales } = await query.limit(5000)
 
   const allSales = sales || []
   const activeSales = allSales.filter((s: any) => s.payment_status !== 'voided' && s.payment_status !== 'draft')
