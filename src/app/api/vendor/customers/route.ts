@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`)
   }
 
-  const { data: customers } = await query.limit(50)
+  const { data: customers } = await query.limit(withCredit ? 1000 : 50)
 
   // If credit info requested, get outstanding balances
   if (withCredit && customers) {
