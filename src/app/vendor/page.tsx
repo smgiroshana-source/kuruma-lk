@@ -220,6 +220,7 @@ function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
 
 export default function VendorDashboard() {
   const cleanupRanRef = useRef(false)
+  const settingsTabLoadedRef = useRef(false)
   const [tab, setTab] = useState<VendorTab>('overview')
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -386,14 +387,18 @@ export default function VendorDashboard() {
   useEffect(() => { if (tab === 'credit') fetchCreditCustomers() }, [tab, showAllCustomers])
   useEffect(() => {
     if (!customerHistoryId) { setCustomerHistory(null); return }
-    fetch(`/api/vendor/sales?customer_id=${customerHistoryId}`).then(r => r.json()).then(j => setCustomerHistory(j.sales || [])).catch(() => setCustomerHistory([]))
+    const controller = new AbortController()
+    fetch(`/api/vendor/sales?customer_id=${customerHistoryId}`, { signal: controller.signal })
+      .then(r => r.json()).then(j => setCustomerHistory(j.sales || []))
+      .catch(e => { if (e.name !== 'AbortError') setCustomerHistory([]) })
+    return () => controller.abort()
   }, [customerHistoryId])
 
   useEffect(() => {
-    if (tab === 'settings') {
-      fetchSettings()
+    // Only load settings tab data once per session — fetchSettings() already runs on mount
+    if (tab === 'settings' && !settingsTabLoadedRef.current) {
+      settingsTabLoadedRef.current = true
       fetchStaff()
-      // Feature 8: Check for pending change requests
       fetch('/api/vendor/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -518,13 +523,17 @@ export default function VendorDashboard() {
     setLoading(true)
     setProductsLoading(true)
     try {
+      // Fire both requests simultaneously — quick shows stats fast, full loads in parallel
+      const quickPromise = fetch('/api/vendor/data?quick=1')
+      const fullPromise = fetch('/api/vendor/data')
+
       // Phase 1: Quick load — vendor info + stats only (fast)
-      const quickR = await fetch('/api/vendor/data?quick=1')
+      const quickR = await quickPromise
       if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
       if (quickR.ok) { const quickData = await quickR.json(); setData(quickData); setLoading(false) }
 
-      // Phase 2: Full load — all products with images (background)
-      const fullR = await fetch('/api/vendor/data')
+      // Phase 2: Full load — already in flight, just await the result
+      const fullR = await fullPromise
       if (fullR.ok) { const fullData = await fullR.json(); setData(fullData) }
     } catch {}
     setLoading(false)

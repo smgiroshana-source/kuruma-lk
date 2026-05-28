@@ -352,28 +352,26 @@ export async function POST(req: NextRequest) {
     const { error: itemsError } = await admin.from('sale_items').insert(saleItems)
     if (itemsError) { await admin.from('sales').delete().eq('id', sale.id); return NextResponse.json({ error: itemsError.message }, { status: 400 }) }
 
-    // Record cash/cheque/bank payment lines
-    if (paymentLines && paymentLines.length > 0) {
-      for (const pl of paymentLines) {
-        if (parseFloat(pl.amount) > 0) {
-          await admin.from('payments').insert({
-            sale_id: sale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
-            amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
-            cheque_number: pl.chequeNumber || null, cheque_date: pl.chequeDate || null,
-            bank_ref: pl.bankRef || null, notes: pl.notes || null,
-          })
-        }
+    // Record all payment lines in one batch insert
+    const paymentRecords: any[] = []
+    for (const pl of (paymentLines || [])) {
+      if (parseFloat(pl.amount) > 0) {
+        paymentRecords.push({
+          sale_id: sale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+          amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
+          cheque_number: pl.chequeNumber || null, cheque_date: pl.chequeDate || null,
+          bank_ref: pl.bankRef || null, notes: pl.notes || null,
+        })
       }
     }
-
-    // Record advance usage
     if (advanceUsedForBill > 0) {
-      await admin.from('payments').insert({
+      paymentRecords.push({
         sale_id: sale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
         amount: advanceUsedForBill, payment_method: 'advance',
         notes: 'Used from advance balance',
       })
     }
+    if (paymentRecords.length > 0) await admin.from('payments').insert(paymentRecords)
 
     // Step 5: If there's excess payment AND outstanding invoices, apply to oldest first
     let excessAppliedToOutstanding = 0
@@ -429,12 +427,21 @@ export async function POST(req: NextRequest) {
       if (resolvedCustomerId) await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
     }
 
-    // Step 6: Auto-deduct stock (vendor_id guard prevents cross-vendor tampering)
-    for (const item of items) {
-      if (item.productId) {
-        const { data: product } = await admin.from('products').select('quantity').eq('id', item.productId).eq('vendor_id', vendor.id).single()
-        if (product) { await admin.from('products').update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq('id', item.productId).eq('vendor_id', vendor.id) }
-      }
+    // Step 6: Auto-deduct stock — fetch all product quantities in parallel, then update in parallel
+    const stockItems = items.filter((item: any) => item.productId)
+    if (stockItems.length > 0) {
+      const productResults = await Promise.all(
+        stockItems.map((item: any) =>
+          admin.from('products').select('quantity').eq('id', item.productId).eq('vendor_id', vendor.id).single()
+        )
+      )
+      await Promise.all(
+        stockItems.map((item: any, idx: number) => {
+          const product = productResults[idx].data
+          if (!product) return Promise.resolve()
+          return admin.from('products').update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq('id', item.productId).eq('vendor_id', vendor.id)
+        })
+      )
     }
 
     // Fetch complete sale
