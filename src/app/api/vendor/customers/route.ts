@@ -144,23 +144,20 @@ export async function POST(req: NextRequest) {
           .eq('vendor_id', vendor.id).eq('customer_id', customerId)
           .gt('balance_due', 0).neq('payment_status', 'voided')
           .order('created_at', { ascending: true })
+        // Compute all apply amounts upfront, then batch insert payments + parallel update sales
         let remaining = existingAdvance
+        const paymentInserts: any[] = []
+        const saleUpdates: any[] = []
         for (const sale of (pendingSales || [])) {
           if (remaining <= 0) break
           const bal = parseFloat(sale.balance_due)
           const apply = Math.min(remaining, bal)
-          await admin.from('payments').insert({
-            sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
-            amount: apply, payment_method: 'advance', notes: 'Auto-offset from advance balance',
-          })
-          const newPaid = parseFloat(sale.paid_amount) + apply
-          const newBal = Math.max(0, bal - apply)
-          await admin.from('sales').update({
-            paid_amount: newPaid, balance_due: newBal,
-            payment_status: newBal <= 0 ? 'paid' : 'partial',
-          }).eq('id', sale.id)
+          paymentInserts.push({ sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId, amount: apply, payment_method: 'advance', notes: 'Auto-offset from advance balance' })
+          saleUpdates.push({ id: sale.id, paid_amount: parseFloat(sale.paid_amount) + apply, balance_due: Math.max(0, bal - apply), payment_status: Math.max(0, bal - apply) <= 0 ? 'paid' : 'partial' })
           remaining -= apply
         }
+        if (paymentInserts.length > 0) await admin.from('payments').insert(paymentInserts)
+        await Promise.all(saleUpdates.map((u: any) => admin.from('sales').update({ paid_amount: u.paid_amount, balance_due: u.balance_due, payment_status: u.payment_status }).eq('id', u.id)))
         // Put any un-applied remainder back
         if (remaining > 0) {
           await admin.from('customers').update({ advance_balance: remaining }).eq('id', customerId)
@@ -183,7 +180,7 @@ export async function POST(req: NextRequest) {
   // Auto-offset: apply advance against outstanding invoices (oldest first)
   if (action === 'auto_offset') {
     const { customerId } = body
-    const { data: cust } = await admin.from('customers').select('*').eq('id', customerId).eq('vendor_id', vendor.id).single()
+    const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', customerId).eq('vendor_id', vendor.id).single()
     if (!cust) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
 
     let advance = parseFloat(cust.advance_balance || 0)
@@ -202,34 +199,29 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No outstanding invoices to offset against' }, { status: 400 })
     }
 
+    // Compute all apply amounts upfront, then batch insert payments + parallel update sales
     let totalApplied = 0
     const settledInvoices: string[] = []
     const partialInvoices: string[] = []
+    const paymentInserts: any[] = []
+    const saleUpdates: any[] = []
 
     for (const sale of outstandingSales) {
       if (advance <= 0) break
       const balance = parseFloat(sale.balance_due)
       const applyAmount = Math.min(advance, balance)
-
-      await admin.from('payments').insert({
-        sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId,
-        amount: applyAmount, payment_method: 'advance',
-        notes: 'Auto-offset from advance balance',
-      })
-
       const newPaid = parseFloat(sale.paid_amount) + applyAmount
       const newBalance = Math.max(0, balance - applyAmount)
-      await admin.from('sales').update({
-        paid_amount: newPaid, balance_due: newBalance,
-        payment_status: newBalance <= 0 ? 'paid' : 'partial',
-      }).eq('id', sale.id)
-
+      paymentInserts.push({ sale_id: sale.id, vendor_id: vendor.id, customer_id: customerId, amount: applyAmount, payment_method: 'advance', notes: 'Auto-offset from advance balance' })
+      saleUpdates.push({ id: sale.id, paid_amount: newPaid, balance_due: newBalance, payment_status: newBalance <= 0 ? 'paid' : 'partial' })
       totalApplied += applyAmount
       advance -= applyAmount
       if (newBalance <= 0) settledInvoices.push(sale.invoice_no)
       else partialInvoices.push(sale.invoice_no)
     }
 
+    if (paymentInserts.length > 0) await admin.from('payments').insert(paymentInserts)
+    await Promise.all(saleUpdates.map((u: any) => admin.from('sales').update({ paid_amount: u.paid_amount, balance_due: u.balance_due, payment_status: u.payment_status }).eq('id', u.id)))
     await admin.from('customers').update({ advance_balance: Math.max(0, advance) }).eq('id', customerId)
 
     let msg = `Rs.${totalApplied.toLocaleString()} offset from advance.`
