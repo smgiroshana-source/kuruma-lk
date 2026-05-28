@@ -38,23 +38,31 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const vendorLocation = (product.vendor as any)?.location || ''
     const priceText = product.show_price && product.price ? `Rs.${Number(product.price).toLocaleString()}` : ''
 
-    const title = `${product.name}${vehicle ? ' — ' + vehicle : ''}${priceText ? ' — ' + priceText : ''}`
+    const conditionLabel = product.condition ? ` (${product.condition})` : ''
+    const title = `${product.name}${conditionLabel} Sri Lanka`
     const description = [
-      product.name,
-      vehicle ? `for ${vehicle}` : '',
-      product.condition ? `Condition: ${product.condition}` : '',
-      priceText || 'Ask for price',
-      vendorName ? `Available at ${vendorName}, ${vendorLocation}` : '',
-      'Buy on kuruma.lk — Sri Lanka\'s auto parts marketplace.',
-    ].filter(Boolean).join('. ')
+      `${product.condition ? product.condition + ' ' : ''}${product.name}${vehicle ? ' for ' + vehicle : ''} available in Sri Lanka.`,
+      priceText ? `Price: ${priceText}.` : 'Contact for price.',
+      vendorName ? `Sold by ${vendorName}${vendorLocation ? ', ' + vendorLocation : ''}.` : '',
+      'Buy auto parts online at kuruma.lk — Sri Lanka\'s trusted vehicle parts marketplace.',
+    ].filter(Boolean).join(' ')
 
     return {
       title,
       description,
       keywords: [
-        product.name, product.category, product.make, product.model,
-        `${product.make} ${product.model} parts`, 'auto parts Sri Lanka',
-        product.sku, vendorName,
+        product.name,
+        vehicle ? `${vehicle} ${product.name}` : '',
+        vehicle ? `${vehicle} parts` : '',
+        vehicle ? `${vehicle} spare parts Sri Lanka` : '',
+        product.category,
+        product.make ? `${product.make} parts Sri Lanka` : '',
+        product.condition || '',
+        `${product.name} Sri Lanka`,
+        `buy ${product.name} Sri Lanka`,
+        'auto parts Sri Lanka',
+        product.sku,
+        vendorName,
       ].filter(Boolean),
       openGraph: {
         title: `${product.name} | kuruma.lk`,
@@ -98,10 +106,10 @@ async function getProductJsonLd(id: string) {
     const vendorName = (product.vendor as any)?.name || 'kuruma.lk'
 
     const conditionMap: Record<string, string> = {
-      'Excellent': 'https://schema.org/NewCondition',
-      'Good': 'https://schema.org/UsedCondition',
-      'Fair': 'https://schema.org/UsedCondition',
-      'Salvage': 'https://schema.org/DamagedCondition',
+      'New-Genuine': 'https://schema.org/NewCondition',
+      'New-Other': 'https://schema.org/NewCondition',
+      'Reconditioned': 'https://schema.org/RefurbishedCondition',
+      'Damaged': 'https://schema.org/DamagedCondition',
     }
 
     return {
