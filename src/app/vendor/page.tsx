@@ -219,6 +219,7 @@ function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
 }
 
 export default function VendorDashboard() {
+  const cleanupRanRef = useRef(false)
   const [tab, setTab] = useState<VendorTab>('overview')
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -549,8 +550,11 @@ export default function VendorDashboard() {
       const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`)
       if (r.ok) setSalesData(await r.json())
       fetchAllDrafts()
-      // Fire-and-forget background tasks
-      fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
+      // Run cleanup once per session only (not on every fetchSales call — reduces DB write IO)
+      if (!cleanupRanRef.current) {
+        cleanupRanRef.current = true
+        fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cleanup_void_drafts' }) }).catch(() => {})
+      }
     } catch {}
     setSalesLoading(false)
   }
