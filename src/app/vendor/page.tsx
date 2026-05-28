@@ -1,7 +1,7 @@
 'use client'
 import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constants'
 
-import { useState, useEffect, useRef, startTransition } from 'react'
+import { useState, useEffect, useRef, startTransition, useMemo } from 'react'
 
 type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
@@ -997,14 +997,17 @@ export default function VendorDashboard() {
   function updatePaymentLine(i: number, field: string, value: string) { setPosPayments(p => p.map((line, x) => x === i ? { ...line, [field]: value } : line)) }
   function removePaymentLine(i: number) { setPosPayments(p => p.filter((_, x) => x !== i)) }
 
-  const posSubtotal = posCart.reduce((s, i) => s + i.quantity * i.unitPrice, 0)
-  const posDiscountAmt = parseFloat(posDiscount) || 0
-  const posTotal = Math.max(0, posSubtotal - posDiscountAmt)
-  const posPaidAmount = posPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
-  const posAdvanceApplied = useAdvance && posCustomer.advance > 0 ? Math.min(posCustomer.advance, Math.max(0, posTotal - posPaidAmount)) : 0
-  const posTotalPaid = posPaidAmount + posAdvanceApplied
-  const posBalance = Math.max(0, posTotal - posTotalPaid)
-  const posOverpayment = Math.max(0, posTotalPaid - posTotal)
+  const { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment } = useMemo(() => {
+    const posSubtotal = posCart.reduce((s, i) => s + i.quantity * i.unitPrice, 0)
+    const posDiscountAmt = parseFloat(posDiscount) || 0
+    const posTotal = Math.max(0, posSubtotal - posDiscountAmt)
+    const posPaidAmount = posPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
+    const posAdvanceApplied = useAdvance && posCustomer.advance > 0 ? Math.min(posCustomer.advance, Math.max(0, posTotal - posPaidAmount)) : 0
+    const posTotalPaid = posPaidAmount + posAdvanceApplied
+    const posBalance = Math.max(0, posTotal - posTotalPaid)
+    const posOverpayment = Math.max(0, posTotalPaid - posTotal)
+    return { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment }
+  }, [posCart, posDiscount, posPayments, useAdvance, posCustomer])
 
   function handleCreateSale() {
     if (posCart.length === 0) { showToast('Add items to cart'); return }
@@ -1837,22 +1840,32 @@ ${customerRows.map(c => `<tr>
     setExportLoading(false)
   }
 
+  const filteredProducts = useMemo(() => {
+    const prods: any[] = (data?.products) || []
+    const s = productSearch.toLowerCase()
+    return prods.filter((p: any) => {
+      const matchesSearch = !productSearch || p.name.toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s) || (p.make || '').toLowerCase().includes(s)
+      if (!matchesSearch) return false
+      // If sold out (qty 0): show if showSoldOut is on, OR if searching by SKU and it matches
+      if (p.quantity <= 0) {
+        if (showSoldOut) return true
+        if (productSearch && (p.sku || '').toLowerCase().includes(s)) return true
+        return false
+      }
+      return true
+    })
+  }, [data, productSearch, showSoldOut])
+
+  const posFilteredProducts = useMemo(() => {
+    const prods: any[] = (data?.products) || []
+    if (!posSearch || posSearch.length < 2) return []
+    const s = posSearch.toLowerCase()
+    return prods.filter((p: any) => (p.name.toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s) || (p.make || '').toLowerCase().includes(s)) && p.quantity > 0)
+  }, [data, posSearch])
+
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>
   if (!data) return null
   const { vendor, products, stats } = data
-  const filteredProducts = products.filter((p: any) => {
-    const s = productSearch.toLowerCase()
-    const matchesSearch = !productSearch || p.name.toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s) || (p.make || '').toLowerCase().includes(s)
-    if (!matchesSearch) return false
-    // If sold out (qty 0): show if showSoldOut is on, OR if searching by SKU and it matches
-    if (p.quantity <= 0) {
-      if (showSoldOut) return true
-      if (productSearch && (p.sku || '').toLowerCase().includes(s)) return true
-      return false
-    }
-    return true
-  })
-  const posFilteredProducts = products.filter((p: any) => { if (!posSearch || posSearch.length < 2) return false; const s = posSearch.toLowerCase(); return (p.name.toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s) || (p.make || '').toLowerCase().includes(s)) && p.quantity > 0 })
 
   // Payment lines are rendered inline to avoid focus loss
 
