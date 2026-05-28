@@ -176,7 +176,7 @@ export default function ProductDetailPage() {
                     className="flex overflow-x-auto snap-x snap-mandatory" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
                     {images.map((img: any, i: number) => (
                       <div key={img.id} className="w-full flex-shrink-0 snap-center aspect-square bg-white" onClick={() => setLightbox(true)}>
-                        <img src={medium(img.url)} alt={product.name} loading={i === 0 ? 'eager' : 'lazy'} onError={imgFallback} className="w-full h-full object-contain" />
+                        <img src={medium(img.url)} alt={product.name} width={600} height={600} loading={i === 0 ? 'eager' : 'lazy'} onError={imgFallback} className="w-full h-full object-contain" />
                       </div>
                     ))}
                   </div>
@@ -205,7 +205,7 @@ export default function ProductDetailPage() {
                       {images.map((img: any, i: number) => (
                         <button key={img.id} onClick={() => setActiveImage(i)}
                           className={`w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition ${i === activeImage ? 'border-orange-500 shadow-md' : 'border-slate-200 hover:border-slate-400'}`}>
-                          <img src={thumb64(img.url)} alt="" onError={imgFallback} className="w-full h-full object-cover" />
+                          <img src={thumb64(img.url)} alt="" width={64} height={64} onError={imgFallback} className="w-full h-full object-cover" />
                         </button>
                       ))}
                     </div>

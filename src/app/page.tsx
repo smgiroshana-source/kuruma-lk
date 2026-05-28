@@ -9,11 +9,11 @@ async function getStoreData() {
   const [productsRes, vendorsRes, synonymsRes] = await Promise.all([
     admin
       .from('products')
-      .select('id, name, sku, category, make, model, year, model_code, condition, price, show_price, quantity, vendor_id, created_at, side, color, oem_code, vendor:vendors(id, name, slug, location, phone, whatsapp), images:product_images(id, url, sort_order)')
+      .select('id, name, sku, category, make, model, condition, price, show_price, quantity, vendor_id, created_at, vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order)')
       .eq('is_active', true)
       .gt('quantity', 0)
       .order('created_at', { ascending: false })
-      .limit(10000),
+      .limit(2000),
     admin
       .from('vendors')
       .select('*')
