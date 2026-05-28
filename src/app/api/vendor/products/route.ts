@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { generateProductSlug } from '@/lib/slug'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -41,6 +42,15 @@ export async function POST(req: NextRequest) {
   if (action === 'create') {
     const { data: pd } = body
     const sku = pd.sku?.trim() || generateSKU()
+
+    // Generate slug — try clean first, fall back to slug+sku if already taken
+    const baseSlug = generateProductSlug(pd.name, pd.make, pd.model, pd.condition || 'Reconditioned')
+    let slug = baseSlug
+    const { data: slugTaken } = await admin.from('products').select('id').eq('slug', slug).maybeSingle()
+    if (slugTaken) {
+      slug = `${baseSlug}-${sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`
+    }
+
     const { data: product, error } = await admin.from('products').insert({
       vendor_id: vendor.id, sku, name: pd.name, description: pd.description || '',
       category: pd.category || 'Other', make: pd.make || null, model: pd.model || null,
@@ -48,7 +58,7 @@ export async function POST(req: NextRequest) {
       side: pd.side || null, color: pd.color || null, oem_code: pd.oem_code || null,
       price: pd.price ? parseInt(pd.price) : null, cost: pd.cost ? parseInt(pd.cost) : null,
       show_price: pd.show_price !== false, quantity: parseInt(pd.quantity) || 1,
-      added_date: pd.added_date || null, is_active: true,
+      added_date: pd.added_date || null, is_active: true, slug,
       loc_store: pd.loc_store || null, loc_floor: pd.loc_floor || null,
       loc_sub1: pd.loc_sub1 || null, loc_sub2: pd.loc_sub2 || null,
     }).select().single()
@@ -151,11 +161,12 @@ export async function POST(req: NextRequest) {
   // ─── UPDATE PRODUCT ───
   if (action === 'update') {
     const { productId, data: updateData } = body
-    const { data: existing } = await admin.from('products').select('vendor_id').eq('id', productId).single()
+    const { data: existing } = await admin.from('products').select('vendor_id, slug').eq('id', productId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     const { error } = await admin.from('products').update(updateData).eq('id', productId)
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
-    // Revalidate only this product's public page — no timer needed
+    // Revalidate both slug URL and legacy UUID URL
+    if (existing.slug) revalidatePath(`/product/${existing.slug}`)
     revalidatePath(`/product/${productId}`)
     return NextResponse.json({ success: true, message: 'Product updated' })
   }
@@ -163,9 +174,10 @@ export async function POST(req: NextRequest) {
   // ─── TOGGLE ACTIVE/HIDDEN ───
   if (action === 'toggle') {
     const { productId } = body
-    const { data: existing } = await admin.from('products').select('vendor_id, is_active').eq('id', productId).single()
+    const { data: existing } = await admin.from('products').select('vendor_id, is_active, slug').eq('id', productId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     await admin.from('products').update({ is_active: !existing.is_active }).eq('id', productId)
+    if (existing.slug) revalidatePath(`/product/${existing.slug}`)
     revalidatePath(`/product/${productId}`)
     revalidatePath('/')
     return NextResponse.json({ success: true, message: existing.is_active ? 'Product hidden' : 'Product visible' })

@@ -10,7 +10,7 @@ export async function GET() {
   const [productsRes, vendorsRes, synonymsRes] = await Promise.all([
     admin
       .from('products')
-      .select('id, name, sku, category, make, model, condition, price, show_price, quantity, vendor_id, created_at, vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order)')
+      .select('id, name, sku, category, make, model, condition, price, show_price, quantity, vendor_id, created_at, slug, vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order)')
       .eq('is_active', true)
       .gt('quantity', 0)
       .order('created_at', { ascending: false })

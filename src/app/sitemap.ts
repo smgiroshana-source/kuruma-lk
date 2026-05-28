@@ -28,17 +28,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
   ]
 
-  // All active products
+  // All active products — use slug URL when available (better for SEO)
   const { data: products } = await admin
     .from('products')
-    .select('id, updated_at, created_at')
+    .select('id, slug, updated_at, created_at')
     .eq('is_active', true)
     .gt('quantity', 0)
     .order('created_at', { ascending: false })
     .limit(5000)
 
   const productPages: MetadataRoute.Sitemap = (products || []).map((p) => ({
-    url: `${SITE_URL}/product/${p.id}`,
+    url: `${SITE_URL}/product/${p.slug || p.id}`,
     lastModified: new Date(p.updated_at || p.created_at),
     changeFrequency: 'weekly' as const,
     priority: 0.8,
