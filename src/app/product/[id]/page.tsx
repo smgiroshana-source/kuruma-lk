@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { redirect } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isUUID } from '@/lib/slug'
 import ProductDetailClient from './ProductDetail'
@@ -157,20 +157,27 @@ async function getProductJsonLd(idOrSlug: string) {
 export default async function ProductPage({ params }: Props) {
   const { id } = await params
 
-  // If the URL contains a raw UUID, redirect permanently to the slug URL.
-  // This handles all old links (from Google, WhatsApp shares, etc.) without breaking them.
+  const admin = createAdminClient()
+
   if (isUUID(id)) {
-    const admin = createAdminClient()
+    // UUID-based URL — look up the product and redirect to its slug.
     const { data } = await admin
       .from('products')
       .select('slug')
       .eq('id', id)
       .eq('is_active', true)
       .single()
-    if (data?.slug) {
-      redirect(`/product/${data.slug}`)
-    }
-    // No slug yet — render normally with UUID (product pages created before backfill)
+    if (!data) notFound()           // Product deleted or hidden → proper 404 (not soft 404)
+    if (data!.slug) redirect(`/product/${data!.slug}`)
+    // No slug yet — fall through and render with UUID
+  } else {
+    // Slug-based URL — verify the product actually exists.
+    const { data } = await (admin.from('products') as any)
+      .select('id')
+      .eq('slug', id)
+      .eq('is_active', true)
+      .single()
+    if (!data) notFound()           // Unknown slug → proper 404
   }
 
   const jsonLd = await getProductJsonLd(id)
