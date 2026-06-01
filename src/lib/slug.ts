@@ -1,8 +1,12 @@
 /**
  * URL slug utilities for product pages.
  *
- * Slug format: {make}-{model}-{name}-{condition}
- * Example: "toyota-aqua-front-bumper-reconditioned"
+ * Slug format: {name}-{condition}
+ * Example: "aqua-front-bumper-reconditioned"
+ *
+ * We do NOT prepend make/model because vendors already include vehicle info
+ * in the product name (e.g. "Honda Fit GP5 Axel LHS"). Prepending make+model
+ * would double it: "honda-fit-honda-fit-gp5-axel-lhs-reconditioned".
  *
  * Slugs are generated once at product creation and never changed —
  * changing a slug breaks existing Google-indexed URLs.
@@ -10,11 +14,11 @@
 
 export function generateProductSlug(
   name: string,
-  make?: string | null,
-  model?: string | null,
+  _make?: string | null,
+  _model?: string | null,
   condition?: string | null,
 ): string {
-  const parts = [make, model, name, condition].filter(Boolean) as string[]
+  const parts = [name, condition].filter(Boolean) as string[]
   const slug = parts
     .join(' ')
     .toLowerCase()
