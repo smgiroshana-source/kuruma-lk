@@ -44,5 +44,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.8,
   }))
 
-  return [...staticPages, ...productPages]
+  // Make hub pages — /toyota, /honda, /nissan, etc.
+  const { data: makeRows } = await (admin.from('products') as any)
+    .select('make')
+    .eq('is_active', true)
+    .gt('quantity', 0)
+
+  const uniqueMakes: string[] = [
+    ...new Set(
+      (makeRows || [])
+        .map((p: any) => p.make as string | null)
+        .filter(Boolean) as string[],
+    ),
+  ]
+
+  const makePages: MetadataRoute.Sitemap = uniqueMakes.map((make) => ({
+    url: `${SITE_URL}/${make.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}`,
+    lastModified: new Date(),
+    changeFrequency: 'daily' as const,
+    priority: 0.9, // Higher than product pages — these rank for broad "Toyota parts Sri Lanka" queries
+  }))
+
+  return [...staticPages, ...makePages, ...productPages]
 }
