@@ -868,7 +868,39 @@ export async function POST(req: NextRequest) {
     if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
     if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
 
-    const resolvedCustomerId = bodyCustomerId || draft.customer_id || null
+    let resolvedCustomerId = bodyCustomerId || draft.customer_id || null
+
+    // Auto-create customer if cashier typed a brand-new name+phone at finalise
+    // (mirrors create_sale / create_draft so finalize_draft doesn't produce orphan sales)
+    if (!resolvedCustomerId && customerName?.trim()) {
+      if (customerPhone?.trim()) {
+        const { data: existing } = await admin.from('customers').select('id')
+          .eq('vendor_id', vendor.id).eq('phone', customerPhone.trim()).maybeSingle()
+        if (existing) resolvedCustomerId = existing.id
+      }
+      if (!resolvedCustomerId) {
+        const { data: newCust } = await admin.from('customers').insert({
+          vendor_id: vendor.id, name: customerName.trim(),
+          phone: customerPhone?.trim() || null, whatsapp: customerPhone?.trim() || null,
+        }).select().single()
+        if (newCust) resolvedCustomerId = newCust.id
+      }
+    }
+
+    // Pull canonical name/phone from the linked customer so the finalised invoice
+    // shows the registered customer's full details — not "Walk-in" or a typo
+    let canonicalCustomerName: string | null = null
+    let canonicalCustomerPhone: string | null = null
+    if (resolvedCustomerId) {
+      const { data: linkedCust } = await admin.from('customers')
+        .select('name, phone').eq('id', resolvedCustomerId).maybeSingle()
+      if (linkedCust) {
+        canonicalCustomerName = linkedCust.name
+        canonicalCustomerPhone = linkedCust.phone
+      }
+    }
+    const finalCustomerName  = canonicalCustomerName  || customerName || draft.customer_name
+    const finalCustomerPhone = canonicalCustomerPhone || customerPhone || draft.customer_phone
 
     // ── Partial finalization: peel confirmed items into a new invoice, leave draft intact ──
     const confirmedItems = (finalItems || []).filter((fi: any) => parseFloat(fi.unitPrice || 0) > 0)
@@ -902,8 +934,8 @@ export async function POST(req: NextRequest) {
       const { data: newSale, error: newSaleErr } = await admin.from('sales').insert({
         vendor_id: vendor.id, customer_id: resolvedCustomerId,
         invoice_no: invoiceNo,
-        customer_name: customerName || draft.customer_name,
-        customer_phone: customerPhone || draft.customer_phone,
+        customer_name: finalCustomerName,
+        customer_phone: finalCustomerPhone,
         subtotal: partialSubtotal, discount: discountAmt, total: partialTotal,
         paid_amount: paidAmt, balance_due: balanceDue,
         payment_status: pStatus, payment_method: primaryMethod,
@@ -993,6 +1025,7 @@ export async function POST(req: NextRequest) {
     // Stamp the finalization date (not draft creation date) so it lands in today's reports
     await admin.from('sales').update({
       invoice_no: invoiceNo,
+      customer_id: resolvedCustomerId,
       subtotal, discount: discountAmt, total,
       paid_amount: paidForThisBill, balance_due: billBalance,
       payment_status: paymentStatus,
@@ -1000,8 +1033,8 @@ export async function POST(req: NextRequest) {
       vehicle_no: vehicleNo || draft.vehicle_no,
       notes: notes || draft.notes?.replace('ON APPROVAL\n', '').replace('ON APPROVAL', '').trim() || null,
       created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
-      customer_name: customerName || draft.customer_name,
-      customer_phone: customerPhone || draft.customer_phone,
+      customer_name: finalCustomerName,
+      customer_phone: finalCustomerPhone,
     }).eq('id', saleId)
 
     // Record cash/cheque/bank payment lines
