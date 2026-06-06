@@ -94,6 +94,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, message: 'Vendor updated' })
     }
 
+    case 'update_settings': {
+      const { settings } = body
+      const { error } = await admin
+        .from('vendor_settings')
+        .upsert({
+          vendor_id: vendorId,
+          invoice_mode: settings.invoice_mode || null,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'vendor_id' })
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      return NextResponse.json({ success: true, message: 'Vendor settings updated' })
+    }
+
     default:
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
   }

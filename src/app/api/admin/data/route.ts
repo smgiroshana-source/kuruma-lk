@@ -45,6 +45,11 @@ export async function GET() {
     from += PAGE_SIZE
   }
 
+  // Fetch vendor settings (for feature flags)
+  const { data: vendorSettings } = await admin
+    .from('vendor_settings')
+    .select('vendor_id, invoice_mode, tax_id')
+
   // Fetch recent sales (last 1000)
   const { data: sales } = await admin
     .from('sales')
@@ -70,5 +75,6 @@ export async function GET() {
     vendors: vendors || [],
     products: products || [],
     sales: sales || [],
+    vendorSettings: vendorSettings || [],
   })
 }

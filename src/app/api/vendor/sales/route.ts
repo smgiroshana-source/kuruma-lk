@@ -62,6 +62,91 @@ async function generateDraftNo(vendorId: string, vendorName: string) {
   return `${prefix}-OP-${String(maxNum + 1).padStart(4, '0')}`
 }
 
+// ── lk_tax helpers ────────────────────────────────────────────────────────────
+
+/** Returns the vendor_settings.invoice_mode for this vendor. */
+async function getInvoiceMode(vendorId: string): Promise<string> {
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('vendor_settings')
+    .select('invoice_mode')
+    .eq('vendor_id', vendorId)
+    .single()
+  return data?.invoice_mode || 'simple'
+}
+
+/** Fetches a single invoice entity row. */
+async function getInvoiceEntity(entityId: string) {
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('invoice_entities')
+    .select('id, name, address, tin, vat_registered, invoice_mode, serial_qqqq, receipt_prefix')
+    .eq('id', entityId)
+    .single()
+  return data
+}
+
+/** Fetches VAT rate from tax_config (default 18 if not found). */
+async function getVatRate(vendorId: string): Promise<number> {
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('tax_config')
+    .select('value')
+    .eq('vendor_id', vendorId)
+    .eq('key', 'vat_rate')
+    .single()
+  return data ? parseFloat(data.value) : 18
+}
+
+/**
+ * Atomically reserves the next serial number via the Postgres RPC and
+ * formats it as either a gazette serial (YYMMM_QQQQ_XXXXX) or a receipt
+ * number (PREFIX-XXXXX).
+ *
+ * @param entityId  invoice_entities.id
+ * @param entity    the entity row (needs receipt_prefix, serial_qqqq)
+ * @param docType   'receipt' | 'tax_invoice'
+ * @param supplyDate  used to derive YYMMM period for gazette serials
+ */
+async function reserveSerial(
+  entityId: string,
+  entity: { receipt_prefix: string; serial_qqqq: string },
+  docType: 'receipt' | 'tax_invoice',
+  supplyDate: Date
+): Promise<{ invoiceNo: string; receiptNo: string | null; taxSerial: string | null }> {
+  const admin = createAdminClient()
+
+  let period: string
+  let format: (n: number) => string
+
+  if (docType === 'tax_invoice') {
+    const yy = supplyDate.getFullYear().toString().slice(-2)
+    const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+    const mmm = MONTHS[supplyDate.getMonth()]
+    period = `${yy}${mmm}` // e.g. '26JUN'
+    format = (n: number) => `${period}_${entity.serial_qqqq}_${String(n).padStart(5, '0')}`
+  } else {
+    period = 'receipt'
+    format = (n: number) => `${entity.receipt_prefix}-${String(n).padStart(5, '0')}`
+  }
+
+  const { data: nextNum, error } = await admin.rpc('next_invoice_serial', {
+    p_entity_id: entityId,
+    p_period: period,
+  })
+
+  if (error || nextNum == null) {
+    throw new Error('Serial generation failed: ' + (error?.message ?? 'null result'))
+  }
+
+  const serialNo = format(nextNum as number)
+  return {
+    invoiceNo: serialNo,
+    receiptNo: docType === 'receipt' ? serialNo : null,
+    taxSerial: docType === 'tax_invoice' ? serialNo : null,
+  }
+}
+
 export async function GET(req: NextRequest) {
   const vendor = await getVendor()
   if (!vendor) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
@@ -271,7 +356,14 @@ export async function POST(req: NextRequest) {
   const { action } = body
 
   if (action === 'create_sale') {
-    const { customerId, customerName, customerPhone, items, discount, payments: paymentLines, notes, useAdvance, applyToOutstanding, saleDate, vehicleNo } = body
+    const {
+      customerId, customerName, customerPhone, items,
+      discount, payments: paymentLines, notes, useAdvance, applyToOutstanding,
+      saleDate, vehicleNo,
+      // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
+      invoiceEntityId, documentType,
+      customerAddress, customerTin, customerVatRegistered,
+    } = body
 
     if (!items || items.length === 0) return NextResponse.json({ error: 'No items in sale' }, { status: 400 })
 
@@ -292,10 +384,53 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
-
     const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0)
     const total = Math.max(0, subtotal - (discount || 0))
+
+    // ── lk_tax: atomic serial + VAT calculation ────────────────
+    const invoiceMode = await getInvoiceMode(vendor.id)
+    const isLkTax = invoiceMode === 'lk_tax' && !!invoiceEntityId
+
+    let invoiceNo: string
+    let receiptNo: string | null = null
+    let taxSerial: string | null = null
+    let netAmount: number | null = null
+    let vatAmount: number | null = null
+    let resolvedDocType: 'receipt' | 'tax_invoice' = 'receipt'
+    let resolvedEntityId: string | null = null
+
+    if (isLkTax) {
+      const entity = await getInvoiceEntity(invoiceEntityId)
+      if (!entity) return NextResponse.json({ error: 'Invoice entity not found' }, { status: 400 })
+
+      resolvedDocType = (documentType === 'tax_invoice' && entity.invoice_mode === 'lk_tax')
+        ? 'tax_invoice' : 'receipt'
+      resolvedEntityId = invoiceEntityId
+
+      const supplyDate = saleDate ? new Date(saleDate) : new Date()
+      const serial = await reserveSerial(invoiceEntityId, entity, resolvedDocType, supplyDate)
+      invoiceNo = serial.invoiceNo
+      receiptNo = serial.receiptNo
+      taxSerial = serial.taxSerial
+
+      // VAT is extracted from VAT-inclusive prices (prices are what customer pays)
+      const vatRate = await getVatRate(vendor.id)
+      vatAmount = Math.round(total * vatRate / (100 + vatRate))
+      netAmount = total - vatAmount
+
+      // Snapshot / update customer address + TIN for tax invoices
+      if (resolvedDocType === 'tax_invoice' && resolvedCustomerId) {
+        const custPatch: any = {}
+        if (customerAddress?.trim()) custPatch.address = customerAddress.trim()
+        if (customerVatRegistered !== undefined) custPatch.vat_registered = customerVatRegistered
+        if (customerTin?.trim() && customerVatRegistered) custPatch.tin = customerTin.trim()
+        if (Object.keys(custPatch).length > 0) {
+          await admin.from('customers').update(custPatch).eq('id', resolvedCustomerId)
+        }
+      }
+    } else {
+      invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+    }
 
     // Step 1: How much cash/cheque/bank was paid
     const cashPaid = (paymentLines || []).reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0)
@@ -338,6 +473,24 @@ export async function POST(req: NextRequest) {
     }
     if (saleDate) saleRecord.created_at = new Date(saleDate).toISOString()
 
+    // lk_tax extra fields
+    if (isLkTax) {
+      saleRecord.invoice_entity_id = resolvedEntityId
+      saleRecord.document_type     = resolvedDocType
+      saleRecord.receipt_no        = receiptNo
+      saleRecord.tax_serial        = taxSerial
+      saleRecord.net_amount        = netAmount
+      saleRecord.vat_amount        = vatAmount
+      saleRecord.date_supply       = saleDate
+        ? new Date(saleDate).toISOString().split('T')[0]
+        : new Date().toISOString().split('T')[0]
+      // Snapshot purchaser details (columns added in Phase 2 migration)
+      if (resolvedDocType === 'tax_invoice') {
+        saleRecord.customer_address = customerAddress?.trim() || null
+        saleRecord.customer_tin     = (customerVatRegistered && customerTin?.trim()) ? customerTin.trim() : null
+      }
+    }
+
     const { data: sale, error: saleError } = await admin.from('sales').insert(saleRecord).select().single()
 
     if (saleError) return NextResponse.json({ error: saleError.message }, { status: 400 })
@@ -348,6 +501,8 @@ export async function POST(req: NextRequest) {
       product_sku: item.productSku || null, quantity: item.quantity,
       unit_price: item.unitPrice, unit_cost: item.unitCost || null,
       total: item.quantity * item.unitPrice,
+      // sscl_stream: inventory items = PART (50% base), manual service lines = SVC (100% base)
+      sscl_stream: item.ssclStream || (item.productId ? 'PART' : 'SVC'),
     }))
     const { error: itemsError } = await admin.from('sale_items').insert(saleItems)
     if (itemsError) { await admin.from('sales').delete().eq('id', sale.id); return NextResponse.json({ error: itemsError.message }, { status: 400 }) }
@@ -444,6 +599,23 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Step 7: FIFO cost consumption — populate unit_cost on each product sale item
+    if (stockItems.length > 0) {
+      const { data: insertedSaleItems } = await admin
+        .from('sale_items').select('id, product_id, quantity').eq('sale_id', sale.id)
+      for (const si of (insertedSaleItems || [])) {
+        if (!si.product_id) continue
+        const { data: totalCost } = await admin.rpc('consume_fifo_cost', {
+          p_vendor_id: vendor.id, p_product_id: si.product_id, p_quantity: si.quantity,
+        })
+        if (totalCost && totalCost > 0) {
+          await admin.from('sale_items')
+            .update({ unit_cost: Math.round(totalCost / si.quantity) })
+            .eq('id', si.id)
+        }
+      }
+    }
+
     // Fetch complete sale
     const { data: completeSale } = await admin
       .from('sales')
@@ -500,11 +672,20 @@ export async function POST(req: NextRequest) {
     if (!sale) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (sale.payment_status === 'voided') return NextResponse.json({ error: 'Already voided' }, { status: 400 })
 
-    // 1. Restore stock for each item
+    // 1. Restore stock + FIFO cost layers for each item
+    const voidDate = new Date().toISOString().slice(0, 10)
     for (const item of (sale.items || [])) {
       if (item.product_id) {
         const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
         if (product) await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id)
+        // Restore FIFO layer at original unit_cost (puts stock back for future sales)
+        if (parseInt(item.unit_cost || 0) > 0) {
+          await admin.rpc('restore_fifo_cost', {
+            p_vendor_id: vendor.id, p_product_id: item.product_id,
+            p_quantity: item.quantity, p_unit_cost: parseInt(item.unit_cost),
+            p_received_at: voidDate,
+          })
+        }
       }
     }
 
@@ -561,11 +742,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Mark sale as voided
+    // 5. Mark sale as voided — set voided_at timestamp (keeps gazette serial in ledger)
+    const voidedAt = new Date().toISOString()
     await admin.from('sales').update({
       payment_status: 'voided',
+      voided_at: voidedAt,
       balance_due: 0,
-      notes: (sale.notes || '') + '\nVOIDED: ' + new Date().toISOString() + (refundMethod === 'advance' ? ' | Refund to advance' : ' | Cash refund')
+      notes: (sale.notes || '') + '\nVOIDED: ' + voidedAt + (refundMethod === 'advance' ? ' | Refund to advance' : ' | Cash refund')
     }).eq('id', saleId)
 
     const messages = ['Sale voided, stock restored']
@@ -616,6 +799,15 @@ export async function POST(req: NextRequest) {
         returned_quantity: (saleItem.returned_quantity || 0) + returnQty
       }).eq('id', saleItem.id)
 
+      // Restore FIFO cost layer for returned quantity
+      if (saleItem.product_id && parseInt(saleItem.unit_cost || 0) > 0) {
+        await admin.rpc('restore_fifo_cost', {
+          p_vendor_id: vendor.id, p_product_id: saleItem.product_id,
+          p_quantity: returnQty, p_unit_cost: parseInt(saleItem.unit_cost),
+          p_received_at: new Date().toISOString().slice(0, 10),
+        })
+      }
+
       returnedDetails.push(saleItem.product_name + ' x' + returnQty)
     }
 
@@ -638,14 +830,33 @@ export async function POST(req: NextRequest) {
     const { data: updatedItems } = await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)
     const allReturned = (updatedItems || []).every((i: any) => (i.returned_quantity || 0) >= i.quantity)
 
-    await admin.from('sales').update({
-      total: newTotal,
-      subtotal: newSubtotal,
+    const isTaxInvoice = !!sale.tax_serial   // gazette serial present → lk_tax invoice
+    const returnedAt = new Date().toISOString()
+
+    // For tax invoices: freeze gazette-stamped amounts; only update payment tracking.
+    // For receipts: mutate totals freely (no legal document constraint).
+    const salesUpdate: Record<string, any> = {
       paid_amount: newPaidAmount,
       balance_due: newBalanceDue,
       payment_status: allReturned ? 'voided' : newBalanceDue > 0 ? 'partial' : 'paid',
-      notes: (sale.notes || '') + '\nRETURN: ' + new Date().toISOString() + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund')
-    }).eq('id', saleId)
+      notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund')
+    }
+    if (!isTaxInvoice) {
+      // Receipts: update totals directly
+      salesUpdate.total = newTotal
+      salesUpdate.subtotal = newSubtotal
+    } else {
+      // Tax invoices: keep gazette amounts frozen; track return value separately
+      salesUpdate.returned_amount = (parseFloat(sale.returned_amount || 0) + totalRefund)
+      // Recompute net/vat on the *remaining* liable amount so reports stay accurate
+      const remainingTotal = Math.max(0, parseFloat(sale.total) - salesUpdate.returned_amount)
+      salesUpdate.net_amount = remainingTotal - Math.round(remainingTotal * 18 / 118)
+      salesUpdate.vat_amount = Math.round(remainingTotal * 18 / 118)
+    }
+    // Bug fix: set voided_at when all items returned so VAT register shows VOID correctly
+    if (allReturned) salesUpdate.voided_at = returnedAt
+
+    await admin.from('sales').update(salesUpdate).eq('id', saleId)
 
     // 3. Handle refund to customer
     // Always record payment entries for reporting — even if customer_id is null.

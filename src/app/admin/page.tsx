@@ -117,6 +117,36 @@ export default function AdminDashboard() {
     setActionLoading(null)
   }
 
+  async function saveVendor() {
+    if (!editingVendor) return
+    setActionLoading(editingVendor.id)
+    try {
+      const [r1, r2] = await Promise.all([
+        fetch('/api/admin/vendors', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', vendorId: editingVendor.id, data: {
+            name: editingVendor.name, phone: editingVendor.phone,
+            whatsapp: editingVendor.whatsapp, location: editingVendor.location,
+            description: editingVendor.description,
+          }}),
+        }),
+        fetch('/api/admin/vendors', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update_settings', vendorId: editingVendor.id, settings: editingVendor._settings || {} }),
+        }),
+      ])
+      const [j1, j2] = await Promise.all([r1.json(), r2.json()])
+      if (j1.success && j2.success) {
+        showToast('Vendor saved')
+        await fetchData()
+        setEditingVendor(null)
+      } else {
+        showToast('Error: ' + (j1.error || j2.error || 'Unknown error'))
+      }
+    } catch { showToast('Network error') }
+    setActionLoading(null)
+  }
+
   async function productAction(action: string, productId: string, updateData?: any) {
     setActionLoading(productId)
     try {
@@ -427,8 +457,25 @@ export default function AdminDashboard() {
                       <textarea value={editingVendor.description || ''} onChange={e => setEditingVendor({ ...editingVendor, description: e.target.value })} rows={3} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                     </div>
                   </div>
+                  {/* ── Features ── */}
+                  <div className="border-t border-slate-100 pt-4 mt-2">
+                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3">Features &amp; Mode</h4>
+                    <label className="block text-xs font-semibold text-slate-500 mb-2">Invoice Mode</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button onClick={() => setEditingVendor({ ...editingVendor, _settings: { ...editingVendor._settings, invoice_mode: null } })}
+                        className={`py-2.5 px-3 text-left text-xs font-bold rounded-xl border-2 transition ${!editingVendor._settings?.invoice_mode ? 'border-orange-400 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+                        Standard
+                        <p className="text-[10px] font-normal text-slate-400 mt-0.5">Basic POS · no VAT reports</p>
+                      </button>
+                      <button onClick={() => setEditingVendor({ ...editingVendor, _settings: { ...editingVendor._settings, invoice_mode: 'lk_tax' } })}
+                        className={`py-2.5 px-3 text-left text-xs font-bold rounded-xl border-2 transition ${editingVendor._settings?.invoice_mode === 'lk_tax' ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+                        🇱🇰 SL Tax Invoice
+                        <p className="text-[10px] font-normal text-slate-400 mt-0.5">Gazette serials · VAT/SSCL · GRN</p>
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex gap-2 mt-5">
-                    <button onClick={() => vendorAction('update', editingVendor.id, { name: editingVendor.name, phone: editingVendor.phone, whatsapp: editingVendor.whatsapp, location: editingVendor.location, description: editingVendor.description })} disabled={actionLoading === editingVendor.id} className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">Save</button>
+                    <button onClick={saveVendor} disabled={actionLoading === editingVendor.id} className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-5 py-2 rounded-lg disabled:opacity-50">{actionLoading === editingVendor.id ? 'Saving…' : 'Save'}</button>
                     <button onClick={() => setEditingVendor(null)} className="text-slate-500 text-sm font-semibold px-4 py-2">Cancel</button>
                   </div>
                 </div>
@@ -436,24 +483,28 @@ export default function AdminDashboard() {
             )}
 
             <div className="space-y-3">
-              {filteredVendors.map((vendor: any) => {
+              {(() => {
+                const settingsMap = new Map<string, any>((data?.vendorSettings || []).map((s: any) => [s.vendor_id, s]))
+                return filteredVendors.map((vendor: any) => {
                 const vendorProducts = products.filter((p: any) => p.vendor_id === vendor.id)
+                const vs = settingsMap.get(vendor.id)
                 return (
                   <div key={vendor.id} className="bg-white rounded-xl border border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-start gap-3 flex-1">
                         <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-white font-bold flex-shrink-0">{vendor.name.charAt(0)}</div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-bold text-slate-900">{vendor.name}</h3>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${vendor.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : vendor.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>{vendor.status.toUpperCase()}</span>
+                            {vs?.invoice_mode === 'lk_tax' && <span className="text-[9px] font-bold bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">🇱🇰 SL TAX</span>}
                           </div>
                           <p className="text-xs text-slate-500 mt-0.5">{vendor.location} &bull; {vendor.phone} &bull; {vendorProducts.length} products</p>
                           {vendor.description && <p className="text-xs text-slate-400 mt-1 line-clamp-1">{vendor.description}</p>}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <button onClick={() => setEditingVendor({ ...vendor })} className="text-[11px] font-semibold text-blue-600 px-2.5 py-1.5 rounded-lg border border-blue-200">Edit</button>
+                        <button onClick={() => setEditingVendor({ ...vendor, _settings: { invoice_mode: vs?.invoice_mode || null } })} className="text-[11px] font-semibold text-blue-600 px-2.5 py-1.5 rounded-lg border border-blue-200">Edit</button>
                         {vendor.status === 'pending' && <button onClick={() => vendorAction('approve', vendor.id)} disabled={actionLoading === vendor.id} className="text-[11px] font-semibold text-white bg-emerald-500 px-2.5 py-1.5 rounded-lg disabled:opacity-50">Approve</button>}
                         {vendor.status === 'approved' && <button onClick={() => vendorAction('suspend', vendor.id)} disabled={actionLoading === vendor.id} className="text-[11px] font-semibold text-amber-600 px-2.5 py-1.5 rounded-lg border border-amber-200 disabled:opacity-50">Suspend</button>}
                         {vendor.status === 'suspended' && <button onClick={() => vendorAction('reactivate', vendor.id)} disabled={actionLoading === vendor.id} className="text-[11px] font-semibold text-emerald-600 px-2.5 py-1.5 rounded-lg border border-emerald-200 disabled:opacity-50">Reactivate</button>}
@@ -462,7 +513,8 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 )
-              })}
+              })
+            })()}
             </div>
           </div>
         )}

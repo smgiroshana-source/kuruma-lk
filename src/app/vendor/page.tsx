@@ -2,6 +2,8 @@
 import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constants'
 
 import { useState, useEffect, useRef, startTransition, useMemo } from 'react'
+import TabStockLkTax from './_lk_tax/TabStock'
+import TabStockStandard from './_standard/TabStock'
 
 type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
@@ -125,7 +127,172 @@ async function printWithTotal(sale: any, vendor: any, format: 'a4' | 'thermal', 
   printInvoice({ ...sale, total_amount_due: totalAmountDue }, vendor, format, settings)
 }
 
+// ── SL-compliant TAX INVOICE printer (lk_tax vendors only) ──────────────────
+
+function numberToWords(n: number): string {
+  if (n === 0) return 'Zero'
+  const ones = ['','One','Two','Three','Four','Five','Six','Seven','Eight','Nine','Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen','Eighteen','Nineteen']
+  const tens = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety']
+  function chunk(x: number): string {
+    if (x === 0) return ''
+    if (x < 20) return ones[x]
+    if (x < 100) return tens[Math.floor(x/10)] + (x%10 ? ' ' + ones[x%10] : '')
+    return ones[Math.floor(x/100)] + ' Hundred' + (x%100 ? ' ' + chunk(x%100) : '')
+  }
+  let result = ''
+  if (Math.floor(n/10000000)) result += chunk(Math.floor(n/10000000)) + ' Crore '
+  if (Math.floor((n%10000000)/100000)) result += chunk(Math.floor((n%10000000)/100000)) + ' Lakh '
+  if (Math.floor((n%100000)/1000)) result += chunk(Math.floor((n%100000)/1000)) + ' Thousand '
+  if (n%1000) result += chunk(n%1000)
+  return result.trim()
+}
+
+function fmtDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `${mm}/${dd}/${yyyy}`
+}
+
+function printTaxInvoice(sale: any, vendor: any, settings?: any) {
+  const items = (sale.items || [])
+    .filter((i: any) => (i.returned_quantity || 0) < i.quantity)
+    .map((i: any) => {
+      const qty = i.quantity - (i.returned_quantity || 0)
+      return { ...i, quantity: qty, total: qty * parseFloat(i.unit_price) }
+    })
+
+  const s = settings || {}
+  const total     = parseFloat(sale.total) || 0
+  const vatAmount = parseInt(sale.vat_amount) || Math.round(total * 18 / 118)
+  const netAmount = parseInt(sale.net_amount) || (total - vatAmount)
+  const serial    = sale.tax_serial || sale.invoice_no || ''
+  const invoiceDate = fmtDate(sale.created_at)
+  const supplyDate  = fmtDate(sale.date_supply || sale.created_at)
+  const totalWords  = numberToWords(total) + ' Rupees Only'
+
+  const supplierName    = 'MacForce Auto Engineering (Pvt) Ltd'
+  const supplierAddress = s.supplier_address || 'No. 351/T, Pannipitiya Road, Thalawathugoda'
+  const supplierTin     = s.supplier_tin     || '101969738'
+
+  const purchaserName    = sale.customer_name    || ''
+  const purchaserAddress = sale.customer_address || ''
+  const purchaserTin     = sale.customer_tin     || ''
+  const purchaserPhone   = sale.customer_phone   || ''
+
+  const logoHtml = (s.logo_url && s.invoice_show_logo !== false)
+    ? `<img src="${s.logo_url}" style="height:60px;max-width:130px;object-fit:contain;margin-bottom:4px">`
+    : ''
+
+  const lineRows = items.map((i: any) => `
+    <tr>
+      <td style="padding:5px 8px;font-size:13px;color:#000;border-bottom:1px solid #e5e7eb">${i.product_name}</td>
+      <td style="padding:5px 8px;font-size:13px;color:#000;text-align:center;border-bottom:1px solid #e5e7eb">${i.quantity}</td>
+      <td style="padding:5px 8px;font-size:13px;color:#000;text-align:right;border-bottom:1px solid #e5e7eb">Rs.${parseFloat(i.unit_price).toLocaleString()}</td>
+      <td style="padding:5px 8px;font-size:13px;font-weight:700;color:#000;text-align:right;border-bottom:1px solid #e5e7eb">Rs.${parseFloat(i.total).toLocaleString()}</td>
+    </tr>`).join('')
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TAX INVOICE ${serial}</title>
+<style>
+  @page { size:A4; margin:15mm 18mm }
+  body { font-family:'Helvetica Neue',Arial,sans-serif; color:#000; margin:0; padding:0 }
+  * { box-sizing:border-box }
+</style></head><body>
+<div style="max-width:750px;margin:0 auto">
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+    <div>
+      ${logoHtml}
+      <div style="font-size:11px;color:#555;margin-top:2px">${supplierName}</div>
+      <div style="font-size:11px;color:#555">${supplierAddress}</div>
+      <div style="font-size:11px;font-weight:700;color:#000">TIN: ${supplierTin}</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:24px;font-weight:900;color:#000;letter-spacing:1px">TAX INVOICE</div>
+      <div style="font-size:12px;font-weight:700;color:#000;margin-top:4px;font-family:monospace">${serial}</div>
+    </div>
+  </div>
+
+  <!-- Dates -->
+  <div style="display:flex;gap:24px;margin-bottom:16px">
+    <div><span style="font-size:11px;color:#555">Date of Invoice: </span><span style="font-size:12px;font-weight:700">${invoiceDate}</span></div>
+    <div><span style="font-size:11px;color:#555">Date of Supply: </span><span style="font-size:12px;font-weight:700">${supplyDate}</span></div>
+  </div>
+
+  <!-- Purchaser -->
+  <div style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;margin-bottom:16px">
+    <div style="font-size:10px;font-weight:900;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Bill To</div>
+    <div style="font-size:13px;font-weight:700;color:#000">${purchaserName}</div>
+    ${purchaserAddress ? `<div style="font-size:12px;color:#000">${purchaserAddress}</div>` : ''}
+    ${purchaserPhone ? `<div style="font-size:11px;color:#555">${purchaserPhone}</div>` : ''}
+    ${purchaserTin ? `<div style="font-size:12px;font-weight:700;color:#000;margin-top:2px">TIN: ${purchaserTin}</div>` : ''}
+  </div>
+
+  <!-- Line items -->
+  <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
+    <thead>
+      <tr style="background:#1e293b">
+        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:left">Description</th>
+        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:center;width:60px">Qty</th>
+        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:right;width:110px">Unit Price</th>
+        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:right;width:110px">Amount</th>
+      </tr>
+    </thead>
+    <tbody>${lineRows}</tbody>
+  </table>
+
+  <!-- Totals -->
+  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+    <div style="width:280px">
+      ${parseFloat(sale.discount || 0) > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px"><span style="color:#555">Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-top:1px solid #e5e7eb;margin-top:4px">
+        <span style="color:#555">Net Amount (excl. VAT)</span><span style="font-weight:600">Rs.${netAmount.toLocaleString()}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px">
+        <span style="color:#555">VAT @ 18%</span><span style="font-weight:600">Rs.${vatAmount.toLocaleString()}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:7px 10px;font-size:15px;font-weight:900;background:#1e293b;color:#fff;border-radius:6px;margin-top:6px">
+        <span>TOTAL</span><span>Rs.${total.toLocaleString()}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Amount in words -->
+  <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 12px;margin-bottom:16px">
+    <span style="font-size:11px;color:#92400e;font-weight:700">Amount in Words: </span>
+    <span style="font-size:12px;font-weight:700;color:#000">${totalWords}</span>
+  </div>
+
+  <!-- Payment method -->
+  ${(sale.payments || []).length > 0 ? `
+  <div style="margin-bottom:16px">
+    <div style="font-size:10px;font-weight:900;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Payment Method</div>
+    ${(sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return').map((p: any) =>
+      `<span style="display:inline-block;margin-right:10px;font-size:12px;font-weight:700;color:#000">${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #'+p.cheque_number : ''}: Rs.${parseFloat(p.amount).toLocaleString()}</span>`
+    ).join('')}
+  </div>` : ''}
+
+  <!-- Footer -->
+  <div style="border-top:1px solid #e5e7eb;padding-top:10px;text-align:center">
+    <p style="font-size:11px;color:#555;margin:0">${s.invoice_footer || 'Thank you for your business!'}</p>
+  </div>
+</div>
+</body></html>`
+
+  const win = window.open('', '_blank', 'width=900,height=700')
+  if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
+  // Route lk_tax TAX INVOICEs to the compliant template
+  if (sale.document_type === 'tax_invoice') {
+    return printTaxInvoice(sale, vendor, settings)
+  }
+
   // Exclude fully-returned items; adjust qty/total for partial returns
   const items = (sale.items || [])
     .filter((i: any) => (i.returned_quantity || 0) < i.quantity)
@@ -340,6 +507,35 @@ export default function VendorDashboard() {
   const [posDraftInvoiceNo, setPosDraftInvoiceNo] = useState('')
   const [allDrafts, setAllDrafts] = useState<any[]>([])
 
+  // ── lk_tax (WHEEL MART) POS state ─────────────────────────────────────────
+  const [posInvoiceEntities, setPosInvoiceEntities] = useState<any[]>([])
+  const [posEntityId, setPosEntityId] = useState<string | null>(null)
+  const [posDocType, setPosDocType] = useState<'receipt' | 'tax_invoice'>('receipt')
+  const [posCustomerAddress, setPosCustomerAddress] = useState('')
+  const [posCustomerTin, setPosCustomerTin] = useState('')
+  const [posCustomerVatReg, setPosCustomerVatReg] = useState(false)
+  // Manual / service line entry (SVC stream)
+  const [showManualLine, setShowManualLine] = useState(false)
+  const [manualLine, setManualLine] = useState({ name: '', qty: '1', price: '' })
+
+  // ── Credit note state ─────────────────────────────────────────────────────
+  const [pendingCreditNote, setPendingCreditNote] = useState<{
+    saleId: string; taxSerial: string; customerName: string
+    returnedItems: Array<{saleItemId: string; quantity: number}>; refundAmount: number
+    entityId: string | null
+  } | null>(null)
+  const [creditNoteLoading, setCreditNoteLoading] = useState(false)
+  const [issuedCreditNote, setIssuedCreditNote] = useState<any>(null)
+
+  // ── lk_tax Tax Reports + Tax Config state ────────────────────────────────
+  const [taxReportType, setTaxReportType] = useState<'vat_register' | 'sscl_report' | 'input_vat' | 'vat_summary'>('vat_register')
+  const [taxReportFrom, setTaxReportFrom] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10))
+  const [taxReportTo, setTaxReportTo] = useState(() => new Date().toISOString().slice(0, 10))
+  const [taxReportData, setTaxReportData] = useState<any>(null)
+  const [taxReportLoading, setTaxReportLoading] = useState(false)
+  const [taxConfigData, setTaxConfigData] = useState<Record<string, number> | null>(null)
+  const [taxConfigSaving, setTaxConfigSaving] = useState(false)
+
   // Void sale modal
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
   const [returnModal, setReturnModal] = useState<any>(null)
@@ -367,17 +563,7 @@ export default function VendorDashboard() {
   const [primaryMode, setPrimaryMode] = useState(false)
   const [primaryChanges, setPrimaryChanges] = useState<Map<string, { imageId: string, images: any[] }>>(new Map())
 
-  // Stock Take
-  const [stockView, setStockView] = useState<'browse' | 'assign'>('browse')
-  const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
-  const [stocktakeSearch, setStocktakeSearch] = useState('')
-  const [stockQtyEdits, setStockQtyEdits] = useState<Record<string, number>>({})
-  const [stockConfirmSet, setStockConfirmSet] = useState<Set<string>>(new Set())
-  const [stocktakeSaving, setStocktakeSaving] = useState(false)
-  // Quick Assign mode
-  const [assignLoc, setAssignLoc] = useState({ store: '', floor: '', sub1: '', sub2: '' })
-  const [assignSearch, setAssignSearch] = useState('')
-  const [assignLoading, setAssignLoading] = useState<string | null>(null)
+  // Stock Take state moved into _lk_tax/TabStock and _standard/TabStock components
 
   // Feature 8: Vendor change request
   const [pendingChangeRequest, setPendingChangeRequest] = useState<any>(null)
@@ -417,8 +603,26 @@ export default function VendorDashboard() {
       const res = await fetch('/api/vendor/settings')
       if (res.ok) {
         const j = await res.json()
-        if (j.settings) setVendorSettings({ ...vendorSettings, ...j.settings })
+        if (j.settings) {
+          setVendorSettings({ ...vendorSettings, ...j.settings })
+          // Load invoice entities for lk_tax vendors (WHEEL MART)
+          if (j.settings.invoice_mode === 'lk_tax') fetchInvoiceEntities()
+        }
         if (j.role) { setStaffRole(j.role); if (j.role === 'cashier') setTab('pos') }
+      }
+    } catch {}
+  }
+
+  async function fetchInvoiceEntities() {
+    try {
+      const res = await fetch('/api/vendor/invoice-entities')
+      if (!res.ok) return
+      const j = await res.json()
+      const entities: any[] = j.entities || []
+      setPosInvoiceEntities(entities)
+      if (entities.length > 0) {
+        // Pre-select the default entity (Pvt Ltd); keep any existing selection
+        setPosEntityId(prev => prev || (entities.find((e: any) => e.is_default) || entities[0]).id)
       }
     } catch {}
   }
@@ -487,6 +691,8 @@ export default function VendorDashboard() {
       }
     } catch { showToast('Error updating shop info') }
   }
+
+  // GRN / supplier / stocktake functions moved into _lk_tax/TabStock and _standard/TabStock components
 
   async function fetchStaff() {
     setStaffLoading(true)
@@ -644,30 +850,7 @@ export default function VendorDashboard() {
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 4000) }
   async function handleSignOut() { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = '/' }
 
-  async function saveAllStockChanges() {
-    const now = new Date().toISOString()
-    const qtyEntries = Object.entries(stockQtyEdits)
-    // confirm-only: products ticked but qty not changed
-    const confirmOnly = [...stockConfirmSet].filter(id => !(id in stockQtyEdits))
-    if (!qtyEntries.length && !confirmOnly.length) return
-    setStocktakeSaving(true)
-    try {
-      await Promise.all([
-        ...qtyEntries.map(([id, qty]) =>
-          fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'update', productId: id, data: { quantity: qty, last_stock_confirmed_at: now } }) })),
-        ...confirmOnly.map(id =>
-          fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'update', productId: id, data: { last_stock_confirmed_at: now } }) }))
-      ])
-      const total = qtyEntries.length + confirmOnly.length
-      showToast(`${total} product${total !== 1 ? 's' : ''} saved & confirmed`)
-      setStockQtyEdits({})
-      setStockConfirmSet(new Set())
-      await fetchData()
-    } catch { showToast('Error saving') }
-    setStocktakeSaving(false)
-  }
+  // saveAllStockChanges and saveStocktakeWithCost moved into _lk_tax/TabStock and _standard/TabStock components
 
   async function productAction(action: string, productId: string, updateData?: any) {
     setActionLoading(productId); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, productId, data: updateData }) }); const j = await r.json(); if (j.success) { showToast(j.message); await fetchData(); setEditingProduct(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setActionLoading(null)
@@ -992,6 +1175,20 @@ export default function VendorDashboard() {
   function updateCartPrice(i: number, price: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, unitPrice: price } : item)) }
   function removeFromCart(i: number) { setPosCart(p => p.filter((_, x) => x !== i)) }
 
+  /** lk_tax: add a free-text service / labour line tagged as SVC stream */
+  function addManualLine() {
+    const name = manualLine.name.trim()
+    const qty = Math.max(1, parseInt(manualLine.qty) || 1)
+    const price = parseInt(manualLine.price) || 0
+    if (!name) { return }
+    setPosCart(prev => [...prev, {
+      productId: null, productName: name, productSku: '', unitPrice: price,
+      quantity: qty, maxStock: null, ssclStream: 'SVC',
+    }])
+    setManualLine({ name: '', qty: '1', price: '' })
+    setShowManualLine(false)
+  }
+
   // Payment lines
   function addPaymentLine() { setPosPayments(p => [...p, { method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]) }
   function updatePaymentLine(i: number, field: string, value: string) { setPosPayments(p => p.map((line, x) => x === i ? { ...line, [field]: value } : line)) }
@@ -1009,14 +1206,27 @@ export default function VendorDashboard() {
     return { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment }
   }, [posCart, posDiscount, posPayments, useAdvance, posCustomer])
 
+  // lk_tax computed values (VAT-inclusive pricing: extract VAT from total)
+  const isLkTax = vendorSettings?.invoice_mode === 'lk_tax'
+  const posCurrentEntity = posInvoiceEntities.find((e: any) => e.id === posEntityId) || null
+  const posIsVatEntity = posCurrentEntity?.invoice_mode === 'lk_tax'
+  const posVatAmount = posIsVatEntity ? Math.round(posTotal * 18 / 118) : 0
+  const posNetAmount = posIsVatEntity ? posTotal - posVatAmount : posTotal
+
   function handleCreateSale() {
     if (posCart.length === 0) { showToast('Add items to cart'); return }
-    const errors: { name?: boolean; phone?: boolean; vehicle?: boolean } = {}
+    const errors: { name?: boolean; phone?: boolean; vehicle?: boolean; address?: boolean; tin?: boolean } = {}
     if (!posCustomer.name.trim()) errors.name = true
     if (!posCustomer.phone.trim()) errors.phone = true
     if (posCustomer.require_vehicle_no && !posVehicleNo.trim()) errors.vehicle = true
-    if (errors.name || errors.phone || errors.vehicle) {
+    // lk_tax: address required on tax invoices
+    if (isLkTax && posDocType === 'tax_invoice' && !posCustomerAddress.trim()) errors.address = true
+    // lk_tax: TIN required when customer is VAT-registered
+    if (isLkTax && posDocType === 'tax_invoice' && posCustomerVatReg && !posCustomerTin.trim()) errors.tin = true
+    if (errors.name || errors.phone || errors.vehicle || errors.address || errors.tin) {
       setPosErrors(errors)
+      if (errors.address) showToast('⚠️ Customer address required for tax invoice')
+      if (errors.tin) showToast('⚠️ Customer TIN required (VAT-registered purchaser)')
       if (errors.vehicle) showToast('⚠️ Vehicle number required for this customer')
       setTimeout(() => setPosErrors({}), 4000)
       return
@@ -1048,8 +1258,24 @@ export default function VendorDashboard() {
         : {
             action,
             customerId: posCustomer.id, customerName: posCustomer.name || 'Walk-in Customer', customerPhone: posCustomer.phone,
-            items: posCart.map(i => ({ productId: i.productId, productName: i.productName, productSku: i.productSku, quantity: i.quantity, unitPrice: i.unitPrice })),
-            discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0), notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
+            items: posCart.map(i => ({
+              productId: i.productId || null,
+              productName: i.productName,
+              productSku: i.productSku || null,
+              quantity: i.quantity,
+              unitPrice: i.unitPrice,
+              ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC'),
+            })),
+            discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0),
+            notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
+            // lk_tax fields (only sent when applicable)
+            ...(isLkTax && posEntityId ? {
+              invoiceEntityId: posEntityId,
+              documentType: posDocType,
+              customerAddress: posCustomerAddress.trim() || null,
+              customerVatRegistered: posCustomerVatReg,
+              customerTin: posCustomerVatReg ? posCustomerTin.trim() || null : null,
+            } : {}),
           }
 
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -1061,6 +1287,9 @@ export default function VendorDashboard() {
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
         setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false)
         setPosDraftId(null); setPosDraftInvoiceNo('')
+        // Reset lk_tax fields (keep entity + docType for next sale)
+        setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
+        setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' })
         setPosPreview(false); await fetchData(); fetchSales(); fetchCreditCustomers()
       } else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
@@ -1123,10 +1352,138 @@ export default function VendorDashboard() {
     try {
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod }) })
       const j = await r.json()
-      if (j.success) { showToast(j.message); setReturnModal(null); setReturnItems({}); fetchSales(); fetchData() }
-      else showToast('Error: ' + j.error)
+      if (j.success) {
+        showToast(j.message)
+        fetchSales(); fetchData()
+        // If this is a tax invoice (gazette serial), prompt to issue a credit note
+        if (returnModal.tax_serial) {
+          const totalRefund = items.reduce((sum, ri) => {
+            const item = (returnModal.items || []).find((i: any) => i.id === ri.saleItemId)
+            return sum + (item ? ri.quantity * parseFloat(item.unit_price) : 0)
+          }, 0)
+          setPendingCreditNote({
+            saleId: returnModal.id,
+            taxSerial: returnModal.tax_serial,
+            customerName: returnModal.customer_name || '',
+            returnedItems: items,
+            refundAmount: totalRefund,
+            entityId: returnModal.invoice_entity_id || null,
+          })
+          setReturnModal(null); setReturnItems({})
+        } else {
+          setReturnModal(null); setReturnItems({})
+        }
+      } else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
     setReturnLoading(false)
+  }
+
+  async function issueCreditNote() {
+    if (!pendingCreditNote) return
+    setCreditNoteLoading(true)
+    try {
+      const r = await fetch('/api/vendor/credit-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          saleId: pendingCreditNote.saleId,
+          returnedItems: pendingCreditNote.returnedItems,
+          reason: 'goods_returned',
+        }),
+      })
+      const j = await r.json()
+      if (r.ok) { setIssuedCreditNote(j.creditNote); setPendingCreditNote(null) }
+      else showToast('⚠️ ' + (j.error || 'Failed to issue credit note'))
+    } catch { showToast('Network error') }
+    setCreditNoteLoading(false)
+  }
+
+  function printCreditNote(cn: any, entityInfo?: any) {
+    const vatRate = 18
+    const itemRows = (cn.items || []).map((i: any) =>
+      `<tr>
+        <td style="padding:6px 8px">${i.product_name}</td>
+        <td style="padding:6px 8px;text-align:center">${i.quantity}</td>
+        <td style="padding:6px 8px;text-align:right">Rs.${parseInt(i.unit_price).toLocaleString()}</td>
+        <td style="padding:6px 8px;text-align:right">Rs.${parseInt(i.total).toLocaleString()}</td>
+      </tr>`).join('')
+    const total     = parseInt(cn.total || 0)
+    const vatAmount = parseInt(cn.vat_amount || 0)
+    const netAmount = parseInt(cn.net_amount || 0)
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+      <title>Credit Note ${cn.credit_note_no}</title>
+      <style>
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{font-family:Arial,sans-serif;font-size:12px;color:#000;padding:20mm}
+        .title{font-size:22px;font-weight:900;letter-spacing:1px;text-align:center;margin-bottom:4px}
+        .subtitle{font-size:11px;text-align:center;color:#555;margin-bottom:16px}
+        .parties{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px}
+        .party-box{border:1px solid #ccc;border-radius:4px;padding:10px}
+        .party-label{font-size:9px;font-weight:700;text-transform:uppercase;color:#888;margin-bottom:4px}
+        .meta{display:flex;gap:24px;margin-bottom:16px;font-size:11px}
+        .meta span{color:#555}
+        .meta strong{color:#000}
+        table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px}
+        thead tr{background:#f0f0f0}
+        th{padding:6px 8px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase}
+        tbody tr{border-top:1px solid #eee}
+        .totals{margin-left:auto;width:260px;font-size:12px}
+        .totals tr td{padding:4px 8px}
+        .totals tr.grand td{font-weight:900;font-size:14px;border-top:2px solid #000;padding-top:6px}
+        .ref-box{background:#fff8e1;border:1px solid #f9a825;border-radius:4px;padding:10px;font-size:11px;margin-bottom:16px}
+        .footer{font-size:10px;color:#888;text-align:center;margin-top:24px;border-top:1px solid #eee;padding-top:12px}
+        @media print{@page{size:A4;margin:15mm}}
+      </style></head><body>
+      <div class="title">CREDIT NOTE</div>
+      <div class="subtitle">This is not a tax invoice</div>
+
+      <div class="ref-box">
+        <strong>Against Tax Invoice:</strong> ${cn.original_serial} &nbsp;|&nbsp;
+        <strong>Reason:</strong> ${cn.reason === 'goods_returned' ? 'Goods Returned' : cn.reason || 'Goods Returned'}
+      </div>
+
+      <div class="parties">
+        <div class="party-box">
+          <div class="party-label">Supplier</div>
+          <div style="font-weight:700">${entityInfo?.name || 'MacForce Auto Engineering (Pvt) Ltd'}</div>
+          <div>${entityInfo?.address || ''}</div>
+          <div>TIN: ${entityInfo?.tin || ''}</div>
+        </div>
+        <div class="party-box">
+          <div class="party-label">Purchaser</div>
+          <div style="font-weight:700">${cn.customer_name || ''}</div>
+          <div>${cn.customer_address || ''}</div>
+          ${cn.customer_tin ? `<div>TIN: ${cn.customer_tin}</div>` : ''}
+        </div>
+      </div>
+
+      <div class="meta">
+        <div><span>Credit Note No: </span><strong>${cn.credit_note_no}</strong></div>
+        <div><span>Date Issued: </span><strong>${new Date(cn.issued_at).toLocaleDateString('en-US', { month:'2-digit', day:'2-digit', year:'numeric' })}</strong></div>
+      </div>
+
+      <table>
+        <thead><tr>
+          <th>Description</th><th style="text-align:center">Qty</th>
+          <th style="text-align:right">Unit Price</th><th style="text-align:right">Amount</th>
+        </tr></thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+
+      <table class="totals">
+        <tr><td>Net Amount (excl. VAT @ ${vatRate}%)</td><td style="text-align:right">Rs.${netAmount.toLocaleString()}</td></tr>
+        <tr><td>VAT @ ${vatRate}%</td><td style="text-align:right">Rs.${vatAmount.toLocaleString()}</td></tr>
+        <tr class="grand"><td>Total Credit</td><td style="text-align:right">Rs.${total.toLocaleString()}</td></tr>
+      </table>
+
+      <div class="footer">
+        MacForce Auto Engineering (Pvt) Ltd · TIN: ${entityInfo?.tin || ''}<br/>
+        Generated ${new Date().toLocaleString('en-LK')} · Retain for 5 years
+      </div>
+      <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1200)}</script>
+    </body></html>`
+    const w = window.open('', '_blank', 'width=800,height=700')
+    if (w) { w.document.write(html); w.document.close() }
   }
 
   async function voidSale(saleId: string, refundMethod: 'advance' | 'cash') {
@@ -1901,12 +2258,24 @@ ${customerRows.map(c => `<tr>
               <button onClick={() => startTransition(() => setTab('add'))} className="w-full text-left px-4 py-3 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-sm">+ Add Product</button>
               <button onClick={() => startTransition(() => setTab('sales'))} className="w-full text-left px-4 py-3 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 font-semibold text-sm">📊 Sales History</button>
             </div></div>
-            <div className="bg-white rounded-xl border border-slate-200 p-5"><h3 className="font-bold text-slate-900 mb-3">Shop Info</h3><div className="space-y-2 text-sm">
-              <p><span className="text-slate-400">Name:</span> <span className="font-semibold">{vendor.name}</span></p>
-              <p><span className="text-slate-400">Phone:</span> <span className="font-semibold">{vendor.phone}</span></p>
-              <p><span className="text-slate-400">Location:</span> <span className="font-semibold">{vendor.location}</span></p>
-              <p><span className="text-slate-400">Status:</span> <span className={'font-bold ' + (vendor.status === 'approved' ? 'text-emerald-600' : 'text-amber-600')}>{vendor.status.toUpperCase()}</span></p>
-            </div></div>
+            {isLkTax ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-5">
+                <h3 className="font-bold text-slate-900 mb-3">Stock & Receiving</h3>
+                <div className="space-y-2">
+                  <button onClick={() => { startTransition(() => setTab('stocktake')) }} className="w-full text-left px-4 py-3 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-sm">📦 Receive Stock (GRN)</button>
+                  <button onClick={() => { startTransition(() => setTab('stocktake')) }} className="w-full text-left px-4 py-3 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-sm">📜 GRN History</button>
+                  <button onClick={() => { startTransition(() => setTab('stocktake')) }} className="w-full text-left px-4 py-3 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-sm">🏭 Suppliers</button>
+                  <button onClick={() => { startTransition(() => setTab('stocktake')) }} className="w-full text-left px-4 py-3 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold text-sm">📋 Stock Levels</button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white rounded-xl border border-slate-200 p-5"><h3 className="font-bold text-slate-900 mb-3">Shop Info</h3><div className="space-y-2 text-sm">
+                <p><span className="text-slate-400">Name:</span> <span className="font-semibold">{vendor.name}</span></p>
+                <p><span className="text-slate-400">Phone:</span> <span className="font-semibold">{vendor.phone}</span></p>
+                <p><span className="text-slate-400">Location:</span> <span className="font-semibold">{vendor.location}</span></p>
+                <p><span className="text-slate-400">Status:</span> <span className={'font-bold ' + (vendor.status === 'approved' ? 'text-emerald-600' : 'text-amber-600')}>{vendor.status.toUpperCase()}</span></p>
+              </div></div>
+            )}
           </div>
         </div>)}
 
@@ -2309,7 +2678,13 @@ ${customerRows.map(c => `<tr>
             <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Category</label><select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Condition</label><select value={newProduct.condition} onChange={e => setNewProduct({...newProduct, condition: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Make</label><input value={newProduct.make} onChange={e => setNewProduct({...newProduct, make: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Toyota" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Model</label><input value={newProduct.model} onChange={e => setNewProduct({...newProduct, model: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Year</label><input value={newProduct.year} onChange={e => setNewProduct({...newProduct, year: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Model Code</label><input value={newProduct.modelCode} onChange={e => setNewProduct({...newProduct, modelCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="ZRE172" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Side</label><select value={newProduct.side} onChange={e => setNewProduct({...newProduct, side: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none"><option value="">Any</option><option>Front</option><option>Rear</option><option>Left</option><option>Right</option><option>Front Left</option><option>Front Right</option><option>Rear Left</option><option>Rear Right</option></select></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Color</label><input value={newProduct.color} onChange={e => setNewProduct({...newProduct, color: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Black" /></div></div>
-            <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">OEM Code</label><input value={newProduct.oemCode} onChange={e => setNewProduct({...newProduct, oemCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Cost (Rs.)</label><input type="number" value={newProduct.cost} onChange={e => setNewProduct({...newProduct, cost: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal cost" /></div></div>
+            <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">OEM Code</label><input value={newProduct.oemCode} onChange={e => setNewProduct({...newProduct, oemCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Opening Cost (Rs.) <span className="font-normal text-[10px] text-slate-400">excl. VAT</span></label><input type="number" value={newProduct.cost} onChange={e => setNewProduct({...newProduct, cost: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Purchase cost" /></div></div>
+            {newProduct.cost && parseInt(newProduct.cost) > 0 && parseInt(newProduct.quantity) > 0 && (
+              <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-[11px] text-green-700">✅ A FIFO cost layer will be created: {newProduct.quantity} unit{parseInt(newProduct.quantity) !== 1 ? 's' : ''} @ Rs.{parseInt(newProduct.cost).toLocaleString()} — GP tracking enabled from first sale.</div>
+            )}
+            {newProduct.cost && parseInt(newProduct.cost) > 0 && (!newProduct.quantity || parseInt(newProduct.quantity) === 0) && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-700">⚠️ Cost entered but Quantity is 0 — no cost layer created. Use Stock → Receive Stock to add stock with cost tracking.</div>
+            )}
             <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Price (Rs.)</label><input type="number" value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Quantity</label><input type="number" value={newProduct.quantity} onChange={e => setNewProduct({...newProduct, quantity: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
               <label className="block text-xs font-bold text-amber-800">📍 Warehouse Location <span className="font-normal text-amber-600">(optional)</span></label>
@@ -2618,6 +2993,55 @@ ${customerRows.map(c => `<tr>
                 <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo('') }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
               </div>
             )}
+              {/* lk_tax: Entity selector + document type toggle */}
+              {isLkTax && posInvoiceEntities.length > 0 && (
+                <div className="mb-3 bg-white rounded-xl border border-slate-200 p-3 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                  {/* Entity selector */}
+                  <div className="flex-1">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Invoicing Entity</p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {posInvoiceEntities.map((e: any) => (
+                        <button key={e.id}
+                          onClick={() => {
+                            setPosEntityId(e.id)
+                            // Proprietorship can't issue tax invoices
+                            if (e.invoice_mode !== 'lk_tax') setPosDocType('receipt')
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition ${
+                            posEntityId === e.id
+                              ? 'bg-slate-800 text-white border-slate-800'
+                              : 'border-slate-200 text-slate-600 hover:border-slate-400'
+                          }`}>
+                          {e.is_default ? '★ ' : ''}{e.name.replace('MacForce Auto Engineering', 'MacForce')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Document type toggle — only for VAT-registered entity */}
+                  {posCurrentEntity?.invoice_mode === 'lk_tax' && (
+                    <div className="shrink-0">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Document</p>
+                      <div className="flex rounded-lg border-2 border-slate-200 overflow-hidden">
+                        <button
+                          onClick={() => setPosDocType('receipt')}
+                          className={`px-3 py-1.5 text-xs font-bold transition ${
+                            posDocType === 'receipt' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:bg-slate-50'
+                          }`}>
+                          🧾 Receipt
+                        </button>
+                        <button
+                          onClick={() => setPosDocType('tax_invoice')}
+                          className={`px-3 py-1.5 text-xs font-bold transition ${
+                            posDocType === 'tax_invoice' ? 'bg-orange-600 text-white' : 'text-slate-500 hover:bg-slate-50'
+                          }`}>
+                          📋 Tax Invoice
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-6 pb-36 lg:pb-0">
                 <div className="lg:col-span-2 space-y-3 lg:space-y-4 order-last lg:order-none">
                   {/* Product Search */}
@@ -2629,9 +3053,46 @@ ${customerRows.map(c => `<tr>
                   {/* Cart */}
                   {posCart.length === 0 ? <div className="bg-white rounded-xl border border-slate-200 p-8 text-center"><p className="text-3xl opacity-30">🛒</p><p className="text-slate-400 font-semibold">Add products above</p></div> : (
                     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-slate-50"><th className="px-2 sm:px-4 py-2 text-left text-xs font-bold text-slate-500">Item</th><th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-16 sm:w-20">Qty</th><th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-20 sm:w-28">Price</th><th className="px-2 sm:px-4 py-2 text-right text-xs font-bold text-slate-500 w-20 sm:w-24">Total</th><th className="w-8"></th></tr></thead><tbody>
-                      {posCart.map((item, i) => (<tr key={i} className="border-t border-slate-100"><td className="px-2 sm:px-4 py-2"><span className="hidden sm:inline font-mono text-xs text-slate-400 mr-1">{item.productSku}</span><span className="font-semibold text-xs sm:text-sm">{item.productName}</span></td><td className="px-2 sm:px-4 py-2"><input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-12 sm:w-16 px-1 sm:px-2 py-1 border border-slate-200 rounded text-center text-sm" /></td><td className="px-2 sm:px-4 py-2"><input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className="w-20 sm:w-24 px-1 sm:px-2 py-1 border border-slate-200 rounded text-sm" /></td><td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td><td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td></tr>))}
+                      {posCart.map((item, i) => (<tr key={i} className="border-t border-slate-100"><td className="px-2 sm:px-4 py-2"><span className="hidden sm:inline font-mono text-xs text-slate-400 mr-1">{item.productSku}</span><span className="font-semibold text-xs sm:text-sm">{item.productName}</span>{isLkTax && item.ssclStream === 'SVC' && <span className="ml-1 text-[9px] font-black bg-blue-100 text-blue-700 px-1 rounded">SVC</span>}</td><td className="px-2 sm:px-4 py-2"><input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-12 sm:w-16 px-1 sm:px-2 py-1 border border-slate-200 rounded text-center text-sm" /></td><td className="px-2 sm:px-4 py-2"><input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className="w-20 sm:w-24 px-1 sm:px-2 py-1 border border-slate-200 rounded text-sm" /></td><td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td><td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td></tr>))}
                     </tbody></table></div>
                   )}
+                  {/* lk_tax: Manual / service line entry (SVC stream) */}
+                  {isLkTax && (
+                    <div className="mt-2">
+                      {!showManualLine ? (
+                        <button onClick={() => setShowManualLine(true)}
+                          className="text-xs font-bold text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg border border-blue-200 hover:border-blue-400 bg-blue-50">
+                          + Add Service / Labour Line
+                        </button>
+                      ) : (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
+                          <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest">Service / Labour Line <span className="ml-1 bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded text-[9px]">SVC</span></p>
+                          <input
+                            value={manualLine.name}
+                            onChange={e => setManualLine(p => ({ ...p, name: e.target.value }))}
+                            placeholder="Description (e.g. Wheel Alignment)"
+                            className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none focus:border-blue-400"
+                          />
+                          <div className="flex gap-2">
+                            <input
+                              type="text" inputMode="numeric" value={manualLine.qty}
+                              onChange={e => setManualLine(p => ({ ...p, qty: e.target.value.replace(/[^0-9]/g, '') }))}
+                              placeholder="Qty" className="w-20 px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none text-center"
+                            />
+                            <input
+                              type="text" inputMode="numeric" value={manualLine.price}
+                              onChange={e => setManualLine(p => ({ ...p, price: e.target.value.replace(/[^0-9]/g, '') }))}
+                              placeholder="Price (Rs.)" className="flex-1 px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none"
+                            />
+                            <button onClick={addManualLine} className="bg-blue-600 text-white font-bold px-3 py-2 rounded-lg text-sm">Add</button>
+                            <button onClick={() => { setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' }) }}
+                              className="text-slate-400 hover:text-red-500 font-bold px-2">✕</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Notes */}
                   <div className="bg-white rounded-xl border border-red-200 mt-3">
                     <textarea value={posNotes} onChange={e => setPosNotes(e.target.value)} placeholder="Notes (printed on invoice)..." rows={2} className="w-full px-4 py-3 text-sm outline-none resize-none rounded-xl" />
@@ -2640,6 +3101,13 @@ ${customerRows.map(c => `<tr>
                   {/* Total + action buttons — desktop only, sits below cart/notes */}
                   <div className="hidden lg:block rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 text-white">
                     {posDiscountAmt > 0 && <div className="flex justify-between text-sm mb-1"><span className="text-red-300">Discount</span><span>-Rs.{posDiscountAmt.toLocaleString()}</span></div>}
+                    {/* lk_tax VAT breakdown */}
+                    {posIsVatEntity && posTotal > 0 && (
+                      <div className="mb-2 pb-2 border-b border-slate-600 space-y-0.5">
+                        <div className="flex justify-between text-sm"><span className="text-slate-300">NET (excl. VAT)</span><span>Rs.{posNetAmount.toLocaleString()}</span></div>
+                        <div className="flex justify-between text-sm"><span className="text-slate-300">VAT 18%</span><span>Rs.{posVatAmount.toLocaleString()}</span></div>
+                      </div>
+                    )}
                     <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
                     {posAdvanceApplied > 0 && <div className="flex justify-between text-sm mt-1"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
                     {posOverpayment > 0 && posCustomer.outstanding > 0 && (
@@ -2672,6 +3140,32 @@ ${customerRows.map(c => `<tr>
                     </div>
                     <input value={posCustomer.phone} onChange={e => { setPosCustomer({...posCustomer, phone: e.target.value}); if (posErrors.phone) setPosErrors(prev => ({ ...prev, phone: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none transition-all duration-200 ${posErrors.phone ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Phone / WhatsApp" />
                     {posCustomer.id && <p className="text-[10px] text-green-600 font-semibold">✓ Existing customer selected</p>}
+                    {/* lk_tax: address + TIN (required for tax invoices) */}
+                    {isLkTax && posDocType === 'tax_invoice' && (
+                      <div className="space-y-1.5 pt-1 border-t border-slate-100 mt-1">
+                        <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest">Tax Invoice — Purchaser Details</p>
+                        <input
+                          value={posCustomerAddress}
+                          onChange={e => { setPosCustomerAddress(e.target.value); if ((posErrors as any).address) setPosErrors(prev => ({ ...prev, address: false })) }}
+                          className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none ${(posErrors as any).address ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`}
+                          placeholder="Address *"
+                        />
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={posCustomerVatReg}
+                            onChange={e => { setPosCustomerVatReg(e.target.checked); if (!e.target.checked) setPosCustomerTin('') }}
+                            className="w-4 h-4 accent-orange-500" />
+                          <span className="text-xs font-bold text-slate-600">VAT-Registered Purchaser</span>
+                        </label>
+                        {posCustomerVatReg && (
+                          <input
+                            value={posCustomerTin}
+                            onChange={e => { setPosCustomerTin(e.target.value.replace(/[^0-9]/g, '').slice(0, 9)); if ((posErrors as any).tin) setPosErrors(prev => ({ ...prev, tin: false })) }}
+                            className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono ${(posErrors as any).tin ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`}
+                            placeholder="Purchaser TIN (9 digits) *"
+                          />
+                        )}
+                      </div>
+                    )}
                     {posCustomer.outstanding > 0 && (
                       <div className="bg-red-50 border border-red-200 rounded-lg p-2 mt-1">
                         <span className="text-xs font-bold text-red-700">Outstanding: Rs.{posCustomer.outstanding.toLocaleString()}</span>
@@ -2805,7 +3299,7 @@ ${customerRows.map(c => `<tr>
               const [salesSubTab, setSalesSubTab] = [salesView, setSalesView] as [string, (v: string) => void]
               return (<>
                 <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1">
-                  {[{v:'overview',l:'Overview'},{v:'transactions',l:'Transactions'},{v:'customers',l:'Customers'},{v:'reports',l:'📊 Reports'}].map(t => (
+                  {([{v:'overview',l:'Overview'},{v:'transactions',l:'Transactions'},{v:'customers',l:'Customers'},{v:'reports',l:'📊 Reports'},...(isLkTax ? [{v:'tax',l:'🧾 Tax'}] : [])]).map(t => (
                     <button key={t.v} onClick={() => setSalesSubTab(t.v)} className={`flex-1 py-2 text-xs font-bold rounded-md transition ${salesSubTab === t.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>{t.l}</button>
                   ))}
                 </div>
@@ -2814,6 +3308,30 @@ ${customerRows.map(c => `<tr>
                 {/* ─── OVERVIEW ─── */}
                 {salesSubTab === 'overview' && (<div>
                   {/* Stats cards — 2 cols mobile, 3 cols desktop */}
+                  {(() => {
+                    // Compute GP from sale items that have FIFO unit_cost populated
+                    const validSales = (salesData.sales || []).filter((s: any) => s.payment_status !== 'voided')
+                    const totalCogs = validSales.reduce((sum: number, s: any) =>
+                      sum + (s.items || []).reduce((si: number, i: any) => si + (parseInt(i.unit_cost || 0) * i.quantity), 0), 0)
+                    const totalRev  = salesData.stats.totalRevenue - (salesData.stats.totalReturns || 0)
+                    const totalGp   = totalRev - totalCogs
+                    const gpPct     = totalRev > 0 && totalCogs > 0 ? Math.round(totalGp / totalRev * 100) : null
+                    const hasCogs   = totalCogs > 0
+                    return hasCogs ? (
+                      <div className="mb-3 bg-white rounded-xl border border-purple-200 p-3.5 sm:p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className={`text-lg sm:text-xl font-black ${totalGp >= 0 ? 'text-purple-600' : 'text-red-600'}`}>Rs.{totalGp.toLocaleString()}</p>
+                            <p className="text-[11px] text-slate-400 font-semibold">Gross Profit {gpPct !== null ? `(${gpPct}% margin)` : ''}</p>
+                          </div>
+                          <div className="text-right text-[10px] text-slate-400">
+                            <p>Revenue: Rs.{totalRev.toLocaleString()}</p>
+                            <p>COGS: Rs.{totalCogs.toLocaleString()}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null
+                  })()}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-5">
                     <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
                       <p className="text-lg sm:text-xl font-black text-green-600">Rs.{(salesData.stats.totalRevenue - (salesData.stats.totalReturns || 0)).toLocaleString()}</p>
@@ -3172,6 +3690,9 @@ ${customerRows.map(c => `<tr>
                               const isExpanded = expandedSale === sale.id
                               const hasReturns = (sale.items || []).some((i: any) => (i.returned_quantity || 0) > 0)
                               const totalReturned = (sale.items || []).reduce((s: number, i: any) => s + ((i.returned_quantity || 0) * parseFloat(i.unit_price || 0)), 0)
+                              const saleCogs = (sale.items || []).reduce((s: number, i: any) => s + (parseInt(i.unit_cost || 0) * i.quantity), 0)
+                              const saleGp = parseFloat(sale.total) - saleCogs
+                              const saleGpPct = saleCogs > 0 ? Math.round(saleGp / parseFloat(sale.total) * 100) : null
                               return (<>
                                 <tr key={sale.id} onClick={() => setExpandedSale(isExpanded ? null : sale.id)} className={'border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition ' + (sale.payment_status === 'voided' ? 'opacity-50' : '') + (hasReturns && sale.payment_status !== 'voided' ? ' bg-red-50/30' : '') + (isExpanded ? ' bg-orange-50/50' : '')}>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatDateShort(sale.created_at)}</td>
@@ -3193,6 +3714,14 @@ ${customerRows.map(c => `<tr>
                                     <table className="w-full text-xs mt-2"><tbody>{(sale.items || []).map((i: any) => { const returned = (i.returned_quantity || 0) >= i.quantity; const partialReturn = i.returned_quantity > 0 && i.returned_quantity < i.quantity; return (<tr key={i.id} className={'border-b border-slate-100 ' + (returned ? 'opacity-40' : '')}><td className="py-1.5"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span><span className={returned ? 'line-through' : ''}>{i.product_name}</span>{returned && <span className="ml-1.5 text-[9px] font-bold text-red-400 bg-red-50 px-1.5 py-0.5 rounded">RETURNED</span>}{partialReturn && <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded">{i.returned_quantity} returned</span>}</td><td className="py-1.5 text-right text-slate-500">x{i.quantity}</td><td className="py-1.5 text-right font-semibold">Rs.{parseFloat(i.unit_price).toLocaleString()}</td><td className={'py-1.5 text-right font-semibold ' + (returned ? 'line-through text-slate-300' : '')}>Rs.{parseFloat(i.total).toLocaleString()}</td>
 <td className="py-1.5 text-right">{parseFloat(i.unit_price || 0) === 0 && !returned && sale.payment_status !== 'voided' && (<button onClick={async e => { e.stopPropagation(); const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'move_to_approval', saleId: sale.id, saleItemId: i.id }) }); const j = await r.json(); if (j.success) { showToast(j.message); fetchSales() } else showToast(j.error || 'Error') }} className="text-[9px] font-bold text-amber-600 border border-amber-300 rounded px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 whitespace-nowrap">↩ On Approval</button>)}</td></tr>)})}</tbody></table>
                                     {parseFloat(sale.balance_due) > 0 && <p className="text-xs font-bold text-red-600 mt-2">Balance Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p>}
+                                    {saleCogs > 0 && sale.payment_status !== 'voided' && (
+                                      <div className="flex gap-4 mt-2 text-xs">
+                                        <span className="text-slate-400">COGS: Rs.{saleCogs.toLocaleString()}</span>
+                                        <span className={`font-bold ${saleGp >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                          GP: Rs.{saleGp.toLocaleString()} {saleGpPct !== null ? `(${saleGpPct}%)` : ''}
+                                        </span>
+                                      </div>
+                                    )}
                                     <div className="flex gap-2 mt-3 flex-wrap">
                                       <div className="relative">
                                         <button onClick={e => { e.stopPropagation(); const el = document.getElementById('print-menu-' + sale.id); if (el) el.classList.toggle('hidden') }} className="text-[11px] font-semibold text-slate-600 px-3 py-1.5 rounded border border-slate-200 active:bg-slate-50">🖨️ Print ▾</button>
@@ -3276,6 +3805,486 @@ ${customerRows.map(c => `<tr>
                     </div>
                   </div>
                 )}
+
+                {/* ─── TAX REPORTS (lk_tax only) ─── */}
+                {salesSubTab === 'tax' && isLkTax && (() => {
+                  async function runTaxReport() {
+                    if (!taxReportFrom || !taxReportTo) return
+                    setTaxReportLoading(true)
+                    setTaxReportData(null)
+                    try {
+                      const r = await fetch(`/api/vendor/tax-reports?type=${taxReportType}&from=${taxReportFrom}&to=${taxReportTo}`)
+                      const j = await r.json()
+                      if (!r.ok) { showToast('⚠️ ' + (j.error || 'Failed')); return }
+                      setTaxReportData(j)
+                    } catch { showToast('Network error') }
+                    finally { setTaxReportLoading(false) }
+                  }
+
+                  function printTaxReport() {
+                    if (!taxReportData) return
+                    const titleMap: Record<string, string> = {
+                      vat_register: `VAT Output Register — ${taxReportFrom} to ${taxReportTo}`,
+                      input_vat:    `Input VAT Register — ${taxReportFrom} to ${taxReportTo}`,
+                      vat_summary:  `VAT Summary — ${taxReportFrom} to ${taxReportTo}`,
+                      sscl_report:  `SSCL Liability Report — ${taxReportFrom} to ${taxReportTo}`,
+                    }
+                    const title = titleMap[taxReportType] || 'Tax Report'
+                    const entityName = taxReportData.entity || ''
+                    let body = ''
+                    if (taxReportType === 'vat_register') {
+                      const rows = (taxReportData.register || []).map((r: any) => {
+                        const isCrn = r.status === 'CRN'
+                        const style = r.status === 'VOID' ? 'color:#999;text-decoration:line-through'
+                          : isCrn ? 'color:#1d4ed8;background:#eff6ff' : ''
+                        const prefix = isCrn ? '−' : ''
+                        return `<tr style="${style}">
+                          <td>${r.serial}${isCrn && r.refSerial ? `<br/><span style="font-size:9px;color:#93c5fd">↳ ${r.refSerial}</span>` : ''}</td>
+                          <td>${r.invoiceDate ? new Date(r.invoiceDate).toLocaleDateString('en-LK') : ''}</td>
+                          <td>${r.customerName || ''}</td>
+                          <td>${r.customerTin || ''}</td>
+                          <td style="text-align:right">${prefix}Rs.${Math.abs(r.netAmount).toLocaleString()}</td>
+                          <td style="text-align:right">${prefix}Rs.${Math.abs(r.vatAmount).toLocaleString()}</td>
+                          <td style="text-align:right">${prefix}Rs.${Math.abs(r.total).toLocaleString()}</td>
+                          <td style="text-align:center">${r.status}</td>
+                        </tr>`}).join('')
+                      const t = taxReportData.totals
+                      const crnNote = t.crnCount > 0 ? `, ${t.crnCount} credit note(s)` : ''
+                      body = `<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:11px">
+                        <thead><tr style="background:#f0f0f0"><th>Serial / Ref</th><th>Date</th><th>Customer</th><th>TIN</th><th>Net</th><th>VAT</th><th>Total</th><th>Status</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                        <tfoot><tr style="font-weight:bold;background:#f8f8f8"><td colspan="4">NET TOTALS (${t.count} valid, ${t.voidCount} void${crnNote})</td><td style="text-align:right">Rs.${t.netAmount.toLocaleString()}</td><td style="text-align:right">Rs.${t.vatAmount.toLocaleString()}</td><td style="text-align:right">Rs.${t.total.toLocaleString()}</td><td></td></tr></tfoot>
+                      </table>`
+                    } else if (taxReportType === 'sscl_report') {
+                      const rows = (taxReportData.months || []).map((m: any) =>
+                        `<tr>
+                          <td>${m.month}</td>
+                          <td style="text-align:right">Rs.${m.partTurnover.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${m.svcTurnover.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${m.totalTurnover.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${m.partLiable.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${m.svcLiable.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${m.totalLiable.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${m.partSscl.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${m.svcSscl.toLocaleString()}</td>
+                          <td style="text-align:right;font-weight:bold">Rs.${m.totalSscl.toLocaleString()}</td>
+                        </tr>`).join('')
+                      const t = taxReportData.totals
+                      const cfg = taxReportData.config
+                      body = `<p style="font-size:11px;color:#555">SSCL Rate: ${cfg?.ssclRate}% | Parts Liable Base: ${cfg?.liableBasePart}% | Services Liable Base: ${cfg?.liableBaseSvc}%</p>
+                        <table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:11px">
+                          <thead><tr style="background:#f0f0f0"><th>Month</th><th>Parts T/O</th><th>SVC T/O</th><th>Total T/O</th><th>Parts Liable</th><th>SVC Liable</th><th>Total Liable</th><th>Parts SSCL</th><th>SVC SSCL</th><th>Total SSCL</th></tr></thead>
+                          <tbody>${rows}</tbody>
+                          <tfoot><tr style="font-weight:bold;background:#f8f8f8"><td>TOTALS</td>
+                            <td style="text-align:right">Rs.${t.partTurnover.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.svcTurnover.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.totalTurnover.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.partLiable.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.svcLiable.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.totalLiable.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.partSscl.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.svcSscl.toLocaleString()}</td>
+                            <td style="text-align:right">Rs.${t.ssclDue.toLocaleString()}</td>
+                          </tr></tfoot>
+                        </table>`
+                    } else if (taxReportType === 'input_vat') {
+                      const rows = (taxReportData.rows || []).map((r: any) =>
+                        `<tr>
+                          <td style="font-family:monospace">${r.grnNumber}</td>
+                          <td>${r.receivedAt}</td>
+                          <td>${r.supplierName}</td>
+                          <td>${r.supplierInvoiceNo || ''}</td>
+                          <td style="text-align:right">Rs.${r.netCost.toLocaleString()}</td>
+                          <td style="text-align:right;color:#c05621">Rs.${r.inputVat.toLocaleString()}</td>
+                          <td style="text-align:right;font-weight:bold">Rs.${r.totalCost.toLocaleString()}</td>
+                        </tr>`).join('')
+                      const t = taxReportData.totals
+                      body = `<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:11px">
+                        <thead><tr style="background:#f0f0f0"><th>GRN No.</th><th>Date</th><th>Supplier</th><th>Supplier Inv. No.</th><th>Net Cost</th><th>Input VAT</th><th>Total Cost</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                        <tfoot><tr style="font-weight:bold;background:#f8f8f8">
+                          <td colspan="4">TOTALS (${t.count} GRN${t.count !== 1 ? 's' : ''})</td>
+                          <td style="text-align:right">Rs.${t.netCost.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${t.inputVat.toLocaleString()}</td>
+                          <td style="text-align:right">Rs.${t.totalCost.toLocaleString()}</td>
+                        </tr></tfoot>
+                      </table>`
+                    } else if (taxReportType === 'vat_summary') {
+                      const d = taxReportData
+                      const netPayableStyle = d.netPayable >= 0 ? 'color:#991b1b' : 'color:#1e40af'
+                      body = `<table border="1" cellpadding="8" cellspacing="0" style="width:360px;border-collapse:collapse;font-size:12px">
+                        <tbody>
+                          <tr><td><strong>Output VAT</strong> (invoices net of CRNs)</td><td style="text-align:right">Rs.${d.outputVat.toLocaleString()}</td></tr>
+                          <tr><td>&nbsp;&nbsp;Net taxable sales</td><td style="text-align:right">Rs.${d.outputNetSales.toLocaleString()}</td></tr>
+                          <tr><td>&nbsp;&nbsp;Invoices: ${d.invoiceCount} | Credit notes: ${d.crnCount}</td><td></td></tr>
+                          <tr><td><strong>Input VAT</strong> (from posted GRNs)</td><td style="text-align:right">Rs.${d.inputVat.toLocaleString()}</td></tr>
+                          <tr style="font-size:14px;font-weight:bold;background:#f0f0f0"><td>Net VAT Payable</td><td style="text-align:right;${netPayableStyle}">Rs.${Math.abs(d.netPayable).toLocaleString()}${d.netPayable < 0 ? ' (credit)' : ''}</td></tr>
+                        </tbody>
+                      </table>`
+                    }
+                    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
+                      <style>body{font-family:Arial,sans-serif;margin:20px}h2{font-size:14px}h3{font-size:12px;color:#555}@media print{@page{size:A4 landscape;margin:10mm}}</style>
+                      </head><body>
+                      <h2>${title}</h2><h3>${entityName}</h3>
+                      ${body}
+                      <p style="font-size:10px;color:#999;margin-top:16px">Generated ${new Date().toLocaleString('en-LK')}</p>
+                      <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}</script>
+                      </body></html>`
+                    const w = window.open('', '_blank', 'width=1000,height=700')
+                    if (w) { w.document.write(html); w.document.close() }
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Report selector + date range */}
+                      <div className="bg-white rounded-xl border border-slate-200 p-5">
+                        <h3 className="font-bold text-sm text-slate-800 mb-3">🧾 Tax Compliance Reports</h3>
+                        <div className="flex flex-wrap gap-3 items-end">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Report Type</label>
+                            <select value={taxReportType} onChange={e => { setTaxReportType(e.target.value as any); setTaxReportData(null) }} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white">
+                              <option value="vat_register">VAT Output Register</option>
+                              <option value="input_vat">Input VAT Register</option>
+                              <option value="vat_summary">VAT Summary (Net Payable)</option>
+                              <option value="sscl_report">SSCL Liability Report</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label>
+                            <input type="date" value={taxReportFrom} onChange={e => { setTaxReportFrom(e.target.value); setTaxReportData(null) }} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label>
+                            <input type="date" value={taxReportTo} onChange={e => { setTaxReportTo(e.target.value); setTaxReportData(null) }} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                          </div>
+                          <button onClick={runTaxReport} disabled={taxReportLoading} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">
+                            {taxReportLoading ? '⏳ Loading…' : '🔍 Run Report'}
+                          </button>
+                          {taxReportData && (
+                            <button onClick={printTaxReport} className="bg-slate-700 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-lg">🖨️ Print</button>
+                          )}
+                        </div>
+                        {/* Quick range buttons */}
+                        <div className="flex gap-2 mt-3 flex-wrap">
+                          {[
+                            {l:'This Month',fn:()=>{ const n=new Date(); setTaxReportFrom(new Date(n.getFullYear(),n.getMonth(),1).toISOString().slice(0,10)); setTaxReportTo(n.toISOString().slice(0,10)) }},
+                            {l:'Last Month',fn:()=>{ const n=new Date(); const f=new Date(n.getFullYear(),n.getMonth()-1,1); const t=new Date(n.getFullYear(),n.getMonth(),0); setTaxReportFrom(f.toISOString().slice(0,10)); setTaxReportTo(t.toISOString().slice(0,10)) }},
+                            {l:'This Quarter',fn:()=>{ const n=new Date(); const q=Math.floor(n.getMonth()/3); const f=new Date(n.getFullYear(),q*3,1); setTaxReportFrom(f.toISOString().slice(0,10)); setTaxReportTo(n.toISOString().slice(0,10)) }},
+                          ].map(p => (
+                            <button key={p.l} onClick={() => { p.fn(); setTaxReportData(null) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* ── VAT Output Register results ── */}
+                      {taxReportData && taxReportType === 'vat_register' && (() => {
+                        const { register, totals, entity } = taxReportData
+                        return (
+                          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                              <div>
+                                <h3 className="font-bold text-sm text-slate-800">VAT Output Register</h3>
+                                <p className="text-[11px] text-slate-400">{entity} · {taxReportFrom} to {taxReportTo}</p>
+                              </div>
+                              <div className="flex gap-3 text-xs flex-wrap">
+                                <span className="text-slate-500">{totals.count} valid</span>
+                                {totals.voidCount > 0 && <span className="text-red-500">{totals.voidCount} void</span>}
+                                {totals.crnCount > 0 && <span className="text-blue-500">{totals.crnCount} credit note{totals.crnCount > 1 ? 's' : ''}</span>}
+                              </div>
+                            </div>
+                            {/* Totals summary — net of credit notes */}
+                            <div className="grid grid-cols-3 gap-px bg-slate-100">
+                              {[
+                                {l:'Net Amount (net of CRNs)', v: totals.netAmount},
+                                {l:'VAT Output (net of CRNs)', v: totals.vatAmount},
+                                {l:'Total (net of CRNs)', v: totals.total},
+                              ].map(s => (
+                                <div key={s.l} className="bg-white px-4 py-3 text-center">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">{s.l}</p>
+                                  <p className="font-black text-slate-800 text-sm">Rs.{s.v.toLocaleString()}</p>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Table */}
+                            {register.length === 0 ? (
+                              <div className="text-center py-10 text-slate-400 text-sm">No tax invoices found for this period</div>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead><tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase">
+                                    <th className="px-3 py-2 text-left">Serial / Ref</th>
+                                    <th className="px-3 py-2 text-left">Date</th>
+                                    <th className="px-3 py-2 text-left">Customer</th>
+                                    <th className="px-3 py-2 text-left">TIN</th>
+                                    <th className="px-3 py-2 text-right">Net</th>
+                                    <th className="px-3 py-2 text-right">VAT</th>
+                                    <th className="px-3 py-2 text-right">Total</th>
+                                    <th className="px-3 py-2 text-center">Status</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {register.map((r: any, i: number) => {
+                                      const isCrn  = r.status === 'CRN'
+                                      const isVoid = r.status === 'VOID'
+                                      return (
+                                        <tr key={i} className={`border-t border-slate-100 ${isVoid ? 'opacity-40 line-through' : ''} ${isCrn ? 'bg-blue-50' : ''}`}>
+                                          <td className="px-3 py-2">
+                                            <span className="font-mono text-[10px]">{r.serial}</span>
+                                            {isCrn && r.refSerial && <span className="block text-[9px] text-blue-400">↳ {r.refSerial}</span>}
+                                          </td>
+                                          <td className="px-3 py-2 text-slate-500">{r.invoiceDate ? new Date(r.invoiceDate).toLocaleDateString('en-LK') : '—'}</td>
+                                          <td className="px-3 py-2 font-semibold">{r.customerName || '—'}</td>
+                                          <td className="px-3 py-2 font-mono text-slate-400">{r.customerTin || '—'}</td>
+                                          <td className={`px-3 py-2 text-right ${isCrn ? 'text-blue-600 font-semibold' : ''}`}>{isCrn ? '−' : ''}Rs.{Math.abs(r.netAmount).toLocaleString()}</td>
+                                          <td className={`px-3 py-2 text-right ${isCrn ? 'text-blue-600 font-semibold' : 'text-orange-600'}`}>{isCrn ? '−' : ''}Rs.{Math.abs(r.vatAmount).toLocaleString()}</td>
+                                          <td className={`px-3 py-2 text-right font-bold ${isCrn ? 'text-blue-600' : ''}`}>{isCrn ? '−' : ''}Rs.{Math.abs(r.total).toLocaleString()}</td>
+                                          <td className="px-3 py-2 text-center">
+                                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
+                                              isVoid ? 'bg-red-100 text-red-600'
+                                              : isCrn ? 'bg-blue-100 text-blue-700'
+                                              : 'bg-green-100 text-green-700'
+                                            }`}>{r.status}</span>
+                                          </td>
+                                        </tr>
+                                      )
+                                    })}
+                                  </tbody>
+                                  <tfoot>
+                                    <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
+                                      <td className="px-3 py-2" colSpan={4}>NET TOTALS (after credit notes)</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.netAmount.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right text-orange-600">Rs.{totals.vatAmount.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.total.toLocaleString()}</td>
+                                      <td></td>
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {/* ── Input VAT Register results ── */}
+                      {taxReportData && taxReportType === 'input_vat' && (() => {
+                        const { rows, months, totals, entity } = taxReportData
+                        return (
+                          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                              <div>
+                                <h3 className="font-bold text-sm text-slate-800">Input VAT Register</h3>
+                                <p className="text-[11px] text-slate-400">{entity} · {taxReportFrom} to {taxReportTo}</p>
+                              </div>
+                              <span className="text-xs text-slate-400">{totals.count} GRN{totals.count !== 1 ? 's' : ''}</span>
+                            </div>
+                            {/* Totals */}
+                            <div className="grid grid-cols-3 gap-px bg-slate-100">
+                              {[
+                                {l:'Net Cost (excl. VAT)', v: totals.netCost},
+                                {l:'Input VAT Paid', v: totals.inputVat, hi: true},
+                                {l:'Total Cost (incl. VAT)', v: totals.totalCost},
+                              ].map(s => (
+                                <div key={s.l} className="bg-white px-4 py-3 text-center">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">{s.l}</p>
+                                  <p className={`font-black text-sm ${s.hi ? 'text-orange-600' : 'text-slate-800'}`}>Rs.{s.v.toLocaleString()}</p>
+                                </div>
+                              ))}
+                            </div>
+                            {/* By month */}
+                            {months.length > 1 && (
+                              <div className="px-5 py-3 border-b border-slate-100">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">By Month</p>
+                                <div className="flex flex-wrap gap-3">
+                                  {months.map((m: any) => (
+                                    <div key={m.month} className="text-xs bg-slate-50 rounded-lg px-3 py-2">
+                                      <p className="font-semibold text-slate-600">{m.month}</p>
+                                      <p className="text-orange-600">VAT: Rs.{m.inputVat.toLocaleString()}</p>
+                                      <p className="text-slate-400 text-[10px]">{m.count} GRN{m.count !== 1 ? 's' : ''}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {/* Table */}
+                            {rows.length === 0 ? (
+                              <div className="text-center py-10 text-slate-400 text-sm">No posted GRNs with input VAT for this period</div>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead><tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase">
+                                    <th className="px-3 py-2 text-left">GRN No.</th>
+                                    <th className="px-3 py-2 text-left">Date</th>
+                                    <th className="px-3 py-2 text-left">Supplier</th>
+                                    <th className="px-3 py-2 text-left">Supplier Inv.</th>
+                                    <th className="px-3 py-2 text-right">Net Cost</th>
+                                    <th className="px-3 py-2 text-right">Input VAT</th>
+                                    <th className="px-3 py-2 text-right">Total Cost</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {rows.map((r: any, i: number) => (
+                                      <tr key={i} className="border-t border-slate-100">
+                                        <td className="px-3 py-2 font-mono text-[10px] text-slate-600">{r.grnNumber}</td>
+                                        <td className="px-3 py-2 text-slate-500">{r.receivedAt}</td>
+                                        <td className="px-3 py-2 font-semibold">{r.supplierName}</td>
+                                        <td className="px-3 py-2 font-mono text-[10px] text-slate-400">{r.supplierInvoiceNo || '—'}</td>
+                                        <td className="px-3 py-2 text-right text-slate-600">Rs.{r.netCost.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right font-semibold text-orange-600">Rs.{r.inputVat.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right font-bold">Rs.{r.totalCost.toLocaleString()}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                  <tfoot>
+                                    <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
+                                      <td className="px-3 py-2" colSpan={4}>TOTALS</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.netCost.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right text-orange-600">Rs.{totals.inputVat.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.totalCost.toLocaleString()}</td>
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {/* ── VAT Summary results ── */}
+                      {taxReportData && taxReportType === 'vat_summary' && (() => {
+                        const d = taxReportData
+                        const netPositive = d.netPayable >= 0
+                        return (
+                          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="px-5 py-3 border-b border-slate-100">
+                              <h3 className="font-bold text-sm text-slate-800">VAT Summary — Net Payable</h3>
+                              <p className="text-[11px] text-slate-400">{d.entity} · {taxReportFrom} to {taxReportTo}</p>
+                            </div>
+                            <div className="p-6 space-y-4 max-w-md">
+                              {/* Output VAT block */}
+                              <div className="bg-slate-50 rounded-xl p-4">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Output VAT (from tax invoices)</p>
+                                <div className="space-y-1 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-500">Net taxable sales</span>
+                                    <span className="font-semibold">Rs.{d.outputNetSales.toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-slate-500">Output VAT collected</span>
+                                    <span className="font-bold text-orange-600">Rs.{d.outputVat.toLocaleString()}</span>
+                                  </div>
+                                  <div className="flex justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200">
+                                    <span>{d.invoiceCount} valid invoice{d.invoiceCount !== 1 ? 's' : ''}</span>
+                                    {d.crnCount > 0 && <span>{d.crnCount} credit note{d.crnCount !== 1 ? 's' : ''} applied</span>}
+                                  </div>
+                                </div>
+                              </div>
+                              {/* Input VAT block */}
+                              <div className="bg-slate-50 rounded-xl p-4">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Input VAT (from posted GRNs)</p>
+                                <div className="flex justify-between text-sm">
+                                  <span className="text-slate-500">Input VAT paid on purchases</span>
+                                  <span className="font-bold text-green-700">Rs.{d.inputVat.toLocaleString()}</span>
+                                </div>
+                              </div>
+                              {/* Net payable */}
+                              <div className={`rounded-xl p-5 border-2 ${netPositive ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
+                                <p className="text-[10px] font-bold uppercase mb-1 text-slate-500">Net VAT {netPositive ? 'Payable to CGIR' : 'Refundable / Credit'}</p>
+                                <p className={`text-2xl font-black ${netPositive ? 'text-red-600' : 'text-blue-700'}`}>
+                                  Rs.{Math.abs(d.netPayable).toLocaleString()}
+                                </p>
+                                <p className="text-[10px] text-slate-400 mt-1">Output Rs.{d.outputVat.toLocaleString()} − Input Rs.{d.inputVat.toLocaleString()}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })()}
+
+                      {/* ── SSCL Liability Report results ── */}
+                      {taxReportData && taxReportType === 'sscl_report' && (() => {
+                        const { months, totals, config, entity } = taxReportData
+                        return (
+                          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                              <div>
+                                <h3 className="font-bold text-sm text-slate-800">SSCL Liability Report</h3>
+                                <p className="text-[11px] text-slate-400">{entity} · {taxReportFrom} to {taxReportTo}</p>
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                Rate {config?.ssclRate}% · Parts base {config?.liableBasePart}% · SVC base {config?.liableBaseSvc}%
+                              </div>
+                            </div>
+                            {/* Totals summary */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-100">
+                              {[
+                                {l:'Total Turnover', v: totals.totalTurnover},
+                                {l:'Liable Base', v: totals.totalLiable},
+                                {l:'SSCL Due', v: totals.ssclDue, highlight: true},
+                                {l:'Parts / SVC Split', v: `${((totals.partTurnover/(totals.totalTurnover||1))*100).toFixed(0)}% / ${((totals.svcTurnover/(totals.totalTurnover||1))*100).toFixed(0)}%`, isText: true},
+                              ].map((s: any) => (
+                                <div key={s.l} className="bg-white px-4 py-3 text-center">
+                                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">{s.l}</p>
+                                  <p className={`font-black text-sm ${s.highlight ? 'text-red-600' : 'text-slate-800'}`}>
+                                    {s.isText ? s.v : `Rs.${(s.v as number).toLocaleString()}`}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                            {/* Table */}
+                            {months.length === 0 ? (
+                              <div className="text-center py-10 text-slate-400 text-sm">No sales found for this period</div>
+                            ) : (
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs">
+                                  <thead><tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase">
+                                    <th className="px-3 py-2 text-left">Month</th>
+                                    <th className="px-3 py-2 text-right">Parts T/O</th>
+                                    <th className="px-3 py-2 text-right">SVC T/O</th>
+                                    <th className="px-3 py-2 text-right">Total T/O</th>
+                                    <th className="px-3 py-2 text-right">Parts Liable</th>
+                                    <th className="px-3 py-2 text-right">SVC Liable</th>
+                                    <th className="px-3 py-2 text-right">Total Liable</th>
+                                    <th className="px-3 py-2 text-right">Parts SSCL</th>
+                                    <th className="px-3 py-2 text-right">SVC SSCL</th>
+                                    <th className="px-3 py-2 text-right font-black text-slate-700">SSCL Due</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {months.map((m: any) => (
+                                      <tr key={m.month} className="border-t border-slate-100">
+                                        <td className="px-3 py-2 font-semibold">{m.month}</td>
+                                        <td className="px-3 py-2 text-right text-slate-500">Rs.{m.partTurnover.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right text-slate-500">Rs.{m.svcTurnover.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right font-semibold">Rs.{m.totalTurnover.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right text-slate-500">Rs.{m.partLiable.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right text-slate-500">Rs.{m.svcLiable.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right font-semibold">Rs.{m.totalLiable.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right text-orange-500">Rs.{m.partSscl.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right text-orange-500">Rs.{m.svcSscl.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right font-black text-red-600">Rs.{m.totalSscl.toLocaleString()}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                  <tfoot>
+                                    <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
+                                      <td className="px-3 py-2">TOTALS</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.partTurnover.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.svcTurnover.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.totalTurnover.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.partLiable.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.svcLiable.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.totalLiable.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.partSscl.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right">Rs.{totals.svcSscl.toLocaleString()}</td>
+                                      <td className="px-3 py-2 text-right text-red-600">Rs.{totals.ssclDue.toLocaleString()}</td>
+                                    </tr>
+                                  </tfoot>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  )
+                })()}
+
               </>)
 
 
@@ -3831,6 +4840,60 @@ ${customerRows.map(c => `<tr>
           </div>
         )}
 
+        {/* ── CREDIT NOTE PROMPT (after return on tax invoice) ── */}
+        {pendingCreditNote && (
+          <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl">
+              <div className="bg-blue-50 px-5 py-4 border-b border-blue-100">
+                <h3 className="font-bold text-base text-blue-800">🧾 Issue Credit Note?</h3>
+                <p className="text-xs text-blue-600 mt-1">Return processed against tax invoice <strong>{pendingCreditNote.taxSerial}</strong></p>
+              </div>
+              <div className="px-5 py-4 space-y-3">
+                <p className="text-sm text-slate-600">Sri Lankan tax law requires a <strong>Credit Note</strong> for any return against a gazette tax invoice. This reduces your output VAT for the period.</p>
+                <div className="bg-slate-50 rounded-xl p-4 space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-500">Customer</span><span className="font-semibold">{pendingCreditNote.customerName || '—'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Original Invoice</span><span className="font-mono text-xs">{pendingCreditNote.taxSerial}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Credit Amount</span><span className="font-black text-blue-700">Rs.{pendingCreditNote.refundAmount.toLocaleString()}</span></div>
+                </div>
+              </div>
+              <div className="px-5 pb-5 space-y-2">
+                <button onClick={issueCreditNote} disabled={creditNoteLoading} className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl">
+                  {creditNoteLoading ? '⏳ Issuing…' : '✅ Issue Credit Note'}
+                </button>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <p className="text-[11px] text-amber-700 font-semibold">⚠️ Required by law</p>
+                  <p className="text-[10px] text-amber-600 mt-0.5">A Credit Note is mandatory for returns against a gazette tax invoice. Skipping means your VAT register will show an overstated output VAT until a CRN is issued manually.</p>
+                  <button onClick={() => setPendingCreditNote(null)} className="text-[11px] text-amber-700 underline mt-1">Dismiss — I will issue manually</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── ISSUED CREDIT NOTE — show number + print ── */}
+        {issuedCreditNote && (
+          <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setIssuedCreditNote(null)}>
+            <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="bg-green-50 px-5 py-4 border-b border-green-100">
+                <h3 className="font-bold text-base text-green-800">✅ Credit Note Issued</h3>
+                <p className="text-xs text-green-600 mt-1">Keep this for your VAT records</p>
+              </div>
+              <div className="px-5 py-5 space-y-3">
+                <div className="bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-500">Credit Note No.</span><span className="font-black font-mono text-green-700 text-base">{issuedCreditNote.credit_note_no}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Against Invoice</span><span className="font-mono text-xs">{issuedCreditNote.original_serial}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">VAT Credited</span><span className="font-semibold">Rs.{parseInt(issuedCreditNote.vat_amount || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Total Credit</span><span className="font-black text-blue-700">Rs.{parseInt(issuedCreditNote.total || 0).toLocaleString()}</span></div>
+                </div>
+              </div>
+              <div className="px-5 pb-5 space-y-2">
+                <button onClick={() => printCreditNote(issuedCreditNote, posInvoiceEntities.find((e: any) => e.id === issuedCreditNote.invoice_entity_id))} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm py-3 rounded-xl">🖨️ Print Credit Note</button>
+                <button onClick={() => setIssuedCreditNote(null)} className="w-full text-sm font-semibold text-slate-400 py-2 active:text-slate-600">Done</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* VOID SALE MODAL */}
         {voidModal && (
           <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setVoidModal(null)}>
@@ -3883,340 +4946,24 @@ ${customerRows.map(c => `<tr>
         )}
 
         {/* STOCK TAKE */}
-        {tab === 'stocktake' && (() => {
-          const allProducts = (data?.products || [])
-
-          // ── derive unique values for dropdowns ──
-          const uniq = (arr: string[]) => [...new Set(arr.filter(Boolean))].sort()
-          const allStores  = uniq(allProducts.map((p: any) => p.loc_store))
-          const allFloors  = uniq(allProducts.filter((p: any) => !stockFilter.store || p.loc_store === stockFilter.store).map((p: any) => p.loc_floor))
-          const allSub1s   = uniq(allProducts.filter((p: any) => (!stockFilter.store || p.loc_store === stockFilter.store) && (!stockFilter.floor || p.loc_floor === stockFilter.floor)).map((p: any) => p.loc_sub1))
-          const allSub2s   = uniq(allProducts.filter((p: any) => (!stockFilter.store || p.loc_store === stockFilter.store) && (!stockFilter.floor || p.loc_floor === stockFilter.floor) && (!stockFilter.sub1 || p.loc_sub1 === stockFilter.sub1)).map((p: any) => p.loc_sub2))
-
-          // ── filter products by active filters + search ──
-          const searchLower = stocktakeSearch.toLowerCase()
-          const browseProducts = allProducts.filter((p: any) => {
-            if (stockFilter.store && p.loc_store !== stockFilter.store) return false
-            if (stockFilter.floor && p.loc_floor !== stockFilter.floor) return false
-            if (stockFilter.sub1  && p.loc_sub1  !== stockFilter.sub1)  return false
-            if (stockFilter.sub2  && p.loc_sub2  !== stockFilter.sub2)  return false
-            if (searchLower) return p.name?.toLowerCase().includes(searchLower) || (p.sku || '').toLowerCase().includes(searchLower)
-            return true
-          })
-
-          const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch
-          const pendingCount = Object.keys(stockQtyEdits).length + stockConfirmSet.size
-
-          // ── quick assign: search results ──
-          const assignSearchLower = assignSearch.toLowerCase()
-          const assignResults = assignSearch.length > 1
-            ? allProducts.filter((p: any) =>
-                p.name?.toLowerCase().includes(assignSearchLower) ||
-                (p.sku || '').toLowerCase().includes(assignSearchLower))
-              .slice(0, 20)
-            : []
-          const anyAssignLoc = assignLoc.store || assignLoc.floor || assignLoc.sub1 || assignLoc.sub2
-
-          const dropdownCls = "px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white w-full"
-
-          return (
-            <div>
-              {/* ── Mode toggle ── */}
-              <div className="flex items-center gap-2 mb-5">
-                <button onClick={() => setStockView('browse')}
-                  className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'browse' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}`}>
-                  📦 Browse & Count
-                </button>
-                <button onClick={() => setStockView('assign')}
-                  className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'assign' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-500 border-slate-200'}`}>
-                  📍 Quick Assign
-                </button>
-                {pendingCount > 0 && stockView === 'browse' && (
-                  <button onClick={saveAllStockChanges} disabled={stocktakeSaving}
-                    className="ml-auto bg-orange-500 active:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-xl disabled:opacity-50 shrink-0">
-                    {stocktakeSaving ? 'Saving...' : `Save ${pendingCount} Change${pendingCount !== 1 ? 's' : ''}`}
-                  </button>
-                )}
-              </div>
-
-              {/* ══════════════════════════════════════════ */}
-              {/* BROWSE & COUNT MODE                       */}
-              {/* ══════════════════════════════════════════ */}
-              {stockView === 'browse' && (
-                <div>
-                  {/* 4-level filter row */}
-                  <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
-                    <p className="text-xs font-bold text-slate-400 uppercase">Filter by Location</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 mb-1">Store</label>
-                        <select value={stockFilter.store} onChange={e => setStockFilter(f => ({...f, store: e.target.value, floor: '', sub1: '', sub2: ''}))} className={dropdownCls}>
-                          <option value="">All Stores</option>
-                          {allStores.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 mb-1">Floor</label>
-                        <select value={stockFilter.floor} onChange={e => setStockFilter(f => ({...f, floor: e.target.value, sub1: '', sub2: ''}))} className={dropdownCls}>
-                          <option value="">All Floors</option>
-                          {allFloors.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 mb-1">Sub Location 1</label>
-                        <select value={stockFilter.sub1} onChange={e => setStockFilter(f => ({...f, sub1: e.target.value, sub2: ''}))} className={dropdownCls}>
-                          <option value="">All</option>
-                          {allSub1s.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500 mb-1">Sub Location 2</label>
-                        <select value={stockFilter.sub2} onChange={e => setStockFilter(f => ({...f, sub2: e.target.value}))} className={dropdownCls}>
-                          <option value="">All</option>
-                          {allSub2s.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                    {/* Search within filter */}
-                    <div className="relative">
-                      <input type="search" placeholder="Search by name or SKU…" value={stocktakeSearch}
-                        onChange={e => setStocktakeSearch(e.target.value)}
-                        className="w-full px-4 py-2.5 text-sm rounded-lg border-2 border-slate-200 outline-none focus:border-orange-400 bg-white" />
-                      {stocktakeSearch && <button onClick={() => setStocktakeSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">×</button>}
-                    </div>
-                    {anyFilter && (
-                      <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch('') }}
-                        className="text-xs font-bold text-orange-500 hover:text-orange-700">✕ Clear all filters</button>
-                    )}
-                  </div>
-
-                  {/* Results header */}
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold text-slate-400 uppercase">{browseProducts.length} product{browseProducts.length !== 1 ? 's' : ''}{anyFilter ? ' matching' : ''}</p>
-                  </div>
-
-                  {/* Product list */}
-                  {browseProducts.length === 0 ? (
-                    <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
-                      <p className="text-3xl mb-3">🔍</p>
-                      <p className="text-slate-500 font-semibold">No products match these filters</p>
-                      <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch('') }} className="mt-3 text-sm text-orange-500 font-bold">Clear filters</button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 pb-24 sm:pb-4">
-                      {browseProducts.map((p: any) => {
-                        const curQty = stockQtyEdits[p.id] ?? p.quantity
-                        const changed = stockQtyEdits[p.id] !== undefined
-                        const confirmed = stockConfirmSet.has(p.id)
-                        const loc = locLabel(p)
-                        const ago = confirmedAgo(p.last_stock_confirmed_at)
-                        return (
-                          <div key={p.id} className={`bg-white rounded-xl border p-4 ${changed ? 'border-orange-300 bg-orange-50' : confirmed ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
-                            {/* Top row: info + confirmed badge */}
-                            <div className="flex items-start justify-between gap-2 mb-3">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                                  <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
-                                  {p.condition && <span className="text-[10px] font-semibold text-slate-400">{p.condition}</span>}
-                                </div>
-                                <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
-                                {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model}</p>}
-                                {loc && !anyFilter && <p className="text-[10px] font-semibold text-amber-700 mt-0.5">📍 {loc}</p>}
-                                {changed && <p className="text-[10px] font-bold text-orange-600 mt-0.5">Was {p.quantity} → now {curQty}</p>}
-                              </div>
-                              <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                {ago
-                                  ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ago.cls}`}>✓ {ago.label}</span>
-                                  : <span className="text-[10px] font-semibold text-slate-300 px-2 py-0.5 rounded-full bg-slate-50">Never confirmed</span>}
-                                {!changed && (
-                                  <button onClick={() => setStockConfirmSet(prev => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n })}
-                                    className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border transition active:scale-95 ${confirmed ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600'}`}>
-                                    {confirmed ? '✓ Confirmed' : 'Confirm'}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            {/* Bottom row: qty controls */}
-                            <div className="flex items-center gap-2">
-                              <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
-                                className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
-                              <input type="number" min="0" value={curQty}
-                                onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: parseInt(e.target.value) || 0}))}
-                                className="w-20 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
-                              <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
-                                className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  {/* Sticky save bar — mobile */}
-                  {pendingCount > 0 && (
-                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-orange-200 p-4 z-50 sm:hidden">
-                      <button onClick={saveAllStockChanges} disabled={stocktakeSaving}
-                        className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl disabled:opacity-50 text-base">
-                        {stocktakeSaving ? 'Saving...' : `✓ Save ${pendingCount} Change${pendingCount !== 1 ? 's' : ''}`}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ══════════════════════════════════════════ */}
-              {/* QUICK ASSIGN MODE                         */}
-              {/* ══════════════════════════════════════════ */}
-              {stockView === 'assign' && (
-                <div>
-                  {/* Set current location — locked until changed */}
-                  <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 mb-5">
-                    <p className="text-xs font-bold text-amber-800 uppercase mb-3">📍 I'm standing at this location</p>
-                    <div className="grid grid-cols-2 gap-2 mb-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-amber-700 mb-1">Store</label>
-                        <input value={assignLoc.store} onChange={e => setAssignLoc(l => ({...l, store: e.target.value}))}
-                          list="assign-stores" className="w-full px-3 py-2.5 rounded-lg border-2 border-amber-200 text-sm outline-none bg-white focus:border-orange-400" placeholder="Main Store" />
-                        <datalist id="assign-stores">{allStores.map(s => <option key={s} value={s} />)}</datalist>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-amber-700 mb-1">Floor</label>
-                        <input value={assignLoc.floor} onChange={e => setAssignLoc(l => ({...l, floor: e.target.value}))}
-                          list="assign-floors" className="w-full px-3 py-2.5 rounded-lg border-2 border-amber-200 text-sm outline-none bg-white focus:border-orange-400" placeholder="Ground" />
-                        <datalist id="assign-floors">{allFloors.map(s => <option key={s} value={s} />)}</datalist>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-amber-700 mb-1">Sub Location 1</label>
-                        <input value={assignLoc.sub1} onChange={e => setAssignLoc(l => ({...l, sub1: e.target.value}))}
-                          list="assign-sub1s" className="w-full px-3 py-2.5 rounded-lg border-2 border-amber-200 text-sm outline-none bg-white focus:border-orange-400" placeholder="Rack A" />
-                        <datalist id="assign-sub1s">{allSub1s.map(s => <option key={s} value={s} />)}</datalist>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-amber-700 mb-1">Sub Location 2</label>
-                        <input value={assignLoc.sub2} onChange={e => setAssignLoc(l => ({...l, sub2: e.target.value}))}
-                          list="assign-sub2s" className="w-full px-3 py-2.5 rounded-lg border-2 border-amber-200 text-sm outline-none bg-white focus:border-orange-400" placeholder="Bin 5" />
-                        <datalist id="assign-sub2s">{allSub2s.map(s => <option key={s} value={s} />)}</datalist>
-                      </div>
-                    </div>
-                    {anyAssignLoc
-                      ? <div className="bg-amber-100 border border-amber-300 rounded-lg px-3 py-2 text-sm font-bold text-amber-900">📍 {[assignLoc.store, assignLoc.floor, assignLoc.sub1, assignLoc.sub2].filter(Boolean).join(' › ')}</div>
-                      : <p className="text-xs text-amber-600">Fill at least one field above to start assigning</p>
-                    }
-                  </div>
-
-                  {/* Product search */}
-                  <div className="relative mb-3">
-                    <input type="search" placeholder="Search product by name or SKU to assign…" value={assignSearch}
-                      onChange={e => setAssignSearch(e.target.value)}
-                      className="w-full px-4 py-3 text-base rounded-xl border-2 border-slate-200 outline-none focus:border-orange-400 bg-white" />
-                    {assignSearch && <button onClick={() => setAssignSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">×</button>}
-                  </div>
-
-                  {assignSearch.length < 2 && (
-                    <p className="text-xs text-slate-400 text-center py-6">Type at least 2 characters to search products</p>
-                  )}
-
-                  {/* ── At this location ── always visible when a location is set */}
-                  {anyAssignLoc && (() => {
-                    const atLoc = allProducts.filter((p: any) =>
-                      (!assignLoc.store || p.loc_store === assignLoc.store) &&
-                      (!assignLoc.floor || p.loc_floor === assignLoc.floor) &&
-                      (!assignLoc.sub1  || p.loc_sub1  === assignLoc.sub1) &&
-                      (!assignLoc.sub2  || p.loc_sub2  === assignLoc.sub2))
-                    if (!atLoc.length) return (
-                      <div className="mb-4 text-center py-4 border-2 border-dashed border-slate-200 rounded-xl">
-                        <p className="text-sm text-slate-400">No products assigned here yet</p>
-                      </div>
-                    )
-                    return (
-                      <div className="mb-5">
-                        <p className="text-xs font-bold text-slate-400 uppercase mb-2">At this location — {atLoc.length} part{atLoc.length !== 1 ? 's' : ''}</p>
-                        <div className="space-y-1.5">
-                          {atLoc.map((p: any) => {
-                            const ago = confirmedAgo(p.last_stock_confirmed_at)
-                            const isClearing = assignLoading === ('clear-' + p.id)
-                            return (
-                              <div key={p.id} className="bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3">
-                                <div className="flex-1 min-w-0">
-                                  <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{p.sku}</span>
-                                  <p className="font-semibold text-slate-900 text-sm leading-tight mt-0.5">{p.name}</p>
-                                  {(p.make || p.model) && <p className="text-xs text-slate-400">{p.make} {p.model}</p>}
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <p className="font-bold text-slate-700 text-sm">qty: {p.quantity}</p>
-                                  {ago
-                                    ? <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${ago.cls}`}>✓ {ago.label}</span>
-                                    : <span className="text-[10px] text-slate-300">not confirmed</span>}
-                                </div>
-                                <button
-                                  disabled={isClearing}
-                                  onClick={async () => {
-                                    setAssignLoading('clear-' + p.id)
-                                    await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: null, loc_floor: null, loc_sub1: null, loc_sub2: null } }) })
-                                    await fetchData()
-                                    setAssignLoading(null)
-                                    showToast('Location cleared')
-                                  }}
-                                  className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 active:bg-red-100 border border-slate-200 text-lg font-bold disabled:opacity-40 transition">
-                                  {isClearing ? '…' : '✕'}
-                                </button>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )
-                  })()}
-
-                  {assignResults.length > 0 && (
-                    <div className="space-y-2">
-                      {assignResults.map((p: any) => {
-                        const currentLoc = locLabel(p)
-                        const isSaving = assignLoading === p.id
-                        const alreadyHere = anyAssignLoc &&
-                          (!assignLoc.store || p.loc_store === assignLoc.store) &&
-                          (!assignLoc.floor || p.loc_floor === assignLoc.floor) &&
-                          (!assignLoc.sub1  || p.loc_sub1  === assignLoc.sub1) &&
-                          (!assignLoc.sub2  || p.loc_sub2  === assignLoc.sub2)
-                        return (
-                          <div key={p.id} className={`bg-white rounded-xl border p-4 flex items-center gap-3 ${alreadyHere ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
-                            <div className="flex-1 min-w-0">
-                              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{p.sku}</span>
-                              <p className="font-bold text-slate-900 leading-tight mt-0.5">{p.name}</p>
-                              {(p.make || p.model) && <p className="text-xs text-slate-400">{p.make} {p.model}</p>}
-                              {currentLoc
-                                ? <p className="text-[10px] font-semibold text-amber-700 mt-0.5">📍 {currentLoc}</p>
-                                : <p className="text-[10px] text-slate-300 mt-0.5">No location set</p>}
-                            </div>
-                            {alreadyHere ? (
-                              <span className="text-emerald-600 font-bold text-sm shrink-0">✓ Here</span>
-                            ) : (
-                              <button
-                                disabled={!anyAssignLoc || isSaving}
-                                onClick={async () => {
-                                  if (!anyAssignLoc) return
-                                  setAssignLoading(p.id)
-                                  await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: assignLoc.store || null, loc_floor: assignLoc.floor || null, loc_sub1: assignLoc.sub1 || null, loc_sub2: assignLoc.sub2 || null } }) })
-                                  await fetchData()
-                                  setAssignLoading(null)
-                                  showToast(`📍 ${p.sku} assigned`)
-                                }}
-                                className="bg-amber-500 active:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-40 shrink-0">
-                                {isSaving ? '…' : 'Assign'}
-                              </button>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )
-        })()}
+        {tab === 'stocktake' && isLkTax && (
+          <TabStockLkTax
+            vendor={data?.vendor}
+            products={data?.products || []}
+            vendorSettings={vendorSettings}
+            showToast={showToast}
+            onDataChanged={fetchData}
+          />
+        )}
+        {tab === 'stocktake' && !isLkTax && (
+          <TabStockStandard
+            vendor={data?.vendor}
+            products={data?.products || []}
+            vendorSettings={vendorSettings}
+            showToast={showToast}
+            onDataChanged={fetchData}
+          />
+        )}
 
         {/* SETTINGS */}
         {tab === 'settings' && (<div>
@@ -4422,8 +5169,73 @@ ${customerRows.map(c => `<tr>
                 </div>
               )}
             </div>
+
+            {/* ── Tax Configuration (lk_tax / Pvt Ltd only) ── */}
+            {isLkTax && (() => {
+              async function loadTaxConfig() {
+                const r = await fetch('/api/vendor/tax-config')
+                const j = await r.json()
+                if (r.ok) setTaxConfigData(j.config)
+              }
+              if (taxConfigData === null) { loadTaxConfig(); return <div className="text-center py-6"><div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" /></div> }
+              async function saveTaxConfig() {
+                setTaxConfigSaving(true)
+                try {
+                  const r = await fetch('/api/vendor/tax-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(taxConfigData) })
+                  if (r.ok) showToast('Tax config saved!')
+                  else { const j = await r.json(); showToast('⚠️ ' + (j.error || 'Failed')) }
+                } finally { setTaxConfigSaving(false) }
+              }
+              const fields: Array<{key: string; label: string; unit: string; hint: string}> = [
+                { key: 'vat_rate',        label: 'VAT Rate',                unit: '%',  hint: 'Standard rate (currently 18%)' },
+                { key: 'sscl_rate',       label: 'SSCL Rate',               unit: '%',  hint: 'Rate on liable base (currently 2.5%)' },
+                { key: 'liable_base_part',label: 'SSCL Liable Base — Parts',unit: '%',  hint: 'Portion of parts turnover liable for SSCL (currently 50%)' },
+                { key: 'liable_base_svc', label: 'SSCL Liable Base — SVC',  unit: '%',  hint: 'Portion of service turnover liable for SSCL (currently 100%)' },
+              ]
+              return (
+                <div className="bg-white rounded-xl border border-slate-200 p-5 lg:col-span-2">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-bold text-sm text-slate-800">🧾 Tax Rate Configuration</h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">MacForce Auto Engineering (Pvt) Ltd only — do not change without accountant advice</p>
+                    </div>
+                    <button onClick={saveTaxConfig} disabled={taxConfigSaving} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-lg">
+                      {taxConfigSaving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {fields.map(f => (
+                      <div key={f.key}>
+                        <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1">{f.label}</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={taxConfigData[f.key] ?? ''}
+                            onChange={e => setTaxConfigData({ ...taxConfigData!, [f.key]: parseFloat(e.target.value) || 0 })}
+                            className="w-28 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400"
+                          />
+                          <span className="text-sm font-bold text-slate-400">{f.unit}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">{f.hint}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <p className="text-[10px] text-amber-700">
+                      Effective SSCL: Parts = {((taxConfigData['sscl_rate'] ?? 2.5) * (taxConfigData['liable_base_part'] ?? 50) / 100).toFixed(4)}% of turnover &nbsp;·&nbsp;
+                      SVC = {((taxConfigData['sscl_rate'] ?? 2.5) * (taxConfigData['liable_base_svc'] ?? 100) / 100).toFixed(4)}% of turnover
+                    </p>
+                  </div>
+                </div>
+              )
+            })()}
+
           </div>
         </div>)}
+
+      {/* STOCKTAKE COST PROMPT MODAL moved into _lk_tax/TabStock and _standard/TabStock components */}
 
       </main>
     </div>

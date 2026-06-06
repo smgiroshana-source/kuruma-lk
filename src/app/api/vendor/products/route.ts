@@ -64,6 +64,19 @@ export async function POST(req: NextRequest) {
     }).select().single()
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
     revalidatePath('/')
+    // Auto-seed FIFO cost layer if opening stock + cost both provided
+    const initQty  = parseInt(pd.quantity) || 1
+    const initCost = parseInt(pd.cost)
+    if (initQty > 0 && initCost > 0 && product) {
+      await admin.from('cost_layers').insert({
+        vendor_id:          vendor.id,
+        product_id:         product.id,
+        quantity_received:  initQty,
+        quantity_remaining: initQty,
+        unit_cost:          initCost,
+        received_at:        new Date().toISOString().slice(0, 10),
+      })
+    }
     return NextResponse.json({ success: true, product, message: 'Product created (ID: ' + sku + ')' })
   }
 
@@ -150,6 +163,31 @@ export async function POST(req: NextRequest) {
 
     // Revalidate home page once for the bulk import (not per-product)
     if (toInsert.length > 0) revalidatePath('/')
+
+    // Auto-seed FIFO cost layers for newly inserted products with qty > 0 AND cost > 0
+    const today = new Date().toISOString().slice(0, 10)
+    const costLayerRows: any[] = []
+    for (const p of results) {
+      const qty  = parseInt(p.quantity) || 0
+      const cost = parseInt(p.cost)     || 0
+      if (qty > 0 && cost > 0 && p.id && p.vendor_id === vendor.id) {
+        costLayerRows.push({
+          vendor_id:          vendor.id,
+          product_id:         p.id,
+          quantity_received:  qty,
+          quantity_remaining: qty,
+          unit_cost:          cost,
+          received_at:        today,
+        })
+      }
+    }
+    if (costLayerRows.length > 0) {
+      const CLBATCH = 80
+      for (let i = 0; i < costLayerRows.length; i += CLBATCH) {
+        await admin.from('cost_layers').insert(costLayerRows.slice(i, i + CLBATCH))
+      }
+    }
+
     return NextResponse.json({
       success: true, count: results.length, products: results, skipped,
       skippedCount: skipped.length, updatedCount: toUpdate.length,
@@ -248,6 +286,24 @@ export async function POST(req: NextRequest) {
       deletedCount: ownedIds.length,
       message: `${ownedIds.length} product${ownedIds.length > 1 ? 's' : ''} deleted`
     })
+  }
+
+  // ─── SEED COST LAYER — for stocktake upward adjustments ───
+  if (action === 'seed_cost_layer') {
+    const { productId, unitCost, quantity, receivedAt } = body
+    if (!productId || !unitCost || !quantity) return NextResponse.json({ success: false, error: 'productId, unitCost, quantity required' }, { status: 400 })
+    const { data: p } = await admin.from('products').select('vendor_id').eq('id', productId).single()
+    if (!p || p.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
+    const { error } = await admin.from('cost_layers').insert({
+      vendor_id:          vendor.id,
+      product_id:         productId,
+      quantity_received:  quantity,
+      quantity_remaining: quantity,
+      unit_cost:          unitCost,
+      received_at:        receivedAt || new Date().toISOString().slice(0, 10),
+    })
+    if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
