@@ -4,6 +4,10 @@ import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constant
 import { useState, useEffect, useRef, startTransition, useMemo } from 'react'
 import TabStockLkTax from './_lk_tax/TabStock'
 import TabStockStandard from './_standard/TabStock'
+import TabPOSLkTax from './_lk_tax/TabPOS'
+import TabPOSStandard from './_standard/TabPOS'
+import type { PendingDraft } from './_lk_tax/TabPOS'
+import TabCredit from './_shared/TabCredit'
 
 type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
@@ -77,19 +81,6 @@ function confirmedAgo(dateStr: string | null): { label: string; cls: string } | 
   if (days <= 30) return { label: `${days}d ago`, cls: 'text-amber-700 bg-amber-50' }
   return { label: `${days}d ago`, cls: 'text-red-600 bg-red-50' }
 }
-
-/** Credit aging badge — shown on customer cards and individual invoices.
- *  Based on the oldest unpaid invoice date.
- *  <30d → nothing  |  30-44d → yellow  |  45-59d → orange  |  60d+ → red */
-function creditAge(dateStr: string | null): { label: string; pill: string; dot: string } | null {
-  if (!dateStr) return null
-  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
-  if (days >= 60) return { label: `${days}d overdue`, pill: 'text-red-700 bg-red-100 border border-red-300',    dot: 'bg-red-500' }
-  if (days >= 45) return { label: `${days}d overdue`, pill: 'text-orange-700 bg-orange-100 border border-orange-300', dot: 'bg-orange-500' }
-  if (days >= 30) return { label: `${days}d overdue`, pill: 'text-yellow-700 bg-yellow-100 border border-yellow-300', dot: 'bg-yellow-500' }
-  return null
-}
-
 
 // Strip internal tracking notes that must not appear on printed customer invoices.
 function cleanPrintNotes(notes: string | null | undefined): string {
@@ -424,19 +415,6 @@ export default function VendorDashboard() {
 
   // POS
   const [posCart, setPosCart] = useState<any[]>([])
-  const [posSearch, setPosSearch] = useState('')
-  const [posCustomer, setPosCustomer] = useState<any>({ id: null, name: '', phone: '', advance: 0 })
-  const [customerSuggestions, setCustomerSuggestions] = useState<any[]>([])
-  const [posDiscount, setPosDiscount] = useState('')
-  const [posPayments, setPosPayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-  const [posNotes, setPosNotes] = useState('')
-  const [posDate, setPosDate] = useState(new Date().toISOString().split('T')[0])
-  const [posVehicleNo, setPosVehicleNo] = useState('')
-  const [posLoading, setPosLoading] = useState(false)
-  const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean; vehicle?: boolean }>({})
-  const [posReceipt, setPosReceipt] = useState<any>(null)
-  const [posPreview, setPosPreview] = useState(false)
-  const [useAdvance, setUseAdvance] = useState(false)
 
   // Sales
   const [salesData, setSalesData] = useState<any>(null)
@@ -444,7 +422,6 @@ export default function VendorDashboard() {
   const [salesLoading, setSalesLoading] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [settingsPhoneError, setSettingsPhoneError] = useState('')
-  const [posPhoneError, setPosPhoneError] = useState('')
   const [exportFrom, setExportFrom] = useState('')
   const [exportTo, setExportTo] = useState('')
   const [exportLoading, setExportLoading] = useState(false)
@@ -467,17 +444,6 @@ export default function VendorDashboard() {
   const [customerHistoryName, setCustomerHistoryName] = useState('')
   const [customerHistory, setCustomerHistory] = useState<any[] | null>(null)
 
-  // Credit
-  const [creditCustomers, setCreditCustomers] = useState<any[]>([])
-  const [creditLoading, setCreditLoading] = useState(false)
-  const [showAllCustomers, setShowAllCustomers] = useState(false)
-  const [customerSearch, setCustomerSearch] = useState('')
-  const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<any>(null)
-  const [outstandingSales, setOutstandingSales] = useState<any[]>([])
-  const [settleSale, setSettleSale] = useState<any>(null)
-  const [settlePayments, setSettlePayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-  const [settleLoading, setSettleLoading] = useState(false)
-
   // Settings
   const [vendorSettings, setVendorSettings] = useState<any>({
     invoice_title: '', invoice_footer: '', invoice_terms: '', invoice_show_logo: true,
@@ -493,30 +459,15 @@ export default function VendorDashboard() {
   const [staffLoading, setStaffLoading] = useState(false)
   const [newStaff, setNewStaff] = useState({ email: '', name: '', role: 'cashier', pin: '' })
   const [staffTempPassword, setStaffTempPassword] = useState<{ name: string; email: string; password: string } | null>(null)
-  const [editingCustomer, setEditingCustomer] = useState<any>(null)
-  const [editCustomerLoading, setEditCustomerLoading] = useState(false)
-  const [showAddCustomer, setShowAddCustomer] = useState(false)
-  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '', require_vehicle_no: false })
-  const [addCustomerLoading, setAddCustomerLoading] = useState(false)
-  const [adjustAdvanceAmount, setAdjustAdvanceAmount] = useState('')
 
-  // Draft / On Approval
+  // Draft / On Approval (page-level: used by Sales "Finalise →" to hand off to TabPOS)
+  const [pendingPosDraft, setPendingPosDraft] = useState<PendingDraft | null>(null)
   const [draftReturning, setDraftReturning] = useState<string | null>(null)
   const [returningItem, setReturningItem] = useState<string | null>(null)
-  const [posDraftId, setPosDraftId] = useState<string | null>(null)
-  const [posDraftInvoiceNo, setPosDraftInvoiceNo] = useState('')
   const [allDrafts, setAllDrafts] = useState<any[]>([])
 
   // ── lk_tax (WHEEL MART) POS state ─────────────────────────────────────────
   const [posInvoiceEntities, setPosInvoiceEntities] = useState<any[]>([])
-  const [posEntityId, setPosEntityId] = useState<string | null>(null)
-  const [posDocType, setPosDocType] = useState<'receipt' | 'tax_invoice'>('receipt')
-  const [posCustomerAddress, setPosCustomerAddress] = useState('')
-  const [posCustomerTin, setPosCustomerTin] = useState('')
-  const [posCustomerVatReg, setPosCustomerVatReg] = useState(false)
-  // Manual / service line entry (SVC stream)
-  const [showManualLine, setShowManualLine] = useState(false)
-  const [manualLine, setManualLine] = useState({ name: '', qty: '1', price: '' })
 
   // ── Credit note state ─────────────────────────────────────────────────────
   const [pendingCreditNote, setPendingCreditNote] = useState<{
@@ -570,7 +521,6 @@ export default function VendorDashboard() {
 
   useEffect(() => { fetchData(); fetchSettings() }, [])
   useEffect(() => { if (tab === 'sales') fetchSales() }, [tab, salesPeriod])
-  useEffect(() => { if (tab === 'credit') fetchCreditCustomers() }, [tab, showAllCustomers])
   useEffect(() => {
     if (!customerHistoryId) { setCustomerHistory(null); return }
     const controller = new AbortController()
@@ -618,12 +568,7 @@ export default function VendorDashboard() {
       const res = await fetch('/api/vendor/invoice-entities')
       if (!res.ok) return
       const j = await res.json()
-      const entities: any[] = j.entities || []
-      setPosInvoiceEntities(entities)
-      if (entities.length > 0) {
-        // Pre-select the default entity (Pvt Ltd); keep any existing selection
-        setPosEntityId(prev => prev || (entities.find((e: any) => e.is_default) || entities[0]).id)
-      }
+      setPosInvoiceEntities(j.entities || [])
     } catch {}
   }
 
@@ -773,80 +718,6 @@ export default function VendorDashboard() {
     } catch {}
     setSalesLoading(false)
   }
-  async function fetchCreditCustomers() {
-    setCreditLoading(true)
-    try {
-      const url = showAllCustomers ? '/api/vendor/customers?credit=true&all=true' : '/api/vendor/customers?credit=true'
-      const r = await fetch(url)
-      if (r.ok) {
-        const j = await r.json()
-        if (showAllCustomers) {
-          setCreditCustomers(j.customers || [])
-        } else {
-          setCreditCustomers((j.customers || []).filter((c: any) => c.credit?.balance > 0 || c.advance > 0))
-        }
-      }
-    } catch {}
-    setCreditLoading(false)
-  }
-
-  async function registerCustomer() {
-    if (!newCustomer.name.trim()) { showToast('Customer name required'); return }
-    setAddCustomerLoading(true)
-    try {
-      const r = await fetch('/api/vendor/customers', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create', name: newCustomer.name, phone: newCustomer.phone,
-          whatsapp: newCustomer.whatsapp || newCustomer.phone, email: newCustomer.email,
-          address: newCustomer.address, notes: newCustomer.notes,
-          advance_balance: newCustomer.advance ? parseFloat(newCustomer.advance) : 0,
-          require_vehicle_no: newCustomer.require_vehicle_no || false,
-        })
-      })
-      const j = await r.json()
-      if (j.success) {
-        // If opening credit amount, create a dummy sale to represent past debt
-        if (newCustomer.credit && parseFloat(newCustomer.credit) > 0) {
-          await fetch('/api/vendor/sales', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'create_sale', customerId: j.customer.id,
-              items: [{ productId: null, productName: 'Opening Balance (Past Transactions)', productSku: 'OPENING-BAL', unitPrice: parseFloat(newCustomer.credit), quantity: 1 }],
-              payments: [], notes: 'Opening credit balance from past transactions',
-              skipStock: true,
-            })
-          })
-        }
-        showToast('Customer registered!')
-        setNewCustomer({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '', require_vehicle_no: false })
-        setShowAddCustomer(false)
-        fetchCreditCustomers()
-      } else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-    setAddCustomerLoading(false)
-  }
-
-  async function adjustAdvance(customerId: string, type: 'add' | 'refund') {
-    const amount = parseFloat(adjustAdvanceAmount)
-    if (!amount || amount <= 0) { showToast('Enter a valid amount'); return }
-    setEditCustomerLoading(true)
-    try {
-      const r = await fetch('/api/vendor/customers', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: type === 'add' ? 'add_advance' : 'refund_advance', customerId, amount, paymentMethod: 'cash', notes: 'Manual adjustment' })
-      })
-      const j = await r.json()
-      if (j.success) {
-        showToast(type === 'add' ? 'Advance added!' : 'Advance refunded!')
-        setAdjustAdvanceAmount('')
-        fetchCreditCustomers()
-        if (editingCustomer) setEditingCustomer({ ...editingCustomer, advance_balance: j.advance || (editingCustomer.advance_balance + (type === 'add' ? amount : -amount)) })
-      } else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-    setEditCustomerLoading(false)
-  }
-
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 4000) }
   async function handleSignOut() { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = '/' }
 
@@ -1148,201 +1019,12 @@ export default function VendorDashboard() {
     setTimeout(() => setBulkProgress({ current: 0, total: 0, phase: '', detail: '' }), 3000)
   }
 
-  // POS - Customer search
-  async function searchCustomers(query: string) {
-    if (query.length < 2) { setCustomerSuggestions([]); return }
-    try { const r = await fetch(`/api/vendor/customers?search=${encodeURIComponent(query)}`); if (r.ok) { const j = await r.json(); setCustomerSuggestions(j.customers || []) } } catch {}
-  }
-
-  function selectCustomer(customer: any) {
-    const advance = parseFloat(customer.advance_balance || 0)
-    setPosCustomer({ id: customer.id, name: customer.name, phone: customer.phone || '', advance, outstanding: 0, require_vehicle_no: customer.require_vehicle_no || false })
-    setCustomerSuggestions([])
-    if (advance > 0) setUseAdvance(true)
-    // Fetch outstanding
-    fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: customer.id }) })
-      .then(r => r.json()).then(j => {
-        const outstanding = (j.sales || []).reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
-        setPosCustomer((prev: any) => ({ ...prev, outstanding }))
-      }).catch(() => {})
-  }
-
   function addToCart(product: any) {
     setPosCart(prev => { const ex = prev.find(i => i.productId === product.id); if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: Math.min(i.quantity + 1, product.quantity) } : i); return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: product.quantity }] })
-    setPosSearch('')
-  }
-  function updateCartQty(i: number, q: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, quantity: Math.max(1, Math.min(q, item.maxStock)) } : item)) }
-  function updateCartPrice(i: number, price: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, unitPrice: price } : item)) }
-  function removeFromCart(i: number) { setPosCart(p => p.filter((_, x) => x !== i)) }
-
-  /** lk_tax: add a free-text service / labour line tagged as SVC stream */
-  function addManualLine() {
-    const name = manualLine.name.trim()
-    const qty = Math.max(1, parseInt(manualLine.qty) || 1)
-    const price = parseInt(manualLine.price) || 0
-    if (!name) { return }
-    setPosCart(prev => [...prev, {
-      productId: null, productName: name, productSku: '', unitPrice: price,
-      quantity: qty, maxStock: null, ssclStream: 'SVC',
-    }])
-    setManualLine({ name: '', qty: '1', price: '' })
-    setShowManualLine(false)
   }
 
-  // Payment lines
-  function addPaymentLine() { setPosPayments(p => [...p, { method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]) }
-  function updatePaymentLine(i: number, field: string, value: string) { setPosPayments(p => p.map((line, x) => x === i ? { ...line, [field]: value } : line)) }
-  function removePaymentLine(i: number) { setPosPayments(p => p.filter((_, x) => x !== i)) }
-
-  const { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment } = useMemo(() => {
-    const posSubtotal = posCart.reduce((s, i) => s + i.quantity * i.unitPrice, 0)
-    const posDiscountAmt = parseFloat(posDiscount) || 0
-    const posTotal = Math.max(0, posSubtotal - posDiscountAmt)
-    const posPaidAmount = posPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
-    const posAdvanceApplied = useAdvance && posCustomer.advance > 0 ? Math.min(posCustomer.advance, Math.max(0, posTotal - posPaidAmount)) : 0
-    const posTotalPaid = posPaidAmount + posAdvanceApplied
-    const posBalance = Math.max(0, posTotal - posTotalPaid)
-    const posOverpayment = Math.max(0, posTotalPaid - posTotal)
-    return { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment }
-  }, [posCart, posDiscount, posPayments, useAdvance, posCustomer])
-
-  // lk_tax computed values (VAT-inclusive pricing: extract VAT from total)
+  // lk_tax computed values (used in Settings, tab conditionals)
   const isLkTax = vendorSettings?.invoice_mode === 'lk_tax'
-  const posCurrentEntity = posInvoiceEntities.find((e: any) => e.id === posEntityId) || null
-  const posIsVatEntity = posCurrentEntity?.invoice_mode === 'lk_tax'
-  const posVatAmount = posIsVatEntity ? Math.round(posTotal * 18 / 118) : 0
-  const posNetAmount = posIsVatEntity ? posTotal - posVatAmount : posTotal
-
-  function handleCreateSale() {
-    if (posCart.length === 0) { showToast('Add items to cart'); return }
-    const errors: { name?: boolean; phone?: boolean; vehicle?: boolean; address?: boolean; tin?: boolean } = {}
-    if (!posCustomer.name.trim()) errors.name = true
-    if (!posCustomer.phone.trim()) errors.phone = true
-    if (posCustomer.require_vehicle_no && !posVehicleNo.trim()) errors.vehicle = true
-    // lk_tax: address required on tax invoices
-    if (isLkTax && posDocType === 'tax_invoice' && !posCustomerAddress.trim()) errors.address = true
-    // lk_tax: TIN required when customer is VAT-registered
-    if (isLkTax && posDocType === 'tax_invoice' && posCustomerVatReg && !posCustomerTin.trim()) errors.tin = true
-    if (errors.name || errors.phone || errors.vehicle || errors.address || errors.tin) {
-      setPosErrors(errors)
-      if (errors.address) showToast('⚠️ Customer address required for tax invoice')
-      if (errors.tin) showToast('⚠️ Customer TIN required (VAT-registered purchaser)')
-      if (errors.vehicle) showToast('⚠️ Vehicle number required for this customer')
-      setTimeout(() => setPosErrors({}), 4000)
-      return
-    }
-    setPosErrors({})
-    setPosPreview(true)
-  }
-
-  async function confirmCreateSale() {
-    setPosLoading(true)
-    try {
-      // If we're finalising a draft, use finalize_draft instead of create_sale
-      const action = posDraftId ? 'finalize_draft' : 'create_sale'
-      const body = posDraftId
-        ? {
-            action,
-            saleId: posDraftId,
-            customerId: posCustomer.id || null,
-            useAdvance,
-            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity })),
-            payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
-            discount: posDiscountAmt,
-            vehicleNo: posVehicleNo || null,
-            notes: posNotes || null,
-            saleDate: posDate,
-            customerName: posCustomer.name,
-            customerPhone: posCustomer.phone,
-          }
-        : {
-            action,
-            customerId: posCustomer.id, customerName: posCustomer.name || 'Walk-in Customer', customerPhone: posCustomer.phone,
-            items: posCart.map(i => ({
-              productId: i.productId || null,
-              productName: i.productName,
-              productSku: i.productSku || null,
-              quantity: i.quantity,
-              unitPrice: i.unitPrice,
-              ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC'),
-            })),
-            discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0),
-            notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
-            // lk_tax fields (only sent when applicable)
-            ...(isLkTax && posEntityId ? {
-              invoiceEntityId: posEntityId,
-              documentType: posDocType,
-              customerAddress: posCustomerAddress.trim() || null,
-              customerVatRegistered: posCustomerVatReg,
-              customerTin: posCustomerVatReg ? posCustomerTin.trim() || null : null,
-            } : {}),
-          }
-
-      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      const j = await r.json()
-      if (j.success) {
-        setPosReceipt({ sale: { ...j.sale, totalAmountDue: j.totalAmountDue || 0 }, vendor: data?.vendor, advanceUsed: j.advanceUsed || 0, appliedToOutstanding: j.appliedToOutstanding || 0, settledInvoices: j.settledInvoices || [], newAdvance: j.newAdvance || 0 })
-        showToast(j.message)
-        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
-        setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-        setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false)
-        setPosDraftId(null); setPosDraftInvoiceNo('')
-        // Reset lk_tax fields (keep entity + docType for next sale)
-        setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
-        setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' })
-        setPosPreview(false); await fetchData(); fetchSales(); fetchCreditCustomers()
-      } else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-    setPosLoading(false)
-  }
-
-  async function handleCreateDraft() {
-    if (posCart.length === 0) { showToast('Add items to cart'); return }
-    if (!posCustomer.name.trim()) { setPosErrors(prev => ({ ...prev, name: true })); return }
-    setPosLoading(true)
-    try {
-      const res = await fetch('/api/vendor/sales', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create_draft',
-          customerId: posCustomer.id || null,
-          customerName: posCustomer.name,
-          customerPhone: posCustomer.phone,
-          items: posCart.map(i => ({ productId: i.productId, productName: i.productName, productSku: i.productSku, quantity: i.quantity, unitPrice: i.unitPrice, unitCost: i.unitCost })),
-          vehicleNo: posVehicleNo || null,
-        })
-      })
-      const j = await res.json()
-      if (j.success) {
-        showToast('📦 ' + j.invoiceNo + ' sent on approval')
-        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo('')
-        await fetchData(); fetchSales(); fetchCreditCustomers()
-      } else showToast(j.error || 'Error')
-    } catch { showToast('Network error') }
-    setPosLoading(false)
-  }
-
-  // Credit settlement
-  async function loadOutstanding(customer: any) {
-    setSelectedCreditCustomer(customer); setOutstandingSales([]); setRecentPayments([]); setRecentPaymentsOpen(false); setBulkSettleConfirm(false)
-    try { const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: customer.id }) }); if (r.ok) { const j = await r.json(); setOutstandingSales(j.sales || []) } } catch {}
-    loadRecentPayments(customer.id)
-  }
-
-  async function handleSettle() {
-    if (!settleSale) return; const totalPay = settlePayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0); if (totalPay <= 0) { showToast('Enter payment amount'); return }
-    setSettleLoading(true)
-    try {
-      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        action: 'settle_credit', customerId: selectedCreditCustomer.id, saleId: settleSale.id,
-        payments: settlePayments.filter(p => parseFloat(p.amount) > 0),
-      }) })
-      const j = await r.json()
-      if (j.success) { showToast(j.message); setSettleSale(null); setSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]); await loadOutstanding(selectedCreditCustomer); await fetchCreditCustomers() }
-      else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-    setSettleLoading(false)
-  }
 
   async function handleReturn(refundMethod: 'advance' | 'cash') {
     if (!returnModal) return
@@ -1494,183 +1176,6 @@ export default function VendorDashboard() {
       if (j.success) { showToast(j.message); fetchSales(); fetchData() }
       else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
-  }
-
-  async function handleEditCustomer() {
-    if (!editingCustomer) return
-    setEditCustomerLoading(true)
-    try {
-      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        action: 'update', customerId: editingCustomer.id,
-        data: { name: editingCustomer.name, phone: editingCustomer.phone, whatsapp: editingCustomer.whatsapp, email: editingCustomer.email, address: editingCustomer.address, notes: editingCustomer.notes, require_vehicle_no: editingCustomer.require_vehicle_no || false },
-      }) })
-      const j = await r.json()
-      if (j.success) { showToast('Customer updated'); setEditingCustomer(null); fetchCreditCustomers(); if (selectedCreditCustomer?.id === editingCustomer.id) setSelectedCreditCustomer({ ...selectedCreditCustomer, ...editingCustomer }) }
-      else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-    setEditCustomerLoading(false)
-  }
-
-
-  const [bulkSettleMode, setBulkSettleMode] = useState(false)
-  const [bulkSettlePayments, setBulkSettlePayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-  const [bulkSettleLoading, setBulkSettleLoading] = useState(false)
-  const [bulkSettleConfirm, setBulkSettleConfirm] = useState(false)
-  const [reversingPayment, setReversingPayment] = useState<string | null>(null)
-  const [recentPayments, setRecentPayments] = useState<any[]>([])
-  const [recentPaymentsOpen, setRecentPaymentsOpen] = useState(false)
-
-  async function handleBulkSettle() {
-    if (!selectedCreditCustomer) return
-    const totalPay = bulkSettlePayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
-    if (totalPay <= 0) { showToast('Enter payment amount'); return }
-    // Show confirmation step instead of processing immediately
-    setBulkSettleConfirm(true)
-  }
-
-  async function confirmBulkSettle() {
-    if (!selectedCreditCustomer) return
-    setBulkSettleLoading(true)
-    try {
-      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        action: 'bulk_settle', customerId: selectedCreditCustomer.id,
-        payments: bulkSettlePayments.filter((p: any) => parseFloat(p.amount) > 0),
-      }) })
-      const j = await r.json()
-      if (j.success) { showToast(j.message); setBulkSettleMode(false); setBulkSettleConfirm(false); setBulkSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]); fetchCreditCustomers(); loadOutstanding(selectedCreditCustomer) }
-      else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-    setBulkSettleLoading(false)
-  }
-
-  async function handleReversePayment(paymentId: string) {
-    if (!confirm('Reverse this payment? The invoice balance will be restored.')) return
-    setReversingPayment(paymentId)
-    try {
-      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reverse_payment', paymentId }) })
-      const j = await r.json()
-      if (j.success) {
-        showToast('Payment reversed — invoice balance restored')
-        if (selectedCreditCustomer) { loadOutstanding(selectedCreditCustomer); loadRecentPayments(selectedCreditCustomer.id) }
-        fetchCreditCustomers()
-      } else showToast('Error: ' + j.error)
-    } catch { showToast('Network error') }
-    setReversingPayment(null)
-  }
-
-  async function loadRecentPayments(customerId: string) {
-    try {
-      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'get_recent_payments', customerId }) })
-      if (r.ok) { const j = await r.json(); setRecentPayments(j.payments || []) }
-    } catch {}
-  }
-
-  function printCreditReport(customer: any, sales: any[], vendorInfo: any) {
-    const totalDue = sales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
-    const advanceBalance = parseFloat(customer.advance_balance || 0)
-    const netDue = Math.max(0, totalDue - advanceBalance)
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Credit Report - ${customer.name}</title>
-<style>
-  @page { size: A4; margin: 15mm; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; color: #333; max-width: 800px; margin: 0 auto; }
-  .header { text-align: center; padding: 20px 0; border-bottom: 3px solid #f97316; margin-bottom: 20px; }
-  .shop-name { font-size: 24px; font-weight: 900; }
-  .report-title { font-size: 18px; font-weight: 700; color: #dc2626; margin-top: 8px; text-transform: uppercase; letter-spacing: 1px; }
-  .customer-info { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
-  .customer-info h3 { font-size: 12px; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px; }
-  .customer-info p { font-size: 14px; margin: 3px 0; }
-  .customer-name { font-size: 18px; font-weight: 800; }
-  table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-  th { background: #f1f5f9; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 10px 8px; border-bottom: 2px solid #e2e8f0; }
-  td { padding: 10px 8px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
-  .text-right { text-align: right; }
-  .amount-due { color: #dc2626; font-weight: 800; }
-  .amount-paid { color: #16a34a; }
-  .total-box { background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px 8px 0 0; padding: 12px 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: none; }
-  .total-label { font-size: 14px; font-weight: 700; color: #dc2626; }
-  .total-amount { font-size: 22px; font-weight: 900; color: #dc2626; }
-  .footer { text-align: center; padding: 20px 0; color: #94a3b8; font-size: 11px; border-top: 1px solid #e2e8f0; margin-top: 30px; }
-  .date-generated { font-size: 11px; color: #94a3b8; text-align: right; margin-bottom: 15px; }
-  .advance-deduct-box { background: #ecfdf5; border: 2px solid #dc2626; border-top: 1px dashed #dc2626; border-bottom: none; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; }
-  .advance-deduct-label { font-size: 13px; font-weight: 700; color: #059669; }
-  .advance-deduct-amount { font-size: 18px; font-weight: 900; color: #059669; }
-  .net-box { background: #dc2626; border: 2px solid #dc2626; border-radius: 0 0 8px 8px; padding: 15px; display: flex; justify-content: space-between; align-items: center; }
-  .net-label { font-size: 16px; font-weight: 700; color: #fff; }
-  .net-amount { font-size: 30px; font-weight: 900; color: #fff; }
-  .standalone-total-box { background: #fef2f2; border: 2px solid #dc2626; border-radius: 8px; padding: 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
-  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-</style></head><body>
-<div class="header">
-  <div class="shop-name">${vendorInfo?.name || 'kuruma.lk'}</div>
-  ${vendorInfo?.location ? `<div style="font-size:12px;color:#666">${vendorInfo.location} ${vendorInfo?.phone ? '| Tel: ' + vendorInfo.phone : ''}</div>` : ''}
-  <div class="report-title">Credit Statement</div>
-</div>
-<div class="date-generated">Generated: ${new Date().toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-<div class="customer-info">
-  <h3>Customer Details</h3>
-  <p class="customer-name">${customer.name}</p>
-  ${customer.phone ? `<p>Phone: ${customer.phone}</p>` : ''}
-  ${customer.email ? `<p>Email: ${customer.email}</p>` : ''}
-  ${customer.address ? `<p>Address: ${customer.address}</p>` : ''}
-</div>
-${sales.length > 0 ? `
-<table>
-  <thead><tr><th>Invoice #</th><th>Date</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Balance Due</th></tr></thead>
-  <tbody>
-    ${sales.map((s: any) => `<tr>
-      <td><strong>${s.invoice_no}</strong></td>
-      <td>${formatDateShort(s.created_at)}</td>
-      <td style="font-size:11px;color:#666">${(s.items || []).map((i: any) => i.product_name).join(', ')}</td>
-      <td class="text-right">Rs.${parseFloat(s.total).toLocaleString()}</td>
-      <td class="text-right amount-paid">Rs.${parseFloat(s.paid_amount).toLocaleString()}</td>
-      <td class="text-right amount-due">Rs.${parseFloat(s.balance_due).toLocaleString()}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>
-` : '<p style="text-align:center;color:#94a3b8;padding:20px">No outstanding invoices</p>'}
-${advanceBalance > 0 ? `
-<div class="total-box"><span class="total-label">TOTAL OUTSTANDING</span><span class="total-amount">Rs. ${totalDue.toLocaleString()}</span></div>
-<div class="advance-deduct-box"><span class="advance-deduct-label">Less: Advance Balance</span><span class="advance-deduct-amount">( Rs. ${advanceBalance.toLocaleString()} )</span></div>
-<div class="net-box"><span class="net-label">NET AMOUNT DUE</span><span class="net-amount">Rs. ${netDue.toLocaleString()}</span></div>
-` : `<div class="standalone-total-box"><span class="total-label" style="font-size:16px">TOTAL OUTSTANDING</span><span class="total-amount" style="font-size:28px">Rs. ${totalDue.toLocaleString()}</span></div>`}
-<div class="footer">
-  <p>This is a computer-generated statement. Please settle outstanding amounts at your earliest convenience.</p>
-  <p style="margin-top:5px">Contact: ${vendorInfo?.phone || ''} ${vendorInfo?.whatsapp ? '| WhatsApp: ' + vendorInfo.whatsapp : ''}</p>
-  <p style="margin-top:8px;font-weight:700">Powered by kuruma.lk</p>
-</div>
-</body></html>`
-    const win = window.open('', '_blank', 'width=850,height=700')
-    if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
-  }
-
-  function sendWhatsAppCreditReport(customer: any, sales: any[], vendorInfo: any) {
-    const totalDue = sales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
-    const rawPhone = customer.whatsapp || customer.phone
-    if (!rawPhone) { showToast('No phone number for this customer'); return }
-    const phone = toWhatsAppNumber(rawPhone)
-
-    const advanceBalance = parseFloat(customer.advance_balance || 0)
-    const netDue = Math.max(0, totalDue - advanceBalance)
-    let msg = `*CREDIT STATEMENT*%0A${vendorInfo?.name || 'kuruma.lk'}%0ADate: ${new Date().toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })}%0A%0ADear ${customer.name},%0A%0AHere is your outstanding balance:%0A`
-    sales.forEach((s: any) => {
-      msg += `%0A📋 *${s.invoice_no}* (${formatDateShort(s.created_at)})%0A`
-      msg += `   Total: Rs.${parseFloat(s.total).toLocaleString()} | Paid: Rs.${parseFloat(s.paid_amount).toLocaleString()}%0A`
-      msg += `   *Due: Rs.${parseFloat(s.balance_due).toLocaleString()}*%0A`
-    })
-    msg += `%0A━━━━━━━━━━━━━━━━%0A`
-    if (advanceBalance > 0) {
-      msg += `Total Outstanding: Rs.${totalDue.toLocaleString()}%0A`
-      msg += `Less Advance Balance: (Rs.${advanceBalance.toLocaleString()})%0A`
-      msg += `━━━━━━━━━━━━━━━━%0A*NET AMOUNT DUE: Rs.${netDue.toLocaleString()}*%0A`
-    } else {
-      msg += `*TOTAL OUTSTANDING: Rs.${totalDue.toLocaleString()}*%0A`
-    }
-    msg += `%0APlease settle at your earliest convenience.%0AThank you! - ${vendorInfo?.name || 'kuruma.lk'}`
-
-    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
   }
 
   // ─── REPORT GENERATORS ───
@@ -2213,12 +1718,7 @@ ${customerRows.map(c => `<tr>
     })
   }, [data, productSearch, showSoldOut])
 
-  const posFilteredProducts = useMemo(() => {
-    const prods: any[] = (data?.products) || []
-    if (!posSearch || posSearch.length < 2) return []
-    const s = posSearch.toLowerCase()
-    return prods.filter((p: any) => (p.name.toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s) || (p.make || '').toLowerCase().includes(s)) && p.quantity > 0)
-  }, [data, posSearch])
+
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>
   if (!data) return null
@@ -2878,376 +2378,31 @@ ${customerRows.map(c => `<tr>
         </div>)}
 
         {/* POS */}
-        {tab === 'pos' && (<div>
-
-          {/* Invoice Preview Modal */}
-          {posPreview && (
-            <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-              <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[92vh] overflow-y-auto">
-                {/* Header */}
-                <div className="bg-slate-800 text-white px-5 py-4 rounded-t-2xl sm:rounded-t-2xl">
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-0.5">Invoice Preview</p>
-                  <p className="font-black text-xl">{data?.vendor?.name}</p>
-                  <p className="text-sm text-slate-300 mt-1">{new Date(posDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-                </div>
-
-                <div className="p-5 space-y-4">
-                  {/* Customer */}
-                  <div className="bg-slate-50 rounded-xl p-3 space-y-0.5">
-                    <p className="font-black text-slate-800">{posCustomer.name || 'Walk-in Customer'}</p>
-                    {posCustomer.phone && <p className="text-xs text-slate-500">📞 {posCustomer.phone}</p>}
-                    {posVehicleNo && <p className="text-xs font-mono font-bold text-slate-700">🚗 {posVehicleNo}</p>}
-                    {posNotes && <p className="text-xs text-slate-400 italic mt-1">{posNotes}</p>}
-                  </div>
-
-                  {/* Items */}
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2">Items</p>
-                    <div className="space-y-1.5">
-                      {posCart.map((item, i) => (
-                        <div key={i} className="flex justify-between items-start text-sm">
-                          <div className="flex-1 min-w-0 pr-3">
-                            <p className="font-semibold text-slate-800 truncate">{item.productName}</p>
-                            <p className="text-xs text-slate-400">{item.productSku} · Rs.{item.unitPrice.toLocaleString()} × {item.quantity}</p>
-                          </div>
-                          <p className="font-bold text-slate-800 shrink-0">Rs.{(item.unitPrice * item.quantity).toLocaleString()}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Totals */}
-                  <div className="border-t border-slate-100 pt-3 space-y-1.5">
-                    <div className="flex justify-between text-sm text-slate-500"><span>Subtotal</span><span>Rs.{posSubtotal.toLocaleString()}</span></div>
-                    {posDiscountAmt > 0 && <div className="flex justify-between text-sm text-emerald-600"><span>Discount</span><span>−Rs.{posDiscountAmt.toLocaleString()}</span></div>}
-                    <div className="flex justify-between font-black text-base text-slate-800 pt-1 border-t border-slate-200"><span>Total</span><span>Rs.{posTotal.toLocaleString()}</span></div>
-                  </div>
-
-                  {/* Payment breakdown */}
-                  {posPayments.filter(p => parseFloat(p.amount) > 0).length > 0 && (
-                    <div className="bg-emerald-50 rounded-xl p-3 space-y-1">
-                      <p className="text-[10px] font-black text-emerald-700 uppercase tracking-wider mb-1.5">Payment</p>
-                      {posPayments.filter(p => parseFloat(p.amount) > 0).map((p, i) => (
-                        <div key={i} className="flex justify-between text-sm text-emerald-800">
-                          <span>{PAY_LABELS[p.method] || p.method}{p.chequeNumber ? ` #${p.chequeNumber}` : ''}{p.bankRef ? ` ref:${p.bankRef}` : ''}</span>
-                          <span className="font-bold">Rs.{parseFloat(p.amount).toLocaleString()}</span>
-                        </div>
-                      ))}
-                      {useAdvance && posAdvanceApplied > 0 && <div className="flex justify-between text-sm text-cyan-700"><span>Advance Applied</span><span className="font-bold">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
-                    </div>
-                  )}
-                  {posBalance > 0 && <div className="flex justify-between font-black text-red-600 bg-red-50 rounded-xl px-3 py-2"><span>Balance Due (Credit)</span><span>Rs.{posBalance.toLocaleString()}</span></div>}
-                  {posOverpayment > 0 && <div className="flex justify-between font-bold text-cyan-700 bg-cyan-50 rounded-xl px-3 py-2"><span>{posCustomer.outstanding > 0 ? 'Excess → applied to outstanding' : 'Excess → advance'}</span><span>Rs.{posOverpayment.toLocaleString()}</span></div>}
-                </div>
-
-                {/* Action buttons */}
-                <div className="flex gap-3 px-5 pb-6">
-                  <button onClick={() => setPosPreview(false)} className="flex-1 border-2 border-slate-300 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-50 text-sm">
-                    ← Back to Edit
-                  </button>
-                  <button onClick={confirmCreateSale} disabled={posLoading} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black py-3.5 rounded-xl text-sm disabled:opacity-50">
-                    {posLoading ? 'Creating…' : '✅ Confirm'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {posReceipt ? (
-            <div>
-              <div className="flex items-center justify-between mb-4"><h1 className="text-2xl font-black">Invoice Created!</h1><button onClick={() => setPosReceipt(null)} className="text-sm text-slate-500 px-3 py-1.5 rounded-lg border border-slate-200">+ New Sale</button></div>
-              <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-2xl">
-                <div className="text-center mb-4"><p className="text-4xl mb-2">✅</p><p className="text-2xl font-black">{posReceipt.sale.invoice_no}</p><p className="text-sm text-slate-500">{posReceipt.sale.customer_name}</p><p className="text-3xl font-black text-orange-600 mt-2">Rs.{parseFloat(posReceipt.sale.total).toLocaleString()}</p>
-                  {parseFloat(posReceipt.sale.balance_due) > 0 && <p className="text-lg font-bold text-red-600 mt-1">Balance Due: Rs.{parseFloat(posReceipt.sale.balance_due).toLocaleString()}</p>}
-                  {posReceipt.advanceUsed > 0 && <p className="text-sm font-bold text-cyan-600 mt-1">Rs.{posReceipt.advanceUsed.toLocaleString()} used from advance</p>}
-                  {posReceipt.appliedToOutstanding > 0 && <p className="text-sm font-bold text-amber-600 mt-1">Rs.{posReceipt.appliedToOutstanding.toLocaleString()} applied to old invoices{posReceipt.settledInvoices?.length > 0 ? ` (cleared: ${posReceipt.settledInvoices.join(', ')})` : ''}</p>}
-                  {posReceipt.newAdvance > 0 && <p className="text-sm font-bold text-emerald-600 mt-1">Rs.{posReceipt.newAdvance.toLocaleString()} added to advance</p>}
-                </div>
-                <div className="flex gap-2 flex-wrap justify-center">
-                  <button onClick={() => printInvoice(posReceipt.sale, posReceipt.vendor, 'thermal', vendorSettings)} className="bg-slate-800 text-white text-sm font-bold px-5 py-2.5 rounded-xl">🖨️ Thermal</button>
-                  <button onClick={() => printInvoice(posReceipt.sale, posReceipt.vendor, 'a4', vendorSettings)} className="bg-blue-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl">📄 A4</button>
-                  {posReceipt.sale.customer_phone && <button onClick={() => sendWhatsAppBill(posReceipt.sale, posReceipt.vendor, posReceipt.sale.customer_phone)} className="bg-green-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl">💬 WhatsApp</button>}
-                  {data?.vendor?.whatsapp && <button onClick={sendEODReport} className="bg-purple-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl">📊 End of Day → Manager</button>}
-                </div>
-              </div>
-            </div>
+        {tab === 'pos' && (
+          isLkTax ? (
+            <TabPOSLkTax
+              vendor={vendor}
+              products={products}
+              vendorSettings={vendorSettings}
+              showToast={showToast}
+              onDataChanged={fetchData}
+              pendingDraft={pendingPosDraft}
+              onDraftLoaded={() => setPendingPosDraft(null)}
+            />
           ) : (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-              <h1 className="text-2xl font-black text-slate-900">🧾 POS</h1>
-              {data?.vendor?.whatsapp && (
-                <button onClick={sendEODReport}
-                  className="flex items-center gap-2 text-xs font-bold px-3 py-2 rounded-lg bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100">
-                  📊 End of Day → Manager
-                </button>
-              )}
-            </div>
-            {/* Draft mode banner */}
-            {posDraftId && (
-              <div className="mb-4 bg-amber-50 border-2 border-amber-400 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-0.5">Finalising On-Approval Draft</p>
-                  <p className="font-black text-amber-900 text-base">{posCustomer.name}{posDraftInvoiceNo ? ' · ' + posDraftInvoiceNo : ''}</p>
-                  <p className="text-xs text-amber-600 mt-0.5">Edit prices, add vehicle number &amp; payment — then Complete Invoice</p>
-                </div>
-                <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo('') }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
-              </div>
-            )}
-              {/* lk_tax: Entity selector + document type toggle */}
-              {isLkTax && posInvoiceEntities.length > 0 && (
-                <div className="mb-3 bg-white rounded-xl border border-slate-200 p-3 flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                  {/* Entity selector */}
-                  <div className="flex-1">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Invoicing Entity</p>
-                    <div className="flex gap-1.5 flex-wrap">
-                      {posInvoiceEntities.map((e: any) => (
-                        <button key={e.id}
-                          onClick={() => {
-                            setPosEntityId(e.id)
-                            // Proprietorship can't issue tax invoices
-                            if (e.invoice_mode !== 'lk_tax') setPosDocType('receipt')
-                          }}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition ${
-                            posEntityId === e.id
-                              ? 'bg-slate-800 text-white border-slate-800'
-                              : 'border-slate-200 text-slate-600 hover:border-slate-400'
-                          }`}>
-                          {e.is_default ? '★ ' : ''}{e.name.replace('MacForce Auto Engineering', 'MacForce')}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {/* Document type toggle — only for VAT-registered entity */}
-                  {posCurrentEntity?.invoice_mode === 'lk_tax' && (
-                    <div className="shrink-0">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Document</p>
-                      <div className="flex rounded-lg border-2 border-slate-200 overflow-hidden">
-                        <button
-                          onClick={() => setPosDocType('receipt')}
-                          className={`px-3 py-1.5 text-xs font-bold transition ${
-                            posDocType === 'receipt' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:bg-slate-50'
-                          }`}>
-                          🧾 Receipt
-                        </button>
-                        <button
-                          onClick={() => setPosDocType('tax_invoice')}
-                          className={`px-3 py-1.5 text-xs font-bold transition ${
-                            posDocType === 'tax_invoice' ? 'bg-orange-600 text-white' : 'text-slate-500 hover:bg-slate-50'
-                          }`}>
-                          📋 Tax Invoice
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+            <TabPOSStandard
+              vendor={vendor}
+              products={products}
+              vendorSettings={vendorSettings}
+              showToast={showToast}
+              onDataChanged={fetchData}
+              pendingDraft={pendingPosDraft}
+              onDraftLoaded={() => setPendingPosDraft(null)}
+            />
+          )
+        )}
 
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 lg:gap-6 pb-36 lg:pb-0">
-                <div className="lg:col-span-2 space-y-3 lg:space-y-4 order-last lg:order-none">
-                  {/* Product Search */}
-                  <div className="bg-white rounded-xl border border-slate-200 p-4">
-                    <label className="block text-xs font-bold text-slate-500 mb-2">Search Products</label>
-                    <input value={posSearch} onChange={e => setPosSearch(e.target.value)} className="w-full px-4 py-3.5 rounded-xl border-2 border-slate-200 text-base sm:text-sm outline-none focus:border-orange-400" placeholder="Part name, SKU, make..." />
-                    {posFilteredProducts.length > 0 && (<div className="mt-2 max-h-48 overflow-y-auto border border-slate-200 rounded-lg">{posFilteredProducts.slice(0, 10).map((p: any) => (<button key={p.id} onClick={() => addToCart(p)} className="w-full text-left px-3 py-2 hover:bg-orange-50 border-b border-slate-100 flex items-center justify-between text-sm"><div><span className="font-mono text-xs text-slate-400 mr-2">{p.sku}</span><span className="font-semibold">{p.name}</span><span className="text-xs text-slate-400 ml-2">({p.quantity})</span></div><span className="font-bold text-orange-600">Rs.{p.price?.toLocaleString() || 'N/A'}</span></button>))}</div>)}
-                  </div>
-                  {/* Cart */}
-                  {posCart.length === 0 ? <div className="bg-white rounded-xl border border-slate-200 p-8 text-center"><p className="text-3xl opacity-30">🛒</p><p className="text-slate-400 font-semibold">Add products above</p></div> : (
-                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden"><table className="w-full text-sm"><thead><tr className="bg-slate-50"><th className="px-2 sm:px-4 py-2 text-left text-xs font-bold text-slate-500">Item</th><th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-16 sm:w-20">Qty</th><th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-20 sm:w-28">Price</th><th className="px-2 sm:px-4 py-2 text-right text-xs font-bold text-slate-500 w-20 sm:w-24">Total</th><th className="w-8"></th></tr></thead><tbody>
-                      {posCart.map((item, i) => (<tr key={i} className="border-t border-slate-100"><td className="px-2 sm:px-4 py-2"><span className="hidden sm:inline font-mono text-xs text-slate-400 mr-1">{item.productSku}</span><span className="font-semibold text-xs sm:text-sm">{item.productName}</span>{isLkTax && item.ssclStream === 'SVC' && <span className="ml-1 text-[9px] font-black bg-blue-100 text-blue-700 px-1 rounded">SVC</span>}</td><td className="px-2 sm:px-4 py-2"><input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-12 sm:w-16 px-1 sm:px-2 py-1 border border-slate-200 rounded text-center text-sm" /></td><td className="px-2 sm:px-4 py-2"><input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className="w-20 sm:w-24 px-1 sm:px-2 py-1 border border-slate-200 rounded text-sm" /></td><td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td><td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td></tr>))}
-                    </tbody></table></div>
-                  )}
-                  {/* lk_tax: Manual / service line entry (SVC stream) */}
-                  {isLkTax && (
-                    <div className="mt-2">
-                      {!showManualLine ? (
-                        <button onClick={() => setShowManualLine(true)}
-                          className="text-xs font-bold text-blue-600 hover:text-blue-800 px-3 py-1.5 rounded-lg border border-blue-200 hover:border-blue-400 bg-blue-50">
-                          + Add Service / Labour Line
-                        </button>
-                      ) : (
-                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
-                          <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest">Service / Labour Line <span className="ml-1 bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded text-[9px]">SVC</span></p>
-                          <input
-                            value={manualLine.name}
-                            onChange={e => setManualLine(p => ({ ...p, name: e.target.value }))}
-                            placeholder="Description (e.g. Wheel Alignment)"
-                            className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none focus:border-blue-400"
-                          />
-                          <div className="flex gap-2">
-                            <input
-                              type="text" inputMode="numeric" value={manualLine.qty}
-                              onChange={e => setManualLine(p => ({ ...p, qty: e.target.value.replace(/[^0-9]/g, '') }))}
-                              placeholder="Qty" className="w-20 px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none text-center"
-                            />
-                            <input
-                              type="text" inputMode="numeric" value={manualLine.price}
-                              onChange={e => setManualLine(p => ({ ...p, price: e.target.value.replace(/[^0-9]/g, '') }))}
-                              placeholder="Price (Rs.)" className="flex-1 px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none"
-                            />
-                            <button onClick={addManualLine} className="bg-blue-600 text-white font-bold px-3 py-2 rounded-lg text-sm">Add</button>
-                            <button onClick={() => { setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' }) }}
-                              className="text-slate-400 hover:text-red-500 font-bold px-2">✕</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
 
-                  {/* Notes */}
-                  <div className="bg-white rounded-xl border border-red-200 mt-3">
-                    <textarea value={posNotes} onChange={e => setPosNotes(e.target.value)} placeholder="Notes (printed on invoice)..." rows={2} className="w-full px-4 py-3 text-sm outline-none resize-none rounded-xl" />
-                  </div>
-
-                  {/* Total + action buttons — desktop only, sits below cart/notes */}
-                  <div className="hidden lg:block rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 text-white">
-                    {posDiscountAmt > 0 && <div className="flex justify-between text-sm mb-1"><span className="text-red-300">Discount</span><span>-Rs.{posDiscountAmt.toLocaleString()}</span></div>}
-                    {/* lk_tax VAT breakdown */}
-                    {posIsVatEntity && posTotal > 0 && (
-                      <div className="mb-2 pb-2 border-b border-slate-600 space-y-0.5">
-                        <div className="flex justify-between text-sm"><span className="text-slate-300">NET (excl. VAT)</span><span>Rs.{posNetAmount.toLocaleString()}</span></div>
-                        <div className="flex justify-between text-sm"><span className="text-slate-300">VAT 18%</span><span>Rs.{posVatAmount.toLocaleString()}</span></div>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
-                    {posAdvanceApplied > 0 && <div className="flex justify-between text-sm mt-1"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
-                    {posOverpayment > 0 && posCustomer.outstanding > 0 && (
-                      <div className="mt-2 pt-2 border-t border-slate-600">
-                        <div className="flex justify-between text-sm"><span className="text-amber-300">→ To Outstanding</span><span className="text-amber-300">Rs.{Math.min(posOverpayment, posCustomer.outstanding).toLocaleString()}</span></div>
-                        {posOverpayment > posCustomer.outstanding && <div className="flex justify-between text-sm"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">Rs.{(posOverpayment - posCustomer.outstanding).toLocaleString()}</span></div>}
-                      </div>
-                    )}
-                    {posOverpayment > 0 && posCustomer.outstanding <= 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-emerald-300">→ To Advance</span><span className="text-emerald-300">+Rs.{posOverpayment.toLocaleString()}</span></div>}
-                    {posBalance > 0 && <div className="flex justify-between text-sm font-bold mt-1"><span className="text-red-300">On Credit</span><span className="text-red-300">Rs.{posBalance.toLocaleString()}</span></div>}
-                  </div>
-                  {!posDraftId && (
-                    <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-base py-3.5 rounded-xl disabled:opacity-50">
-                      {posLoading ? '…' : '📦 Send on Approval'}
-                    </button>
-                  )}
-                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">
-                    {posLoading ? 'Saving…' : posDraftId ? '✅ Complete Invoice' : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}
-                  </button>
-                </div>
-
-                {/* Right sidebar — shows first on mobile, sticky on desktop */}
-                <div className="space-y-3 lg:space-y-4 order-first lg:order-none lg:sticky lg:top-4 lg:self-start">
-                  {/* Customer */}
-                  <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
-                    <h3 className="font-bold text-slate-800 text-sm">Customer</h3>
-                    <div className="relative">
-                      <input value={posCustomer.name} onChange={e => { setPosCustomer({ ...posCustomer, id: null, name: e.target.value }); searchCustomers(e.target.value); if (posErrors.name) setPosErrors(prev => ({ ...prev, name: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none transition-all duration-200 ${posErrors.name ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Customer name (type to search)" />
-                      {customerSuggestions.length > 0 && (<div className="absolute top-full left-0 right-0 bg-white border border-slate-200 rounded-lg shadow-lg z-10 max-h-40 overflow-y-auto mt-1">{customerSuggestions.map((c: any) => (<button key={c.id} onClick={() => selectCustomer(c)} className="w-full text-left px-3 py-2 hover:bg-orange-50 text-sm border-b border-slate-100"><span className="font-semibold">{c.name}</span>{c.phone && <span className="text-xs text-slate-400 ml-2">{c.phone}</span>}</button>))}</div>)}
-                    </div>
-                    <input value={posCustomer.phone} onChange={e => { setPosCustomer({...posCustomer, phone: e.target.value}); if (posErrors.phone) setPosErrors(prev => ({ ...prev, phone: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none transition-all duration-200 ${posErrors.phone ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Phone / WhatsApp" />
-                    {posCustomer.id && <p className="text-[10px] text-green-600 font-semibold">✓ Existing customer selected</p>}
-                    {/* lk_tax: address + TIN (required for tax invoices) */}
-                    {isLkTax && posDocType === 'tax_invoice' && (
-                      <div className="space-y-1.5 pt-1 border-t border-slate-100 mt-1">
-                        <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest">Tax Invoice — Purchaser Details</p>
-                        <input
-                          value={posCustomerAddress}
-                          onChange={e => { setPosCustomerAddress(e.target.value); if ((posErrors as any).address) setPosErrors(prev => ({ ...prev, address: false })) }}
-                          className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none ${(posErrors as any).address ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`}
-                          placeholder="Address *"
-                        />
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" checked={posCustomerVatReg}
-                            onChange={e => { setPosCustomerVatReg(e.target.checked); if (!e.target.checked) setPosCustomerTin('') }}
-                            className="w-4 h-4 accent-orange-500" />
-                          <span className="text-xs font-bold text-slate-600">VAT-Registered Purchaser</span>
-                        </label>
-                        {posCustomerVatReg && (
-                          <input
-                            value={posCustomerTin}
-                            onChange={e => { setPosCustomerTin(e.target.value.replace(/[^0-9]/g, '').slice(0, 9)); if ((posErrors as any).tin) setPosErrors(prev => ({ ...prev, tin: false })) }}
-                            className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono ${(posErrors as any).tin ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`}
-                            placeholder="Purchaser TIN (9 digits) *"
-                          />
-                        )}
-                      </div>
-                    )}
-                    {posCustomer.outstanding > 0 && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-2 mt-1">
-                        <span className="text-xs font-bold text-red-700">Outstanding: Rs.{posCustomer.outstanding.toLocaleString()}</span>
-                        <p className="text-[10px] text-red-500 mt-0.5">Extra payment will auto-settle old invoices</p>
-                      </div>
-                    )}
-                    {posCustomer.advance > 0 && (
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-emerald-700">Advance: Rs.{posCustomer.advance.toLocaleString()}</span>
-                          <label className="flex items-center gap-1.5 cursor-pointer">
-                            <input type="checkbox" checked={useAdvance} onChange={e => setUseAdvance(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
-                            <span className="text-xs font-bold text-emerald-700">Use</span>
-                          </label>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Vehicle & Date */}
-                  <div className="flex gap-2">
-                    <div className="flex-1 relative">
-                      <input type="text" value={posVehicleNo} onChange={e => { let v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = v.match(/^([A-Z]{2,3})(\d{1,4})$/); if (m) v = m[1] + '-' + m[2]; setPosVehicleNo(v); if (posErrors.vehicle) setPosErrors(prev => ({...prev, vehicle: false})) }} placeholder={posCustomer.require_vehicle_no ? 'ABC-1234 (required)' : 'ABC-1234'} maxLength={8} className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono font-bold tracking-wider transition-all ' + (posErrors.vehicle ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400')} />
-                      {posCustomer.require_vehicle_no && <span className="absolute right-2 top-2 text-[9px] font-black text-red-500">REQ</span>}
-                    </div>
-                    <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-
-                  {/* Payments */}
-                  <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2">
-                    <h3 className="font-bold text-slate-800 text-xs">Payment</h3>
-                    <div className="space-y-2">
-                      {posPayments.map((line, i) => (
-                        <div key={`pos-pay-${i}`} className="flex gap-2 items-start flex-wrap">
-                          <select value={line.method} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], method: e.target.value }; setPosPayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs font-bold outline-none flex-shrink-0">
-                            {PAY_METHODS.map(m => <option key={m} value={m}>{PAY_LABELS[m]}</option>)}
-                          </select>
-                          <input type="text" inputMode="numeric" pattern="[0-9]*" value={line.amount} onChange={e => { const val = e.target.value.replace(/[^0-9.]/g, ''); const u = [...posPayments]; u[i] = { ...u[i], amount: val }; setPosPayments(u) }} className="flex-1 sm:w-28 sm:flex-none min-w-0 px-2 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Amount" />
-                          {line.method === 'cheque' && (<>
-                            <input type="text" value={line.chequeNumber} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeNumber: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Cheque #" />
-                            <input type="date" value={line.chequeDate} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeDate: e.target.value }; setPosPayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
-                          </>)}
-                          {line.method === 'bank' && <input type="text" value={line.bankRef} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], bankRef: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Ref #" />}
-                          {posPayments.length > 1 && <button onClick={() => setPosPayments(posPayments.filter((_, x) => x !== i))} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>}
-                        </div>
-                      ))}
-                      <div className="flex gap-3">
-                        <button onClick={() => setPosPayments([...posPayments, { method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])} className="text-xs font-bold text-blue-600">+ Add Payment Method</button>
-                        {posTotal - posPaidAmount > 0 && <button onClick={() => { const u = [...posPayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(posTotal - posPaidAmount) }; setPosPayments(u) }} className="text-xs font-bold text-orange-600">Fill remaining (Rs.{(posTotal - posPaidAmount).toLocaleString()})</button>}
-                      </div>
-                    </div>
-                    <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Mobile bottom bar — total + both buttons in one fixed strip */}
-              <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 flex flex-col shadow-[0_-4px_20px_rgba(0,0,0,0.18)]">
-                <div className="bg-gradient-to-r from-slate-800 to-slate-900 px-4 py-2.5 text-white flex items-center justify-between">
-                  <div className="flex items-center gap-3 text-sm">
-                    {posDiscountAmt > 0 && <span className="text-red-300">-Rs.{posDiscountAmt.toLocaleString()}</span>}
-                    {posBalance > 0 && <span className="text-red-300">Credit Rs.{posBalance.toLocaleString()}</span>}
-                    {posAdvanceApplied > 0 && <span className="text-cyan-300">Adv Rs.{posAdvanceApplied.toLocaleString()}</span>}
-                  </div>
-                  <span className="text-xl font-black">Rs.{posTotal.toLocaleString()}</span>
-                </div>
-                <div className="flex">
-                  {!posDraftId && (
-                    <button onClick={handleCreateDraft} disabled={posLoading || posCart.length === 0} className="flex-1 bg-amber-500 active:bg-amber-600 text-white font-black text-sm py-4 disabled:opacity-40">
-                      {posLoading ? '…' : '📦 Approval'}
-                    </button>
-                  )}
-                  <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="flex-[2] bg-green-500 active:bg-green-600 text-white font-black text-sm py-4 disabled:opacity-40">
-                    {posLoading ? '…' : posDraftId ? '✅ Complete Invoice' : posBalance > 0 ? '💳 Complete (Credit Rs.' + posBalance.toLocaleString() + ')' : '💰 Complete Sale'}
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          )}
-        </div>)}
 
         {/* SALES */}
         {tab === 'sales' && (<div>
@@ -3299,6 +2454,7 @@ ${customerRows.map(c => `<tr>
               const [salesSubTab, setSalesSubTab] = [salesView, setSalesView] as [string, (v: string) => void]
               return (<>
                 <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1">
+                  {/* ══ WHEEL MART ONLY: adds '🧾 Tax' sub-tab for lk_tax vendors ══ */}
                   {([{v:'overview',l:'Overview'},{v:'transactions',l:'Transactions'},{v:'customers',l:'Customers'},{v:'reports',l:'📊 Reports'},...(isLkTax ? [{v:'tax',l:'🧾 Tax'}] : [])]).map(t => (
                     <button key={t.v} onClick={() => setSalesSubTab(t.v)} className={`flex-1 py-2 text-xs font-bold rounded-md transition ${salesSubTab === t.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>{t.l}</button>
                   ))}
@@ -3467,34 +2623,20 @@ ${customerRows.map(c => `<tr>
                                 </button>
                                 <button
                                   onClick={() => {
-                                    setPosCart((draft.items || []).map((i: any) => ({
-                                      productId: i.product_id, productName: i.product_name,
-                                      productSku: i.product_sku || '', quantity: i.quantity,
-                                      unitPrice: i.unit_price || 0, unitCost: i.unit_cost || 0,
-                                      maxStock: 9999, saleItemId: i.id,
-                                    })))
-                                    setPosCustomer({ id: draft.customer_id || null, name: draft.customer_name, phone: draft.customer_phone || '', advance: 0, outstanding: 0, require_vehicle_no: false })
-                                    setPosVehicleNo(draft.vehicle_no || '')
-                                    setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-                                    setPosDiscount(''); setPosNotes(''); setPosPreview(false)
-                                    setPosDate(new Date().toISOString().split('T')[0])
-                                    setPosDraftId(draft.id); setPosDraftInvoiceNo(draft.invoice_no || '')
+                                    // Build draft payload and hand off to TabPOS via pendingPosDraft
+                                    setPendingPosDraft({
+                                      cart: (draft.items || []).map((i: any) => ({
+                                        productId: i.product_id, productName: i.product_name,
+                                        productSku: i.product_sku || '', quantity: i.quantity,
+                                        unitPrice: i.unit_price || 0, unitCost: i.unit_cost || 0,
+                                        maxStock: 9999, saleItemId: i.id,
+                                      })),
+                                      customer: { id: draft.customer_id || null, name: draft.customer_name, phone: draft.customer_phone || '', advance: 0, outstanding: 0, require_vehicle_no: false },
+                                      vehicleNo: draft.vehicle_no || '',
+                                      draftId: draft.id,
+                                      draftInvoiceNo: draft.invoice_no || '',
+                                    })
                                     setTab('pos')
-                                    if (draft.customer_id) {
-                                      fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_customer', customerId: draft.customer_id }) })
-                                        .then(r => r.json()).then(j => {
-                                          if (j.customer) {
-                                            const adv = parseFloat(j.customer.advance_balance || 0)
-                                            setPosCustomer((prev: any) => ({ ...prev, advance: adv, require_vehicle_no: j.customer.require_vehicle_no || false }))
-                                            if (adv > 0) setUseAdvance(true)
-                                          }
-                                        }).catch(() => {})
-                                      fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: draft.customer_id }) })
-                                        .then(r => r.json()).then(j => {
-                                          const outstanding = (j.sales || []).reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
-                                          setPosCustomer((prev: any) => ({ ...prev, outstanding }))
-                                        }).catch(() => {})
-                                    }
                                   }}
                                   className="flex-1 text-xs font-black text-green-700 border border-green-300 rounded-lg px-3 py-2 bg-green-50 hover:bg-green-100 active:bg-green-200"
                                 >
@@ -3806,7 +2948,11 @@ ${customerRows.map(c => `<tr>
                   </div>
                 )}
 
-                {/* ─── TAX REPORTS (lk_tax only) ─── */}
+                {/* ══ WHEEL MART ONLY ═══════════════════════════════════════════════════════
+                    Tax Reports sub-tab (VAT register, SSCL report, input VAT, VAT summary).
+                    Standard vendors (Sakura) never see this — gated by isLkTax.
+                    To edit: changes here affect ONLY WHEEL MART. Safe to touch.
+                    ════════════════════════════════════════════════════════════════════════ */}
                 {salesSubTab === 'tax' && isLkTax && (() => {
                   async function runTaxReport() {
                     if (!taxReportFrom || !taxReportTo) return
@@ -4354,307 +3500,15 @@ ${customerRows.map(c => `<tr>
         </div>)}
 
         {/* CREDIT */}
-        {tab === 'credit' && (<div>
-          <div className="flex items-center justify-between mb-4">
-            <h1 className="text-2xl font-black text-slate-900">💳 Credit & Customers</h1>
-            <button onClick={() => setShowAddCustomer(!showAddCustomer)} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">{showAddCustomer ? 'Cancel' : '+ Add Customer'}</button>
-          </div>
-
-          {/* Register Customer Form */}
-          {showAddCustomer && (
-            <div className="bg-white rounded-xl border-2 border-orange-200 p-5 mb-4">
-              <h3 className="font-bold text-sm text-slate-800 mb-3">Register New Customer</h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Name *</label><input value={newCustomer.name} onChange={e => setNewCustomer({...newCustomer, name: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Customer name" /></div>
-                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Phone *</label><input value={newCustomer.phone} onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="07XXXXXXXX" /></div>
-                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">WhatsApp</label><input value={newCustomer.whatsapp} onChange={e => setNewCustomer({...newCustomer, whatsapp: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Same as phone if blank" /></div>
-                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Email</label><input value={newCustomer.email} onChange={e => setNewCustomer({...newCustomer, email: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Optional" /></div>
-                <div className="col-span-2"><label className="block text-[11px] font-semibold text-slate-500 mb-1">Address</label><input value={newCustomer.address} onChange={e => setNewCustomer({...newCustomer, address: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Optional" /></div>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-                <div><label className="block text-[11px] font-semibold text-slate-500 mb-1">Notes</label><input value={newCustomer.notes} onChange={e => setNewCustomer({...newCustomer, notes: e.target.value})} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Internal notes" /></div>
-                <div><label className="block text-[11px] font-semibold text-emerald-600 mb-1">Opening Advance (Rs.)</label><input type="text" inputMode="numeric" value={newCustomer.advance} onChange={e => setNewCustomer({...newCustomer, advance: e.target.value.replace(/[^0-9.]/g, '')})} className="w-full px-3 py-2 rounded-lg border-2 border-emerald-200 text-sm outline-none focus:border-emerald-400 bg-emerald-50" placeholder="0" /></div>
-                <div><label className="block text-[11px] font-semibold text-red-600 mb-1">Opening Credit Owed (Rs.)</label><input type="text" inputMode="numeric" value={newCustomer.credit} onChange={e => setNewCustomer({...newCustomer, credit: e.target.value.replace(/[^0-9.]/g, '')})} className="w-full px-3 py-2 rounded-lg border-2 border-red-200 text-sm outline-none focus:border-red-400 bg-red-50" placeholder="0" /></div>
-              </div>
-              <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 mt-3">
-                <div>
-                  <p className="text-xs font-semibold text-amber-800">Require Vehicle Number</p>
-                  <p className="text-[10px] text-amber-600">POS will block sale if vehicle no. is blank</p>
-                </div>
-                <button type="button" onClick={() => setNewCustomer({...newCustomer, require_vehicle_no: !newCustomer.require_vehicle_no})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (newCustomer.require_vehicle_no ? 'bg-amber-500' : 'bg-slate-300')}>
-                  <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (newCustomer.require_vehicle_no ? 'translate-x-6' : 'translate-x-1')} />
-                </button>
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button onClick={registerCustomer} disabled={addCustomerLoading} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-6 py-2 rounded-lg disabled:opacity-50">{addCustomerLoading ? 'Registering...' : 'Register Customer'}</button>
-                <button onClick={() => setShowAddCustomer(false)} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
-              </div>
-            </div>
-          )}
-
-            <div className="flex items-center gap-3 mb-4 flex-wrap">
-              <div className="relative flex-1 min-w-[200px]">
-                <svg className="absolute left-3 top-[10px] text-[#bbb]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                <input type="text" placeholder="Search customers..." value={customerSearch} onChange={e => setCustomerSearch(e.target.value)}
-                  className="w-full pl-8 pr-4 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                {customerSearch && <button onClick={() => setCustomerSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">✕</button>}
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-slate-200">
-                <input type="checkbox" checked={showAllCustomers} onChange={e => setShowAllCustomers(e.target.checked)} className="w-4 h-4 accent-orange-500" />
-                <span className="text-xs font-semibold text-slate-600">Show All Customers</span>
-              </label>
-            </div>
-
-          {/* Settle modal */}
-          {settleSale && selectedCreditCustomer && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setSettleSale(null)}>
-            <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h3 className="text-lg font-bold mb-1">Settle Payment</h3>
-              <p className="text-sm text-slate-500 mb-1">{selectedCreditCustomer.name} — Invoice {settleSale.invoice_no}</p>
-              <p className="text-lg font-black text-red-600 mb-4">Balance Due: Rs.{parseFloat(settleSale.balance_due).toLocaleString()}</p>
-              <div className="space-y-2">
-                {settlePayments.map((line, i) => (
-                  <div key={`settle-pay-${i}`} className="flex gap-2 items-start flex-wrap">
-                    <select value={line.method} onChange={e => { const u = [...settlePayments]; u[i] = { ...u[i], method: e.target.value }; setSettlePayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs font-bold outline-none flex-shrink-0">
-                      {PAY_METHODS.map(m => <option key={m} value={m}>{PAY_LABELS[m]}</option>)}
-                    </select>
-                    <input type="text" inputMode="numeric" pattern="[0-9]*" value={line.amount} onChange={e => { const val = e.target.value.replace(/[^0-9.]/g, ''); const u = [...settlePayments]; u[i] = { ...u[i], amount: val }; setSettlePayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Amount" />
-                    {line.method === 'cheque' && (<>
-                      <input type="text" value={line.chequeNumber} onChange={e => { const u = [...settlePayments]; u[i] = { ...u[i], chequeNumber: e.target.value }; setSettlePayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Cheque #" />
-                      <input type="date" value={line.chequeDate} onChange={e => { const u = [...settlePayments]; u[i] = { ...u[i], chequeDate: e.target.value }; setSettlePayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
-                    </>)}
-                    {line.method === 'bank' && <input type="text" value={line.bankRef} onChange={e => { const u = [...settlePayments]; u[i] = { ...u[i], bankRef: e.target.value }; setSettlePayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Ref #" />}
-                    {settlePayments.length > 1 && <button onClick={() => setSettlePayments(settlePayments.filter((_, x) => x !== i))} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>}
-                  </div>
-                ))}
-                <div className="flex gap-3">
-                  <button onClick={() => setSettlePayments([...settlePayments, { method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])} className="text-xs font-bold text-blue-600">+ Add Payment Method</button>
-                  {settleSale && parseFloat(settleSale.balance_due) > 0 && <button onClick={() => { const u = [...settlePayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(parseFloat(settleSale.balance_due)) }; setSettlePayments(u) }} className="text-xs font-bold text-orange-600">Fill full balance (Rs.{parseFloat(settleSale.balance_due).toLocaleString()})</button>}
-                </div>
-              </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={handleSettle} disabled={settleLoading} className="bg-green-500 hover:bg-green-600 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">{settleLoading ? 'Processing...' : 'Record Payment'}</button>
-                <button onClick={() => setSettleSale(null)} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
-              </div>
-            </div>
-          </div>)}
-
-          {/* Edit Customer Modal */}
-          {editingCustomer && (<div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setEditingCustomer(null)}>
-            <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h3 className="text-lg font-bold mb-4">Edit Customer</h3>
-              <div className="space-y-3">
-                <div><label className="block text-xs font-semibold text-slate-500 mb-1">Name *</label><input value={editingCustomer.name || ''} onChange={e => setEditingCustomer({...editingCustomer, name: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-xs font-semibold text-slate-500 mb-1">Phone</label><input value={editingCustomer.phone || ''} onChange={e => setEditingCustomer({...editingCustomer, phone: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="0771234567" /></div>
-                  <div><label className="block text-xs font-semibold text-slate-500 mb-1">WhatsApp</label><input value={editingCustomer.whatsapp || ''} onChange={e => setEditingCustomer({...editingCustomer, whatsapp: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="94771234567" /></div>
-                </div>
-                <div><label className="block text-xs font-semibold text-slate-500 mb-1">Email</label><input type="email" value={editingCustomer.email || ''} onChange={e => setEditingCustomer({...editingCustomer, email: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="customer@email.com" /></div>
-                <div><label className="block text-xs font-semibold text-slate-500 mb-1">Address</label><textarea value={editingCustomer.address || ''} onChange={e => setEditingCustomer({...editingCustomer, address: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" placeholder="Street, City, District" /></div>
-                <div><label className="block text-xs font-semibold text-slate-500 mb-1">Notes</label><textarea value={editingCustomer.notes || ''} onChange={e => setEditingCustomer({...editingCustomer, notes: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 resize-none" placeholder="Internal notes about this customer" /></div>
-                {/* Require vehicle number */}
-                <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
-                  <div>
-                    <p className="text-xs font-semibold text-amber-800">Require Vehicle Number</p>
-                    <p className="text-[10px] text-amber-600">POS will block sale if vehicle no. is blank</p>
-                  </div>
-                  <button type="button" onClick={() => setEditingCustomer({...editingCustomer, require_vehicle_no: !editingCustomer.require_vehicle_no})} className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (editingCustomer.require_vehicle_no ? 'bg-amber-500' : 'bg-slate-300')}>
-                    <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingCustomer.require_vehicle_no ? 'translate-x-6' : 'translate-x-1')} />
-                  </button>
-                </div>
-                {/* Advance Balance Adjustment */}
-                <div className="border-t border-slate-200 pt-3 mt-3">
-                  <label className="block text-xs font-bold text-slate-700 mb-2">Advance Balance: <span className="text-emerald-600">Rs.{parseFloat(editingCustomer.advance_balance || 0).toLocaleString()}</span></label>
-                  <div className="flex gap-2">
-                    <input type="text" inputMode="numeric" value={adjustAdvanceAmount} onChange={e => setAdjustAdvanceAmount(e.target.value.replace(/[^0-9.]/g, ''))} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-emerald-400" placeholder="Amount (Rs.)" />
-                    <button onClick={() => adjustAdvance(editingCustomer.id, 'add')} disabled={editCustomerLoading} className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg disabled:opacity-50">+ Add</button>
-                    <button onClick={() => adjustAdvance(editingCustomer.id, 'refund')} disabled={editCustomerLoading || parseFloat(editingCustomer.advance_balance || 0) <= 0} className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg disabled:opacity-50">− Refund</button>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between mt-5">
-                <div className="flex gap-2">
-                  <button onClick={handleEditCustomer} disabled={editCustomerLoading} className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">{editCustomerLoading ? 'Saving...' : 'Save Changes'}</button>
-                  <button onClick={() => { setEditingCustomer(null); setAdjustAdvanceAmount('') }} className="text-slate-500 text-sm px-4 py-2">Cancel</button>
-                </div>
-                <button onClick={async () => { if (!confirm(`Delete customer "${editingCustomer.name}"? This cannot be undone.`)) return; setEditCustomerLoading(true); try { const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', customerId: editingCustomer.id }) }); const j = await r.json(); if (j.success) { showToast('Customer deleted'); setEditingCustomer(null); fetchCreditCustomers(); if (selectedCreditCustomer?.id === editingCustomer.id) setSelectedCreditCustomer(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setEditCustomerLoading(false) }} disabled={editCustomerLoading} className="text-red-500 hover:text-red-700 text-xs font-bold px-3 py-2 rounded-lg border border-red-200 hover:bg-red-50 disabled:opacity-50">Delete Customer</button>
-              </div>
-            </div>
-          </div>)}
-
-          {creditLoading ? <div className="text-center py-8"><div className="w-6 h-6 border-3 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" /></div> : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Customer list */}
-              <div className="space-y-2">
-                <h3 className="font-bold text-slate-800 text-sm mb-2">Customers with Credit ({creditCustomers.length})</h3>
-                {(() => { const filtered = creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }); return filtered.length === 0 })() ? <div className="bg-white rounded-xl border border-slate-200 p-6 text-center"><p className="text-2xl opacity-30">✅</p><p className="text-slate-400 text-sm font-semibold mt-2">No outstanding credit or advances</p></div> : creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }).map((c: any) => (
-                  <button key={c.id} onClick={() => loadOutstanding(c)} className={'w-full text-left bg-white rounded-xl border px-4 py-3 hover:shadow-md transition ' + (selectedCreditCustomer?.id === c.id ? 'border-orange-500 bg-orange-50' : 'border-slate-200')}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-sm">{c.name}</p>
-                        {c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}
-                        {(() => { const age = creditAge(c.credit?.oldestDueDate); return age ? <span className={'inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded mt-1 ' + age.pill}><span className={'w-1.5 h-1.5 rounded-full ' + age.dot} />{age.label}</span> : null })()}
-                      </div>
-                      <div className="text-right">
-                        {c.credit?.balance > 0 && <p className="font-black text-red-600">Owes: Rs.{c.credit.balance.toLocaleString()}</p>}
-                        {c.advance > 0 && <p className="font-bold text-emerald-600">Advance: Rs.{c.advance.toLocaleString()}</p>}
-                        <p className="text-[10px] text-slate-400">{c.credit?.salesCount || 0} invoices</p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-                <div className="mt-2 space-y-2">
-                  <div className="bg-red-800 rounded-xl p-3 text-white"><div className="flex justify-between"><span className="text-sm">Total Outstanding</span><span className="font-black">Rs.{creditCustomers.reduce((s: number, c: any) => s + (c.credit?.balance || 0), 0).toLocaleString()}</span></div></div>
-                  <div className="bg-emerald-800 rounded-xl p-3 text-white"><div className="flex justify-between"><span className="text-sm">Total Advances</span><span className="font-black">Rs.{creditCustomers.reduce((s: number, c: any) => s + (c.advance || 0), 0).toLocaleString()}</span></div></div>
-                </div>
-              </div>
-
-              {/* Outstanding invoices */}
-              <div className="lg:col-span-2">
-                {selectedCreditCustomer ? (<div>
-                  <div className="flex items-center justify-between mb-1">
-                    <h3 className="font-bold text-slate-800">{selectedCreditCustomer.name}</h3>
-                    <button onClick={() => setEditingCustomer({...selectedCreditCustomer})} className="text-xs font-semibold text-blue-600 px-3 py-1.5 rounded border border-blue-200 hover:bg-blue-50">✏️ Edit</button>
-                  </div>
-                  {(selectedCreditCustomer.phone || selectedCreditCustomer.email || selectedCreditCustomer.address) && (
-                    <div className="text-xs text-slate-400 mb-2 space-y-0.5">
-                      {selectedCreditCustomer.phone && <p>📞 {selectedCreditCustomer.phone}</p>}
-                      {selectedCreditCustomer.email && <p>📧 {selectedCreditCustomer.email}</p>}
-                      {selectedCreditCustomer.address && <p>📍 {selectedCreditCustomer.address}</p>}
-                    </div>
-                  )}
-                  <div className="flex gap-3 mb-4 flex-wrap">
-                    {selectedCreditCustomer.credit?.balance > 0 && <span className="text-sm font-bold text-red-600 bg-red-50 px-3 py-1 rounded-lg">Owes: Rs.{selectedCreditCustomer.credit.balance.toLocaleString()}</span>}
-                    {selectedCreditCustomer.advance > 0 && <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-lg">Advance: Rs.{selectedCreditCustomer.advance.toLocaleString()}</span>}
-                  </div>
-
-                  {/* Report buttons */}
-                  {outstandingSales.length > 0 && (
-                    <div className="flex gap-2 mb-4 flex-wrap">
-                      <button onClick={() => printCreditReport(selectedCreditCustomer, outstandingSales, data?.vendor)} className="text-xs font-semibold text-slate-600 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50">📄 Print Statement</button>
-                      <button onClick={() => sendWhatsAppCreditReport(selectedCreditCustomer, outstandingSales, data?.vendor)} className="text-xs font-semibold text-green-600 px-3 py-2 rounded-lg border border-green-200 hover:bg-green-50">💬 WhatsApp Statement</button>
-                      <button onClick={() => setBulkSettleMode(!bulkSettleMode)} className="text-xs font-semibold text-purple-700 px-3 py-2 rounded-lg border border-purple-300 bg-purple-50 hover:bg-purple-100">{bulkSettleMode ? '✕ Cancel' : '💰 Lump Payment'}</button>
-                    </div>
-                  )}
-
-                  {/* Bulk settle UI */}
-                  {bulkSettleMode && outstandingSales.length > 0 && (
-                    <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-4">
-                      <h4 className="font-bold text-sm text-purple-800 mb-2">Lump Settlement — applies to oldest invoices first</h4>
-                      <p className="text-xs text-purple-600 mb-3">Total outstanding: Rs.{outstandingSales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0).toLocaleString()}</p>
-                      <div className="space-y-2">
-                        {bulkSettlePayments.map((line, i) => (
-                          <div key={`bulk-pay-${i}`} className="flex gap-2 items-start flex-wrap">
-                            <select value={line.method} onChange={e => { const u = [...bulkSettlePayments]; u[i] = { ...u[i], method: e.target.value }; setBulkSettlePayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs font-bold outline-none flex-shrink-0">
-                              {PAY_METHODS.map(m => <option key={m} value={m}>{PAY_LABELS[m]}</option>)}
-                            </select>
-                            <input type="text" inputMode="numeric" value={line.amount} onChange={e => { const val = e.target.value.replace(/[^0-9.]/g, ''); const u = [...bulkSettlePayments]; u[i] = { ...u[i], amount: val }; setBulkSettlePayments(u) }} className="w-32 px-2 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-purple-400" placeholder="Amount" />
-                            {line.method === 'cheque' && (<>
-                              <input type="text" value={line.chequeNumber} onChange={e => { const u = [...bulkSettlePayments]; u[i] = { ...u[i], chequeNumber: e.target.value }; setBulkSettlePayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Cheque #" />
-                              <input type="date" value={line.chequeDate} onChange={e => { const u = [...bulkSettlePayments]; u[i] = { ...u[i], chequeDate: e.target.value }; setBulkSettlePayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
-                            </>)}
-                            {line.method === 'bank' && <input type="text" value={line.bankRef} onChange={e => { const u = [...bulkSettlePayments]; u[i] = { ...u[i], bankRef: e.target.value }; setBulkSettlePayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Ref #" />}
-                            {bulkSettlePayments.length > 1 && <button onClick={() => setBulkSettlePayments(bulkSettlePayments.filter((_, x) => x !== i))} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>}
-                          </div>
-                        ))}
-                        <div className="flex gap-3">
-                          <button onClick={() => setBulkSettlePayments([...bulkSettlePayments, { method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])} className="text-xs font-bold text-blue-600">+ Add Method</button>
-                          <button onClick={() => { const total = outstandingSales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0); const u = [...bulkSettlePayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(total) }; setBulkSettlePayments(u) }} className="text-xs font-bold text-orange-600">Fill full balance</button>
-                        </div>
-                      </div>
-                      {bulkSettleConfirm ? (
-                        <div className="mt-3 bg-white border-2 border-red-400 rounded-xl p-4 space-y-3">
-                          <p className="text-xs font-bold text-red-500 uppercase tracking-wider text-center">⚠️ Confirm Payment</p>
-                          <p className="text-center text-slate-500 text-xs">You are applying</p>
-                          <p className="text-center font-black text-2xl text-slate-800">Rs.{bulkSettlePayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0).toLocaleString()}</p>
-                          <p className="text-center text-slate-500 text-xs">to</p>
-                          <p className="text-center font-black text-xl text-orange-600">{selectedCreditCustomer?.name}</p>
-                          <div className="flex gap-2 pt-1">
-                            <button onClick={confirmBulkSettle} disabled={bulkSettleLoading} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black text-sm py-3 rounded-xl disabled:opacity-50">
-                              {bulkSettleLoading ? 'Processing…' : '✅ Yes, confirm'}
-                            </button>
-                            <button onClick={() => setBulkSettleConfirm(false)} disabled={bulkSettleLoading} className="flex-1 border-2 border-slate-300 text-slate-600 font-bold text-sm py-3 rounded-xl hover:bg-slate-50">
-                              ✕ Go back
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mt-3 flex gap-2">
-                          <button onClick={handleBulkSettle} disabled={bulkSettleLoading} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">💰 Apply Payment</button>
-                          <p className="text-xs text-purple-500 self-center">Excess amount will be added to advance</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Outstanding invoices */}
-                  {outstandingSales.length > 0 && (<div className="mb-4">
-                    <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Outstanding Invoices</h4>
-                    <div className="space-y-3">{outstandingSales.map((sale: any) => {
-                      const age = creditAge(sale.created_at)
-                      const borderCls = age
-                        ? age.dot === 'bg-red-500'    ? 'border-red-300 bg-red-50/30'
-                        : age.dot === 'bg-orange-500' ? 'border-orange-300 bg-orange-50/30'
-                        :                               'border-yellow-300 bg-yellow-50/30'
-                        : 'border-slate-200'
-                      return (
-                      <div key={sale.id} className={'bg-white rounded-xl border p-4 ' + borderCls}>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-xs font-bold bg-slate-100 px-2 py-1 rounded">{sale.invoice_no}</span>
-                            <span className="text-xs text-slate-400">{formatDateShort(sale.created_at)}</span>
-                            {age && <span className={'inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded ' + age.pill}><span className={'w-1.5 h-1.5 rounded-full ' + age.dot} />{age.label}</span>}
-                          </div>
-                          <div className="text-right"><p className="text-xs text-slate-400">Total: Rs.{parseFloat(sale.total).toLocaleString()}</p><p className="text-xs text-green-600">Paid: Rs.{parseFloat(sale.paid_amount).toLocaleString()}</p><p className="font-black text-red-600">Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p></div>
-                        </div>
-                        <div className="text-xs text-slate-500 mb-2">{(sale.items || []).map((i: any) => `${i.product_name} x${i.quantity}`).join(', ')}</div>
-                        {sale.payments && sale.payments.length > 0 && (
-                          <div className="text-xs text-slate-400 mb-2">
-                            Payments: {sale.payments.map((p: any) => `${PAY_LABELS[p.payment_method] || p.payment_method} Rs.${parseFloat(p.amount).toLocaleString()}${p.cheque_number ? ' #' + p.cheque_number : ''}${p.bank_ref ? ' ref:' + p.bank_ref : ''}`).join(' + ')}
-                          </div>
-                        )}
-                        <button onClick={() => { setSettleSale(sale); setSettlePayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }]) }} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-lg">💰 Record Payment</button>
-                      </div>
-                    )})}</div>
-                  </div>)}
-
-                  {outstandingSales.length === 0 && selectedCreditCustomer.credit?.balance <= 0 && (
-                    <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4 text-center mb-4">
-                      <p className="text-emerald-600 font-semibold">No outstanding invoices</p>
-                    </div>
-                  )}
-
-                  {/* Recent Payments — for reversing payments on fully-settled invoices */}
-                  {recentPayments.length > 0 && (
-                    <div className="mb-4">
-                      <button onClick={() => setRecentPaymentsOpen(o => !o)} className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase mb-2 hover:text-slate-700">
-                        <span>{recentPaymentsOpen ? '▾' : '▸'}</span> Recent Payments (last 7 days) — tap to reverse a mistake
-                      </button>
-                      {recentPaymentsOpen && (
-                        <div className="space-y-2">
-                          {recentPayments.map((p: any) => (
-                            <div key={p.id} className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-3 py-2.5">
-                              <div>
-                                <span className="text-xs font-bold text-slate-700">Rs.{parseFloat(p.amount).toLocaleString()}</span>
-                                <span className="text-xs text-slate-400 ml-2">{PAY_LABELS[p.payment_method] || p.payment_method}</span>
-                                {p.sale?.invoice_no && <span className="text-xs text-slate-400 ml-2">· {p.sale.invoice_no}</span>}
-                                <span className="text-xs text-slate-300 ml-2">· {formatDateShort(p.created_at)}</span>
-                              </div>
-                              <button onClick={() => handleReversePayment(p.id)} disabled={reversingPayment === p.id} className="text-xs font-bold text-red-400 hover:text-red-600 hover:bg-red-50 border border-red-200 px-2.5 py-1 rounded-lg ml-3 disabled:opacity-40 shrink-0">
-                                {reversingPayment === p.id ? '…' : '↩ Reverse'}
-                              </button>
-                            </div>
-                          ))}
-                          <p className="text-[10px] text-slate-400 text-center pt-1">Reversing a payment restores the invoice balance so it reappears as outstanding</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                </div>) : (<div className="bg-white rounded-xl border border-slate-200 p-8 text-center"><p className="text-3xl opacity-20">👈</p><p className="text-slate-400 font-semibold mt-2">Select a customer</p></div>)}
-              </div>
-            </div>
-          )}
-        </div>)}
+        {tab === 'credit' && (
+          <TabCredit
+            vendor={vendor}
+            products={data?.products || []}
+            vendorSettings={vendorSettings}
+            showToast={showToast}
+            onDataChanged={fetchData}
+          />
+        )}
 
         {/* PERIOD REPORT MODAL */}
         {periodReportModal && (() => {
@@ -5170,6 +4024,11 @@ ${customerRows.map(c => `<tr>
               )}
             </div>
 
+            {/* ══ WHEEL MART ONLY ═══════════════════════════════════════════════════════
+                Tax Configuration panel (VAT rate, SSCL rate, liable base percentages).
+                Standard vendors (Sakura) never see this.
+                To edit: changes here affect ONLY WHEEL MART. Safe to touch.
+                ════════════════════════════════════════════════════════════════════════ */}
             {/* ── Tax Configuration (lk_tax / Pvt Ltd only) ── */}
             {isLkTax && (() => {
               async function loadTaxConfig() {
