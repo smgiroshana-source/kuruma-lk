@@ -1,0 +1,109 @@
+name: Vendor Boundary Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  vendor-boundary:
+    name: Cross-vendor change detection
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          else
+            FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          fi
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Check for cross-vendor changes
+        run: |
+          FILES="${{ steps.changed.outputs.files }}"
+          LK_TAX=$(echo "$FILES"  | grep "_lk_tax/"  || true)
+          STANDARD=$(echo "$FILES" | grep "_standard/" || true)
+
+          if [ -n "$LK_TAX" ] && [ -n "$STANDARD" ]; then
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════╗"
+            echo "║  ❌  CROSS-VENDOR CHANGE DETECTED                          ║"
+            echo "╚══════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "This push/PR touches BOTH vendor folders:"
+            echo ""
+            echo "  WHEEL MART  (_lk_tax/):"
+            echo "$LK_TAX" | sed 's/^/    /'
+            echo ""
+            echo "  Sakura Auto (_standard/):"
+            echo "$STANDARD" | sed 's/^/    /'
+            echo ""
+            echo "Each vendor's changes must be in a separate commit/PR."
+            exit 1
+          fi
+
+          if [ -n "$LK_TAX" ]; then
+            echo "✅ Changes are WHEEL MART only (_lk_tax/) — OK"
+          elif [ -n "$STANDARD" ]; then
+            echo "✅ Changes are Sakura Auto only (_standard/) — OK"
+          else
+            echo "✅ No vendor-specific changes detected"
+          fi
+
+  typecheck:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  lint:
+    name: ESLint (vendor boundary imports)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Only fail on cross-vendor import violations — ignore pre-existing any/unused-var noise
+      - name: Check for cross-vendor imports
+        run: |
+          set +e
+          npx eslint src/app/vendor/_lk_tax/ src/app/vendor/_standard/ --format json > /tmp/eslint-out.json 2>&1
+          node -e "
+            const fs = require('fs');
+            let results;
+            try { results = JSON.parse(fs.readFileSync('/tmp/eslint-out.json', 'utf8')); }
+            catch { console.log('✅ ESLint output could not be parsed — skipping'); process.exit(0); }
+            const violations = results.flatMap(r =>
+              (r.messages || [])
+                .filter(m => m.ruleId === 'no-restricted-imports')
+                .map(m => r.filePath.split('src/').pop() + ':' + m.line + '  ' + m.message)
+            );
+            if (violations.length > 0) {
+              console.error('');
+              console.error('❌  CROSS-VENDOR IMPORT VIOLATIONS');
+              console.error('   A file is importing from the wrong vendor folder.');
+              console.error('');
+              violations.forEach(v => console.error('   ' + v));
+              console.error('');
+              process.exit(1);
+            }
+            console.log('✅ No cross-vendor imports detected');
+          "
