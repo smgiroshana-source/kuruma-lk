@@ -12,8 +12,9 @@ import WheelMartSidebar from './_lk_tax/WheelMartSidebar'
 import TabOverview from './_lk_tax/TabOverview'
 import TabSuppliers from './_lk_tax/TabSuppliers'
 import TabSupplierReturns from './_lk_tax/TabSupplierReturns'
+import TabWriteoffs from './_lk_tax/TabWriteoffs'
 
-type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'settings'
+type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
 const TYRE_WIDTHS  = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
@@ -499,6 +500,7 @@ export default function VendorDashboard() {
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
   const [returnModal, setReturnModal] = useState<any>(null)
   const [returnItems, setReturnItems] = useState<Record<string, number>>({})
+  const [returnReason, setReturnReason] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
 
   // Feature 1,2: Bulk upload duplicate detection + progress
@@ -1040,7 +1042,9 @@ export default function VendorDashboard() {
     if (items.length === 0) { showToast('Select items to return'); return }
     setReturnLoading(true)
     try {
-      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod }) })
+      const payload: Record<string, unknown> = { action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod }
+      if (returnReason.trim()) payload.return_reason = returnReason.trim()
+      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       const j = await r.json()
       if (j.success) {
         showToast(j.message)
@@ -1059,9 +1063,9 @@ export default function VendorDashboard() {
             refundAmount: totalRefund,
             entityId: returnModal.invoice_entity_id || null,
           })
-          setReturnModal(null); setReturnItems({})
+          setReturnModal(null); setReturnItems({}); setReturnReason('')
         } else {
-          setReturnModal(null); setReturnItems({})
+          setReturnModal(null); setReturnItems({}); setReturnReason('')
         }
       } else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
@@ -1824,6 +1828,11 @@ ${customerRows.map(c => `<tr>
         {/* SUPPLIER RETURNS — WHEEL MART only */}
         {tab === 'supplier-returns' && isLkTax && (
           <TabSupplierReturns vendor={vendor} showToast={showToast} />
+        )}
+
+        {/* WRITE-OFFS — WHEEL MART only */}
+        {tab === 'writeoffs' && isLkTax && (
+          <TabWriteoffs vendor={vendor} showToast={showToast} />
         )}
 
         {/* PRODUCTS */}
@@ -3729,7 +3738,7 @@ ${customerRows.map(c => `<tr>
 
         {/* RETURN ITEMS MODAL */}
         {returnModal && (
-          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setReturnModal(null)}>
+          <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => { setReturnModal(null); setReturnReason('') }}>
             <div className="bg-white rounded-2xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="bg-amber-50 px-5 py-4 border-b border-amber-100 flex-shrink-0">
                 <h3 className="font-bold text-base text-amber-800">↩ Return Items</h3>
@@ -3775,6 +3784,16 @@ ${customerRows.map(c => `<tr>
                     )
                   })}
                 </div>
+                <div className="mt-4">
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Reason <span className="text-slate-300 font-normal normal-case">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={returnReason}
+                    onChange={e => setReturnReason(e.target.value)}
+                    placeholder="e.g. Wrong item, Defective, Customer changed mind"
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  />
+                </div>
                 {(() => {
                   const totalRefund = Object.entries(returnItems).reduce((sum, [itemId, qty]) => {
                     const item = (returnModal.items || []).find((i: any) => i.id === itemId)
@@ -3805,7 +3824,7 @@ ${customerRows.map(c => `<tr>
                 })()}
               </div>
               <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex-shrink-0">
-                <button onClick={() => setReturnModal(null)} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
+                <button onClick={() => { setReturnModal(null); setReturnReason('') }} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
               </div>
             </div>
           </div>
