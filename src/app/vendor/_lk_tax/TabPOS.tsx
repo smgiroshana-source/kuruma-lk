@@ -46,14 +46,15 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
       const qty = i.quantity - (i.returned_quantity || 0)
       return { ...i, quantity: qty, total: qty * parseFloat(i.unit_price) }
     })
-  const s = settings || {}
-  const total     = parseFloat(sale.total) || 0
-  const vatAmount = parseInt(sale.vat_amount) || Math.round(total * 18 / 118)
-  const netAmount = parseInt(sale.net_amount) || (total - vatAmount)
-  const serial    = sale.tax_serial || sale.invoice_no || ''
-  const invoiceDate = fmtDate(sale.created_at)
-  const supplyDate  = fmtDate(sale.date_supply || sale.created_at)
-  const totalWords  = numberToWords(total) + ' Rupees Only'
+  const s            = settings || {}
+  const total        = parseFloat(sale.total) || 0
+  const vatAmount    = parseInt(sale.vat_amount) || Math.round(total * 18 / 118)
+  const netAmount    = parseInt(sale.net_amount) || (total - vatAmount)
+  const discount     = parseFloat(sale.discount || 0)
+  const serial       = sale.tax_serial || sale.invoice_no || ''
+  const invoiceDate  = fmtDate(sale.created_at)
+  const supplyDate   = fmtDate(sale.date_supply || sale.created_at)
+  const totalWords   = numberToWords(total) + ' Rupees Only'
   const supplierName    = 'MacForce Auto Engineering (Pvt) Ltd'
   const supplierAddress = s.supplier_address || 'No. 351/T, Pannipitiya Road, Thalawathugoda'
   const supplierTin     = s.supplier_tin     || '101969738'
@@ -62,85 +63,148 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const purchaserTin     = sale.customer_tin     || ''
   const purchaserPhone   = sale.customer_phone   || ''
   const logoHtml = (s.logo_url && s.invoice_show_logo !== false)
-    ? `<img src="${s.logo_url}" style="height:60px;max-width:130px;object-fit:contain;margin-bottom:4px">`
+    ? `<img src="${s.logo_url}" style="height:52px;max-width:120px;object-fit:contain;display:block;margin-bottom:4px">`
     : ''
-  const lineRows = items.map((i: any) => `
+  const lineRows = items.map((i: any, idx: number) => `
     <tr>
-      <td style="padding:5px 8px;font-size:13px;color:#000;border-bottom:1px solid #e5e7eb">${i.product_name}</td>
-      <td style="padding:5px 8px;font-size:13px;color:#000;text-align:center;border-bottom:1px solid #e5e7eb">${i.quantity}</td>
-      <td style="padding:5px 8px;font-size:13px;color:#000;text-align:right;border-bottom:1px solid #e5e7eb">Rs.${parseFloat(i.unit_price).toLocaleString()}</td>
-      <td style="padding:5px 8px;font-size:13px;font-weight:700;color:#000;text-align:right;border-bottom:1px solid #e5e7eb">Rs.${parseFloat(i.total).toLocaleString()}</td>
+      <td class="c-no">${idx + 1}</td>
+      <td class="c-desc">${i.product_name}</td>
+      <td class="c-qty">${i.quantity}</td>
+      <td class="c-price">${parseFloat(i.unit_price).toLocaleString()}</td>
+      <td class="c-amt">${parseFloat(i.total).toLocaleString()}</td>
     </tr>`).join('')
+  const paymentHtml = (() => {
+    const pmts = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
+    if (!pmts.length) return ''
+    const lines = pmts.map((p: any) =>
+      `<span style="margin-right:14px;font-weight:700">${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}: Rs.${parseFloat(p.amount).toLocaleString()}</span>`
+    ).join('')
+    return `<div style="border:1px solid #ccc;padding:4px 9px;margin-bottom:8px"><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Payment Method</div>${lines}</div>`
+  })()
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TAX INVOICE ${serial}</title>
 <style>
-  @page { size:A4; margin:15mm 18mm }
-  body { font-family:'Helvetica Neue',Arial,sans-serif; color:#000; margin:0; padding:0 }
-  * { box-sizing:border-box }
+@page{size:A4;margin:14mm 16mm}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:Arial,'Helvetica Neue',sans-serif;font-size:11px;color:#000;line-height:1.45}
+@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:8px;border-bottom:2.5px solid #000;margin-bottom:8px}
+.hdr-name{font-size:16px;font-weight:900}
+.hdr-addr{font-size:10px;margin-top:1px}
+.hdr-tin{font-size:10px;font-weight:700;margin-top:3px}
+.hdr-title{font-size:22px;font-weight:900;letter-spacing:2px;border:3px solid #000;padding:3px 10px;display:inline-block}
+.hdr-serial{font-family:'Courier New',monospace;font-size:11px;font-weight:700;text-align:right;margin-top:5px}
+.parties{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000;margin-bottom:0}
+.p-col{padding:6px 9px}
+.p-col:first-child{border-right:1px solid #000}
+.p-lbl{font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;border-bottom:1px solid #000;padding-bottom:3px;margin-bottom:4px}
+.p-name{font-size:12px;font-weight:700}
+.p-info{font-size:10px;margin-top:1px}
+.p-tin{font-size:10px;font-weight:700;margin-top:2px}
+.dates{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000;border-top:none;margin-bottom:10px}
+.d-col{padding:4px 9px;display:flex;align-items:center;gap:5px}
+.d-col:first-child{border-right:1px solid #000}
+.d-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.d-val{font-size:11px;font-weight:700;font-family:'Courier New',monospace}
+table{width:100%;border-collapse:collapse;margin-bottom:8px}
+th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:5px 5px 4px;text-align:left;border-top:1.5px solid #000;border-bottom:1.5px solid #000}
+td{font-size:11px;padding:5px 5px;border-bottom:1px solid #ccc}
+.c-no{width:22px;text-align:center}
+.c-qty{width:40px;text-align:center}
+.c-price{width:100px;text-align:right}
+.c-amt{width:100px;text-align:right;font-weight:700}
+tbody tr:last-child td{border-bottom:1.5px solid #000}
+.tot-outer{display:flex;justify-content:flex-end;margin-bottom:8px}
+.tot-inner{width:265px}
+.tot-row{display:flex;justify-content:space-between;padding:2.5px 0;font-size:11px}
+.tot-val{font-weight:600;font-family:'Courier New',monospace}
+.tot-div{border-top:1px solid #999;margin:3px 0}
+.tot-grand{display:flex;justify-content:space-between;padding:5px 6px;font-size:14px;font-weight:900;border-top:2.5px double #000;border-bottom:2.5px double #000;margin-top:3px}
+.words{border:1px solid #000;padding:5px 9px;margin-bottom:8px}
+.w-lbl{font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
+.w-val{font-size:11px;font-weight:700}
+.sigs{display:flex;justify-content:space-between;margin-top:28px;gap:30px}
+.sig{flex:1;text-align:center}
+.sig-line{border-top:1px solid #000;padding-top:3px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.footer{text-align:center;font-size:9px;margin-top:10px;padding-top:6px;border-top:1px dashed #000}
 </style></head><body>
-<div style="max-width:750px;margin:0 auto">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
-    <div>
-      ${logoHtml}
-      <div style="font-size:11px;color:#555;margin-top:2px">${supplierName}</div>
-      <div style="font-size:11px;color:#555">${supplierAddress}</div>
-      <div style="font-size:11px;font-weight:700;color:#000">TIN: ${supplierTin}</div>
-    </div>
-    <div style="text-align:right">
-      <div style="font-size:24px;font-weight:900;color:#000;letter-spacing:1px">TAX INVOICE</div>
-      <div style="font-size:12px;font-weight:700;color:#000;margin-top:4px;font-family:monospace">${serial}</div>
-    </div>
+
+<div class="hdr">
+  <div>
+    ${logoHtml}
+    <div class="hdr-name">${supplierName}</div>
+    <div class="hdr-addr">${supplierAddress}</div>
+    <div class="hdr-tin">TIN: ${supplierTin}</div>
   </div>
-  <div style="display:flex;gap:24px;margin-bottom:16px">
-    <div><span style="font-size:11px;color:#555">Date of Invoice: </span><span style="font-size:12px;font-weight:700">${invoiceDate}</span></div>
-    <div><span style="font-size:11px;color:#555">Date of Supply: </span><span style="font-size:12px;font-weight:700">${supplyDate}</span></div>
-  </div>
-  <div style="background:#f8f9fa;border:1px solid #e5e7eb;border-radius:6px;padding:10px 14px;margin-bottom:16px">
-    <div style="font-size:10px;font-weight:900;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Bill To</div>
-    <div style="font-size:13px;font-weight:700;color:#000">${purchaserName}</div>
-    ${purchaserAddress ? `<div style="font-size:12px;color:#000">${purchaserAddress}</div>` : ''}
-    ${purchaserPhone ? `<div style="font-size:11px;color:#555">${purchaserPhone}</div>` : ''}
-    ${purchaserTin ? `<div style="font-size:12px;font-weight:700;color:#000;margin-top:2px">TIN: ${purchaserTin}</div>` : ''}
-  </div>
-  <table style="width:100%;border-collapse:collapse;margin-bottom:16px">
-    <thead>
-      <tr style="background:#1e293b">
-        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:left">Description</th>
-        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:center;width:60px">Qty</th>
-        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:right;width:110px">Unit Price</th>
-        <th style="padding:7px 8px;font-size:11px;font-weight:700;color:#fff;text-align:right;width:110px">Amount</th>
-      </tr>
-    </thead>
-    <tbody>${lineRows}</tbody>
-  </table>
-  <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
-    <div style="width:280px">
-      ${parseFloat(sale.discount || 0) > 0 ? `<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px"><span style="color:#555">Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-top:1px solid #e5e7eb;margin-top:4px">
-        <span style="color:#555">Net Amount (excl. VAT)</span><span style="font-weight:600">Rs.${netAmount.toLocaleString()}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:4px 0;font-size:13px">
-        <span style="color:#555">VAT @ 18%</span><span style="font-weight:600">Rs.${vatAmount.toLocaleString()}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:7px 10px;font-size:15px;font-weight:900;background:#1e293b;color:#fff;border-radius:6px;margin-top:6px">
-        <span>TOTAL</span><span>Rs.${total.toLocaleString()}</span>
-      </div>
-    </div>
-  </div>
-  <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:8px 12px;margin-bottom:16px">
-    <span style="font-size:11px;color:#92400e;font-weight:700">Amount in Words: </span>
-    <span style="font-size:12px;font-weight:700;color:#000">${totalWords}</span>
-  </div>
-  ${(sale.payments || []).length > 0 ? `
-  <div style="margin-bottom:16px">
-    <div style="font-size:10px;font-weight:900;color:#6b7280;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Payment Method</div>
-    ${(sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return').map((p: any) =>
-      `<span style="display:inline-block;margin-right:10px;font-size:12px;font-weight:700;color:#000">${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #'+p.cheque_number : ''}: Rs.${parseFloat(p.amount).toLocaleString()}</span>`
-    ).join('')}
-  </div>` : ''}
-  <div style="border-top:1px solid #e5e7eb;padding-top:10px;text-align:center">
-    <p style="font-size:11px;color:#555;margin:0">${s.invoice_footer || 'Thank you for your business!'}</p>
+  <div style="text-align:right">
+    <div class="hdr-title">TAX INVOICE</div>
+    <div class="hdr-serial">${serial}</div>
   </div>
 </div>
+
+<div class="parties">
+  <div class="p-col">
+    <div class="p-lbl">Supplier</div>
+    <div class="p-name">${supplierName}</div>
+    <div class="p-info">${supplierAddress}</div>
+    <div class="p-tin">TIN: ${supplierTin}</div>
+  </div>
+  <div class="p-col">
+    <div class="p-lbl">Bill To (Purchaser)</div>
+    <div class="p-name">${purchaserName || '&mdash;'}</div>
+    ${purchaserAddress ? `<div class="p-info">${purchaserAddress}</div>` : ''}
+    ${purchaserPhone ? `<div class="p-info">${purchaserPhone}</div>` : ''}
+    ${purchaserTin ? `<div class="p-tin">TIN: ${purchaserTin}</div>` : ''}
+  </div>
+</div>
+
+<div class="dates">
+  <div class="d-col">
+    <span class="d-lbl">Date of Invoice:</span>
+    <span class="d-val">${invoiceDate}</span>
+  </div>
+  <div class="d-col">
+    <span class="d-lbl">Date of Supply:</span>
+    <span class="d-val">${supplyDate}</span>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th class="c-no">#</th>
+      <th>Description of Goods / Services</th>
+      <th class="c-qty">Qty</th>
+      <th class="c-price">Unit Price (Rs.)</th>
+      <th class="c-amt">Amount (Rs.)</th>
+    </tr>
+  </thead>
+  <tbody>${lineRows}</tbody>
+</table>
+
+<div class="tot-outer">
+  <div class="tot-inner">
+    ${discount > 0 ? `<div class="tot-row"><span>Discount</span><span class="tot-val">&#8722;${discount.toLocaleString()}</span></div>` : ''}
+    <div class="tot-div"></div>
+    <div class="tot-row"><span>Net Amount (excl. VAT)</span><span class="tot-val">${netAmount.toLocaleString()}</span></div>
+    <div class="tot-row"><span>VAT @ 18%</span><span class="tot-val">${vatAmount.toLocaleString()}</span></div>
+    <div class="tot-grand"><span>TOTAL (Rs.)</span><span>${total.toLocaleString()}</span></div>
+  </div>
+</div>
+
+<div class="words">
+  <div class="w-lbl">Amount in Words</div>
+  <div class="w-val">${totalWords}</div>
+</div>
+
+${paymentHtml}
+
+<div class="sigs">
+  <div class="sig"><div class="sig-line">Received By</div></div>
+  <div class="sig"><div class="sig-line">Authorised Signatory</div></div>
+</div>
+
+<div class="footer">${s.invoice_footer || 'Thank you for your business!'}</div>
+
 </body></html>`
   const win = window.open('', '_blank', 'width=900,height=700')
   if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
