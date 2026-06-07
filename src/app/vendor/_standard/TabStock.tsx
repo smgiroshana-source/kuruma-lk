@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import StockTransfer from '../_shared/StockTransfer'
 
 function locLabel(p: any) { return [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ') }
 function confirmedAgo(dateStr: string | null): { label: string; cls: string } | null {
@@ -20,7 +21,7 @@ interface TabStockStandardProps {
 }
 
 export default function TabStockStandard({ vendor, products, vendorSettings, showToast, onDataChanged }: TabStockStandardProps) {
-  const [stockView, setStockView] = useState<'browse' | 'assign'>('browse')
+  const [stockView, setStockView] = useState<'browse' | 'assign' | 'transfer'>('browse')
   const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [stocktakeSearch, setStocktakeSearch] = useState('')
   const [stockQtyEdits, setStockQtyEdits] = useState<Record<string, number>>({})
@@ -138,6 +139,10 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
         <button onClick={() => setStockView('assign')}
           className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'assign' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-500 border-slate-200'}`}>
           📍 Quick Assign
+        </button>
+        <button onClick={() => setStockView('transfer')}
+          className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'transfer' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200'}`}>
+          🔀 Transfer Stock
         </button>
         {pendingCount > 0 && stockView === 'browse' && (
           <button onClick={() => saveAllStockChanges()} disabled={stocktakeSaving}
@@ -460,6 +465,11 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── TRANSFER STOCK ── */}
+      {stockView === 'transfer' && (
+        <StockTransfer vendor={vendor} products={products} showToast={showToast} onDataChanged={onDataChanged} />
       )}
     </div>
   )
