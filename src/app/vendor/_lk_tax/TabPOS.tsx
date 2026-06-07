@@ -83,23 +83,24 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   })()
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TAX INVOICE ${serial}</title>
 <style>
-/* ── Print: zero page margins; body padding handles whitespace ── */
+/* ── Print: zero page margins; body padding IS the whitespace ── */
 @page{size:A4 portrait;margin:0}
 *{margin:0;padding:0;box-sizing:border-box}
-/* ── Screen: grey "desk" so the A4 sheet is clearly visible ── */
+/* ── Screen: grey "desk" so the A4 sheet stands out ── */
 html{background:#9ca3af;min-height:100%;padding:12mm 0 20mm}
 body{
   font-family:Arial,'Helvetica Neue',sans-serif;
   font-size:11px;color:#000;line-height:1.5;
-  width:210mm;min-height:277mm;
+  width:210mm;min-height:297mm;       /* full A4 sheet (border-box incl. padding) */
   margin:0 auto;
   padding:14mm 18mm 16mm;
   background:#fff;
   box-shadow:0 6px 32px rgba(0,0,0,.35);
+  display:flex;flex-direction:column; /* push sigs to bottom */
 }
 @media print{
   html{background:#fff;padding:0}
-  body{width:100%;min-height:0;margin:0;padding:14mm 18mm 16mm;box-shadow:none}
+  body{width:100%;min-height:297mm;margin:0;padding:14mm 18mm 16mm;box-shadow:none}
 }
 /* ── Header ── */
 .hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:9px;border-bottom:2px solid #000;margin-bottom:10px}
@@ -151,12 +152,14 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
 .pmt{border:1px solid #ccc;padding:5px 10px;margin-bottom:10px}
 .pmt-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;color:#444;margin-bottom:3px}
 .pmt-val{font-size:11px;font-weight:700}
+/* ── Push spacer — grows to fill space so sigs land at bottom ── */
+.push{flex:1;min-height:12mm}
 /* ── Signatures ── */
-.sigs{display:flex;justify-content:space-between;margin-top:32px;gap:40px}
+.sigs{display:flex;justify-content:space-between;gap:40px;margin-top:0}
 .sig{flex:1;text-align:center}
 .sig-line{border-top:1px solid #000;padding-top:4px;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#333}
 /* ── Footer ── */
-.footer{text-align:center;font-size:9px;color:#555;margin-top:12px;padding-top:7px;border-top:1px dashed #999}
+.footer{text-align:center;font-size:9px;color:#555;margin-top:10px;padding-top:6px;border-top:1px dashed #999}
 </style></head><body>
 
 <div class="hdr">
@@ -231,6 +234,8 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
 </div>
 
 ${paymentHtml}
+
+<div class="push"></div>
 
 <div class="sigs">
   <div class="sig"><div class="sig-line">Received By</div></div>
