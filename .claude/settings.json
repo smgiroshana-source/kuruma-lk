@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolCall": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /Users/goshan/Desktop/kuruma-lk/.claude/vendor-guard.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

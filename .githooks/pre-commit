@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────
+# VENDOR BOUNDARY PRE-COMMIT HOOK
+#
+# Blocks any commit that simultaneously modifies files under BOTH
+# vendor folders (_lk_tax = WHEEL MART, _standard = Sakura Auto).
+#
+# A single commit should never span both vendors.  If you
+# legitimately need to update both, make two separate commits
+# with a clear message for each.
+# ─────────────────────────────────────────────────────────────────
+
+STAGED=$(git diff --cached --name-only)
+
+LK_TAX_FILES=$(echo "$STAGED"  | grep "_lk_tax/")
+STANDARD_FILES=$(echo "$STAGED" | grep "_standard/")
+
+if [[ -n "$LK_TAX_FILES" && -n "$STANDARD_FILES" ]]; then
+  echo ""
+  echo "╔══════════════════════════════════════════════════════════════╗"
+  echo "║  ❌  CROSS-VENDOR COMMIT BLOCKED                            ║"
+  echo "╚══════════════════════════════════════════════════════════════╝"
+  echo ""
+  echo "This commit touches BOTH vendor folders:"
+  echo ""
+  echo "  WHEEL MART  (_lk_tax/):"
+  echo "$LK_TAX_FILES" | sed 's/^/    /'
+  echo ""
+  echo "  Sakura Auto (_standard/):"
+  echo "$STANDARD_FILES" | sed 's/^/    /'
+  echo ""
+  echo "Fix: split into two separate commits — one per vendor."
+  echo "       git reset HEAD <sakura files>   # unstage Sakura changes"
+  echo "       git commit -m 'feat(wheelmart): ...'   # commit WHEEL MART only"
+  echo "       git add <sakura files>"
+  echo "       git commit -m 'feat(sakura): ...'      # commit Sakura separately"
+  echo ""
+  exit 1
+fi
+
+# ── Warn (but don't block) when touching _shared/ ────────────────
+SHARED_FILES=$(echo "$STAGED" | grep "_shared/")
+if [[ -n "$SHARED_FILES" ]]; then
+  echo ""
+  echo "⚠️  SHARED CODE WARNING"
+  echo "   These files affect BOTH WHEEL MART and Sakura Auto:"
+  echo "$SHARED_FILES" | sed 's/^/    /'
+  echo "   Make sure the change is intentionally cross-vendor."
+  echo ""
+fi
+
+exit 0
