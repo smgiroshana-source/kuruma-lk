@@ -77,65 +77,96 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
     const pmts = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
     if (!pmts.length) return ''
     const lines = pmts.map((p: any) =>
-      `<span style="margin-right:14px;font-weight:700">${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}: Rs.${parseFloat(p.amount).toLocaleString()}</span>`
+      `<span style="margin-right:16px"><strong>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</strong>: Rs.&nbsp;${parseFloat(p.amount).toLocaleString()}</span>`
     ).join('')
-    return `<div style="border:1px solid #ccc;padding:4px 9px;margin-bottom:8px"><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Payment Method</div>${lines}</div>`
+    return `<div class="pmt"><div class="pmt-lbl">Payment Method</div><div class="pmt-val">${lines}</div></div>`
   })()
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TAX INVOICE ${serial}</title>
 <style>
-@page{size:A4;margin:14mm 16mm}
+/* ── Print: zero page margins; body padding handles whitespace ── */
+@page{size:A4 portrait;margin:0}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:Arial,'Helvetica Neue',sans-serif;font-size:11px;color:#000;line-height:1.45}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:8px;border-bottom:2.5px solid #000;margin-bottom:8px}
-.hdr-name{font-size:16px;font-weight:900}
-.hdr-addr{font-size:10px;margin-top:1px}
-.hdr-tin{font-size:10px;font-weight:700;margin-top:3px}
-.hdr-title{font-size:22px;font-weight:900;letter-spacing:2px;border:3px solid #000;padding:3px 10px;display:inline-block}
-.hdr-serial{font-family:'Courier New',monospace;font-size:11px;font-weight:700;text-align:right;margin-top:5px}
-.parties{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000;margin-bottom:0}
-.p-col{padding:6px 9px}
-.p-col:first-child{border-right:1px solid #000}
-.p-lbl{font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;border-bottom:1px solid #000;padding-bottom:3px;margin-bottom:4px}
-.p-name{font-size:12px;font-weight:700}
-.p-info{font-size:10px;margin-top:1px}
-.p-tin{font-size:10px;font-weight:700;margin-top:2px}
-.dates{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000;border-top:none;margin-bottom:10px}
-.d-col{padding:4px 9px;display:flex;align-items:center;gap:5px}
-.d-col:first-child{border-right:1px solid #000}
-.d-lbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
-.d-val{font-size:11px;font-weight:700;font-family:'Courier New',monospace}
-table{width:100%;border-collapse:collapse;margin-bottom:8px}
-th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;padding:5px 5px 4px;text-align:left;border-top:1.5px solid #000;border-bottom:1.5px solid #000}
-td{font-size:11px;padding:5px 5px;border-bottom:1px solid #ccc}
-.c-no{width:22px;text-align:center}
-.c-qty{width:40px;text-align:center}
-.c-price{width:100px;text-align:right}
-.c-amt{width:100px;text-align:right;font-weight:700}
+/* ── Screen: grey "desk" so the A4 sheet is clearly visible ── */
+html{background:#9ca3af;min-height:100%;padding:12mm 0 20mm}
+body{
+  font-family:Arial,'Helvetica Neue',sans-serif;
+  font-size:11px;color:#000;line-height:1.5;
+  width:210mm;min-height:277mm;
+  margin:0 auto;
+  padding:14mm 18mm 16mm;
+  background:#fff;
+  box-shadow:0 6px 32px rgba(0,0,0,.35);
+}
+@media print{
+  html{background:#fff;padding:0}
+  body{width:100%;min-height:0;margin:0;padding:14mm 18mm 16mm;box-shadow:none}
+}
+/* ── Header ── */
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:9px;border-bottom:2px solid #000;margin-bottom:10px}
+.hdr-left{flex:1;min-width:0;padding-right:12px}
+.hdr-logo{margin-bottom:5px}
+.hdr-name{font-size:15px;font-weight:900;line-height:1.2}
+.hdr-addr{font-size:9.5px;margin-top:2px;color:#333}
+.hdr-tin{font-size:9.5px;font-weight:700;margin-top:3px}
+.hdr-right{text-align:right;flex-shrink:0}
+.hdr-title{font-size:20px;font-weight:900;letter-spacing:2px;border:2.5px solid #000;padding:4px 12px;display:inline-block;line-height:1.2}
+.hdr-serial{font-family:'Courier New',monospace;font-size:10px;font-weight:700;margin-top:6px;word-break:break-all}
+/* ── Parties ── */
+.parties{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000}
+.p-col{padding:7px 10px}
+.p-col+.p-col{border-left:1px solid #000}
+.p-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;border-bottom:1px solid #000;padding-bottom:3px;margin-bottom:5px;color:#333}
+.p-name{font-size:11.5px;font-weight:700}
+.p-info{font-size:9.5px;margin-top:2px;color:#222}
+.p-tin{font-size:9.5px;font-weight:700;margin-top:3px}
+/* ── Dates ── */
+.dates{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000;border-top:none;margin-bottom:12px}
+.d-col{padding:5px 10px;display:flex;align-items:baseline;gap:6px}
+.d-col+.d-col{border-left:1px solid #000}
+.d-lbl{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;color:#333}
+.d-val{font-size:10.5px;font-weight:700;font-family:'Courier New',monospace}
+/* ── Items table ── */
+table{width:100%;border-collapse:collapse;margin-bottom:4px}
+thead tr th{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:6px 5px 5px;text-align:left;border-top:1.5px solid #000;border-bottom:1.5px solid #000}
+td{font-size:11px;padding:5px 5px;border-bottom:1px solid #ddd;vertical-align:top}
+.c-no{width:26px;text-align:center}
+.c-qty{width:38px;text-align:center}
+.c-price{width:108px;text-align:right;white-space:nowrap}
+.c-amt{width:108px;text-align:right;font-weight:700;white-space:nowrap}
 tbody tr:last-child td{border-bottom:1.5px solid #000}
-.tot-outer{display:flex;justify-content:flex-end;margin-bottom:8px}
-.tot-inner{width:265px}
-.tot-row{display:flex;justify-content:space-between;padding:2.5px 0;font-size:11px}
-.tot-val{font-weight:600;font-family:'Courier New',monospace}
-.tot-div{border-top:1px solid #999;margin:3px 0}
-.tot-grand{display:flex;justify-content:space-between;padding:5px 6px;font-size:14px;font-weight:900;border-top:2.5px double #000;border-bottom:2.5px double #000;margin-top:3px}
-.words{border:1px solid #000;padding:5px 9px;margin-bottom:8px}
-.w-lbl{font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px}
+/* ── Totals ── */
+.tot-outer{display:flex;justify-content:flex-end;margin-bottom:10px}
+.tot-inner{width:46%}
+.tot-row{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
+.tot-lbl{color:#333}
+.tot-val{font-weight:600;font-family:'Courier New',monospace;text-align:right;min-width:80px}
+.tot-div{border-top:1px solid #aaa;margin:4px 0}
+.tot-grand{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;font-size:13.5px;font-weight:900;border-top:2px double #000;border-bottom:2px double #000;margin-top:4px}
+.tot-grand-val{font-family:'Courier New',monospace}
+/* ── Amount in words ── */
+.words{border:1px solid #000;padding:6px 10px;margin-bottom:8px}
+.w-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;color:#444;margin-bottom:2px}
 .w-val{font-size:11px;font-weight:700}
-.sigs{display:flex;justify-content:space-between;margin-top:28px;gap:30px}
+/* ── Payment ── */
+.pmt{border:1px solid #ccc;padding:5px 10px;margin-bottom:10px}
+.pmt-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;color:#444;margin-bottom:3px}
+.pmt-val{font-size:11px;font-weight:700}
+/* ── Signatures ── */
+.sigs{display:flex;justify-content:space-between;margin-top:32px;gap:40px}
 .sig{flex:1;text-align:center}
-.sig-line{border-top:1px solid #000;padding-top:3px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
-.footer{text-align:center;font-size:9px;margin-top:10px;padding-top:6px;border-top:1px dashed #000}
+.sig-line{border-top:1px solid #000;padding-top:4px;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#333}
+/* ── Footer ── */
+.footer{text-align:center;font-size:9px;color:#555;margin-top:12px;padding-top:7px;border-top:1px dashed #999}
 </style></head><body>
 
 <div class="hdr">
-  <div>
-    ${logoHtml}
+  <div class="hdr-left">
+    ${logoHtml ? `<div class="hdr-logo">${logoHtml}</div>` : ''}
     <div class="hdr-name">${supplierName}</div>
     <div class="hdr-addr">${supplierAddress}</div>
     <div class="hdr-tin">TIN: ${supplierTin}</div>
   </div>
-  <div style="text-align:right">
+  <div class="hdr-right">
     <div class="hdr-title">TAX INVOICE</div>
     <div class="hdr-serial">${serial}</div>
   </div>
@@ -152,8 +183,8 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
     <div class="p-lbl">Bill To (Purchaser)</div>
     <div class="p-name">${purchaserName || '&mdash;'}</div>
     ${purchaserAddress ? `<div class="p-info">${purchaserAddress}</div>` : ''}
-    ${purchaserPhone ? `<div class="p-info">${purchaserPhone}</div>` : ''}
-    ${purchaserTin ? `<div class="p-tin">TIN: ${purchaserTin}</div>` : ''}
+    ${purchaserPhone   ? `<div class="p-info">${purchaserPhone}</div>`   : ''}
+    ${purchaserTin     ? `<div class="p-tin">TIN: ${purchaserTin}</div>` : ''}
   </div>
 </div>
 
@@ -173,9 +204,9 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
     <tr>
       <th class="c-no">#</th>
       <th>Description of Goods / Services</th>
-      <th class="c-qty">Qty</th>
-      <th class="c-price">Unit Price (Rs.)</th>
-      <th class="c-amt">Amount (Rs.)</th>
+      <th class="c-qty" style="text-align:center">Qty</th>
+      <th class="c-price" style="text-align:right">Unit Price (Rs.)</th>
+      <th class="c-amt"  style="text-align:right">Amount (Rs.)</th>
     </tr>
   </thead>
   <tbody>${lineRows}</tbody>
@@ -183,11 +214,14 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
 
 <div class="tot-outer">
   <div class="tot-inner">
-    ${discount > 0 ? `<div class="tot-row"><span>Discount</span><span class="tot-val">&#8722;${discount.toLocaleString()}</span></div>` : ''}
+    ${discount > 0 ? `<div class="tot-row"><span class="tot-lbl">Discount</span><span class="tot-val">&#8722;&nbsp;${discount.toLocaleString()}</span></div>` : ''}
     <div class="tot-div"></div>
-    <div class="tot-row"><span>Net Amount (excl. VAT)</span><span class="tot-val">${netAmount.toLocaleString()}</span></div>
-    <div class="tot-row"><span>VAT @ 18%</span><span class="tot-val">${vatAmount.toLocaleString()}</span></div>
-    <div class="tot-grand"><span>TOTAL (Rs.)</span><span>${total.toLocaleString()}</span></div>
+    <div class="tot-row"><span class="tot-lbl">Net Amount (excl. VAT)</span><span class="tot-val">${netAmount.toLocaleString()}</span></div>
+    <div class="tot-row"><span class="tot-lbl">VAT @ 18%</span><span class="tot-val">${vatAmount.toLocaleString()}</span></div>
+    <div class="tot-grand">
+      <span>TOTAL (Rs.)</span>
+      <span class="tot-grand-val">${total.toLocaleString()}</span>
+    </div>
   </div>
 </div>
 
@@ -206,8 +240,8 @@ ${paymentHtml}
 <div class="footer">${s.invoice_footer || 'Thank you for your business!'}</div>
 
 </body></html>`
-  const win = window.open('', '_blank', 'width=900,height=700')
-  if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+  const win = window.open('', '_blank', 'width=960,height=1100')
+  if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 400) }
 }
 
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
