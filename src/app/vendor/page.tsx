@@ -13,8 +13,9 @@ import TabOverview from './_lk_tax/TabOverview'
 import TabSuppliers from './_lk_tax/TabSuppliers'
 import TabSupplierReturns from './_lk_tax/TabSupplierReturns'
 import TabWriteoffs from './_lk_tax/TabWriteoffs'
+import TabFleet from './_lk_tax/TabFleet'
 
-type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'settings'
+type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
 const TYRE_WIDTHS  = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
@@ -1833,6 +1834,11 @@ ${customerRows.map(c => `<tr>
         {/* WRITE-OFFS — WHEEL MART only */}
         {tab === 'writeoffs' && isLkTax && (
           <TabWriteoffs vendor={vendor} showToast={showToast} />
+        )}
+
+        {/* FLEET / VEHICLES — WHEEL MART only */}
+        {tab === 'fleet' && isLkTax && (
+          <TabFleet vendor={vendor} showToast={showToast} />
         )}
 
         {/* PRODUCTS */}
