@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import StockTransfer from '../_shared/StockTransfer'
 
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
@@ -27,7 +28,7 @@ interface TabStockLkTaxProps {
 }
 
 export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged }: TabStockLkTaxProps) {
-  const [stockMainView, setStockMainView] = useState<'stocktake' | 'suppliers' | 'receive' | 'history'>('stocktake')
+  const [stockMainView, setStockMainView] = useState<'stocktake' | 'suppliers' | 'receive' | 'history' | 'transfer'>('stocktake')
   const [stockView, setStockView] = useState<'browse' | 'assign'>('browse')
   const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [stocktakeSearch, setStocktakeSearch] = useState('')
@@ -428,7 +429,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     <div>
       {/* ── Sub-tabs nav ── */}
       <div className="flex gap-1 mb-5 bg-slate-100 rounded-xl p-1 overflow-x-auto">
-        {([{v:'stocktake',l:'📦',lf:'Stock Levels'},{v:'suppliers',l:'🏭',lf:'Suppliers'},{v:'receive',l:'📥',lf:'Receive Stock'},{v:'history',l:'📜',lf:'GRN History'}] as const).map(t => (
+        {([{v:'stocktake',l:'📦',lf:'Stock Levels'},{v:'suppliers',l:'🏭',lf:'Suppliers'},{v:'receive',l:'📥',lf:'Receive Stock'},{v:'history',l:'📜',lf:'GRN History'},{v:'transfer',l:'🔀',lf:'Transfer Stock'}] as const).map(t => (
           <button key={t.v} onClick={() => setStockMainView(t.v)}
             className={`flex-none px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap ${stockMainView === t.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
             <span className="sm:hidden">{t.l} {t.lf}</span>
@@ -1455,6 +1456,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── TRANSFER STOCK ── */}
+      {stockMainView === 'transfer' && (
+        <StockTransfer vendor={vendor} products={products} showToast={showToast} onDataChanged={onDataChanged} />
       )}
     </div>
   )
