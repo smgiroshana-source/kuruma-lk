@@ -3,6 +3,10 @@ import { useState, useEffect } from 'react'
 
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
+const TYRE_WIDTHS   = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
+const TYRE_PROFILES = [25,30,35,40,45,50,55,60,65,70,75,80,85]
+const TYRE_RIMS     = [12,13,14,15,16,17,18,19,20,21,22,24]
+const TYRE_BRANDS   = ['Bridgestone','Michelin','Dunlop','MRF','Apollo','Yokohama','Continental','Pirelli','Toyo','Kumho','Nankang','Nexen','Falken','Hankook','BFGoodrich','Maxxis','Sailun','Linglong','Triangle']
 
 function locLabel(p: any) { return [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ') }
 function confirmedAgo(dateStr: string | null): { label: string; cls: string } | null {
@@ -57,7 +61,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [supplierDeleting, setSupplierDeleting] = useState<string | null>(null)
   // GRN inline product creation
   const [grnInlineCreate, setGrnInlineCreate] = useState(false)
-  const [grnNewProduct, setGrnNewProduct] = useState({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '' })
+  const [grnNewProduct, setGrnNewProduct] = useState({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '' })
   const [grnInlineCreating, setGrnInlineCreating] = useState(false)
   // GRN draft edit
   const [editingGrnId, setEditingGrnId] = useState<string | null>(null)
@@ -288,14 +292,24 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     if (!grnNewProduct.name.trim()) { showToast('Product name required'); return }
     setGrnInlineCreating(true)
     try {
+      const isTyre = grnNewProduct.category === 'Wheels & Tires'
       const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', data: { name: grnNewProduct.name, category: grnNewProduct.category, condition: grnNewProduct.condition, make: grnNewProduct.make, model: grnNewProduct.model, price: grnNewProduct.price, quantity: 0, show_price: true } }) })
+        body: JSON.stringify({ action: 'create', data: {
+          name: grnNewProduct.name, category: grnNewProduct.category,
+          condition: grnNewProduct.condition, make: grnNewProduct.make,
+          model: isTyre ? '' : grnNewProduct.model, price: grnNewProduct.price,
+          quantity: 0, show_price: true,
+          product_type: isTyre ? 'tyre' : 'part',
+          tyre_width:   isTyre && grnNewProduct.tyre_width   ? parseInt(grnNewProduct.tyre_width)   : null,
+          tyre_profile: isTyre && grnNewProduct.tyre_profile ? parseInt(grnNewProduct.tyre_profile) : null,
+          tyre_rim:     isTyre && grnNewProduct.tyre_rim     ? parseInt(grnNewProduct.tyre_rim)     : null,
+        } }) })
       const j = await r.json()
       if (j.success && j.product) {
         const p = j.product
         setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', quantity: 1, unitCost: 0, vatRate: 0, foreignCurrency: '', foreignAmount: '' }])
         setGrnInlineCreate(false)
-        setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '' })
+        setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '' })
         setGrnProductSearch('')
         await onDataChanged()
         showToast('Product created and added to GRN')
@@ -626,7 +640,17 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
             {/* Product search + add items */}
             <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <h3 className="font-bold text-sm text-slate-800 mb-3">Items Received</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold text-sm text-slate-800">Items Received</h3>
+                {/* Quick Add Tyre shortcut */}
+                <button onClick={() => {
+                  setGrnInlineCreate(true)
+                  setGrnNewProduct(p => ({ ...p, category: 'Wheels & Tires', condition: 'Reconditioned' }))
+                  setGrnProductSearch('')
+                }} className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-lg hover:bg-sky-100 active:bg-sky-200">
+                  🏎️ Quick Add Tyre
+                </button>
+              </div>
               {/* Search */}
               <div className="relative mb-3">
                 <input type="search" value={grnProductSearch} onChange={e => setGrnProductSearch(e.target.value)}
@@ -667,17 +691,22 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
               )}
               {/* Inline new product form */}
               {grnInlineCreate && (
-                <div className="border border-orange-200 rounded-xl p-4 mb-3 bg-orange-50 space-y-3">
-                  <h4 className="text-xs font-bold text-orange-700 uppercase">New Product</h4>
+                <div className={`border rounded-xl p-4 mb-3 space-y-3 ${grnNewProduct.category === 'Wheels & Tires' ? 'border-sky-200 bg-sky-50' : 'border-orange-200 bg-orange-50'}`}>
+                  <div className="flex items-center justify-between">
+                    <h4 className={`text-xs font-bold uppercase ${grnNewProduct.category === 'Wheels & Tires' ? 'text-sky-700' : 'text-orange-700'}`}>
+                      {grnNewProduct.category === 'Wheels & Tires' ? '🏎️ New Tyre' : 'New Product'}
+                    </h4>
+                    {grnNewProduct.category !== 'Wheels & Tires' && (
+                      <button onClick={() => setGrnNewProduct(p => ({ ...p, category: 'Wheels & Tires', tyre_width: '', tyre_profile: '', tyre_rim: '' }))}
+                        className="text-[10px] text-sky-600 underline hover:text-sky-800">Switch to Tyre mode →</button>
+                    )}
+                  </div>
+
+                  {/* Category + Condition */}
                   <div className="grid grid-cols-2 gap-2">
-                    <div className="col-span-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Name *</label>
-                      <input type="text" value={grnNewProduct.name} onChange={e => setGrnNewProduct(p => ({ ...p, name: e.target.value }))}
-                        className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                    </div>
                     <div>
                       <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Category</label>
-                      <select value={grnNewProduct.category} onChange={e => setGrnNewProduct(p => ({ ...p, category: e.target.value }))}
+                      <select value={grnNewProduct.category} onChange={e => setGrnNewProduct(p => ({ ...p, category: e.target.value, tyre_width: '', tyre_profile: '', tyre_rim: '' }))}
                         className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400 bg-white">
                         {CATEGORIES.map(c => <option key={c}>{c}</option>)}
                       </select>
@@ -689,28 +718,109 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                         {CONDITIONS.map(c => <option key={c}>{c}</option>)}
                       </select>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Make</label>
-                      <input type="text" value={grnNewProduct.make} onChange={e => setGrnNewProduct(p => ({ ...p, make: e.target.value }))}
-                        placeholder="Toyota" className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Model</label>
-                      <input type="text" value={grnNewProduct.model} onChange={e => setGrnNewProduct(p => ({ ...p, model: e.target.value }))}
-                        className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400" />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Selling Price (Rs.)</label>
-                      <input type="number" value={grnNewProduct.price} onChange={e => setGrnNewProduct(p => ({ ...p, price: e.target.value }))}
-                        placeholder="0" className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400" />
-                    </div>
                   </div>
+
+                  {/* TYRE FIELDS */}
+                  {grnNewProduct.category === 'Wheels & Tires' ? (
+                    <div className="space-y-2">
+                      {/* Size row */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Width</label>
+                          <select value={grnNewProduct.tyre_width} onChange={e => {
+                            const np = { ...grnNewProduct, tyre_width: e.target.value }
+                            if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim)
+                              np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${np.make ? ' ' + np.make : ''}`
+                            setGrnNewProduct(np)
+                          }} className="w-full px-2 py-2 rounded-lg border-2 border-sky-200 text-xs outline-none bg-white focus:border-sky-400">
+                            <option value="">–</option>{TYRE_WIDTHS.map(w => <option key={w} value={w}>{w}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Profile</label>
+                          <select value={grnNewProduct.tyre_profile} onChange={e => {
+                            const np = { ...grnNewProduct, tyre_profile: e.target.value }
+                            if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim)
+                              np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${np.make ? ' ' + np.make : ''}`
+                            setGrnNewProduct(np)
+                          }} className="w-full px-2 py-2 rounded-lg border-2 border-sky-200 text-xs outline-none bg-white focus:border-sky-400">
+                            <option value="">–</option>{TYRE_PROFILES.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Rim (R)</label>
+                          <select value={grnNewProduct.tyre_rim} onChange={e => {
+                            const np = { ...grnNewProduct, tyre_rim: e.target.value }
+                            if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim)
+                              np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${np.make ? ' ' + np.make : ''}`
+                            setGrnNewProduct(np)
+                          }} className="w-full px-2 py-2 rounded-lg border-2 border-sky-200 text-xs outline-none bg-white focus:border-sky-400">
+                            <option value="">–</option>{TYRE_RIMS.map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      {/* Brand (make) */}
+                      <div>
+                        <label className="text-[10px] font-bold text-sky-600 uppercase block mb-1">Brand</label>
+                        <select value={grnNewProduct.make} onChange={e => {
+                          const np = { ...grnNewProduct, make: e.target.value }
+                          if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim)
+                            np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${e.target.value ? ' ' + e.target.value : ''}`
+                          setGrnNewProduct(np)
+                        }} className="w-full px-2 py-2 rounded-lg border-2 border-sky-200 text-xs outline-none bg-white focus:border-sky-400">
+                          <option value="">— Select brand —</option>
+                          {TYRE_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                          <option value="">Other (type below)</option>
+                        </select>
+                      </div>
+                      {/* Name (auto-generated or override) */}
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                          Name *
+                          {grnNewProduct.tyre_width && grnNewProduct.tyre_profile && grnNewProduct.tyre_rim && (
+                            <button type="button" onClick={() => setGrnNewProduct(p => ({ ...p, name: `${p.tyre_width}/${p.tyre_profile}R${p.tyre_rim}${p.make ? ' ' + p.make : ''}`.trim() }))}
+                              className="ml-2 font-normal text-sky-600 underline">Auto-fill</button>
+                          )}
+                        </label>
+                        <input type="text" value={grnNewProduct.name} onChange={e => setGrnNewProduct(p => ({ ...p, name: e.target.value }))}
+                          placeholder="e.g. 185/65R15 Bridgestone"
+                          className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-sky-400" />
+                      </div>
+                    </div>
+                  ) : (
+                    /* Normal part fields */
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Make</label>
+                        <input type="text" value={grnNewProduct.make} onChange={e => setGrnNewProduct(p => ({ ...p, make: e.target.value }))}
+                          placeholder="Toyota" className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Model</label>
+                        <input type="text" value={grnNewProduct.model} onChange={e => setGrnNewProduct(p => ({ ...p, model: e.target.value }))}
+                          className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Name *</label>
+                        <input type="text" value={grnNewProduct.name} onChange={e => setGrnNewProduct(p => ({ ...p, name: e.target.value }))}
+                          className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Selling Price — both modes */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Selling Price (Rs.)</label>
+                    <input type="number" value={grnNewProduct.price} onChange={e => setGrnNewProduct(p => ({ ...p, price: e.target.value }))}
+                      placeholder="0" className="w-full px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400" />
+                  </div>
+
                   <div className="flex gap-2">
                     <button onClick={grnInlineCreateProduct} disabled={grnInlineCreating || !grnNewProduct.name.trim()}
                       className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-lg">
                       {grnInlineCreating ? 'Creating…' : 'Create & Add to GRN'}
                     </button>
-                    <button onClick={() => { setGrnInlineCreate(false); setGrnProductSearch('') }}
+                    <button onClick={() => { setGrnInlineCreate(false); setGrnProductSearch(''); setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '' }) }}
                       className="text-xs font-bold text-slate-500 px-4 py-2 rounded-lg hover:bg-slate-100">Cancel</button>
                   </div>
                 </div>

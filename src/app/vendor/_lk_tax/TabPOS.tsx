@@ -434,11 +434,38 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const posVatAmount = posIsVatEntity ? Math.round(posTotal * 18 / 118) : 0
   const posNetAmount = posIsVatEntity ? posTotal - posVatAmount : posTotal
 
+  // ── Parse tyre size from a search string ─────────────────────────────
+  function parseTyreSize(q: string): { width: number; profile: number; rim: number } | null {
+    // Handles: 185/65R15, 185/65/15, 185 65 15, 18565R15, 18565/15
+    const m = q.trim().match(/^(\d{3})[/\s]?(\d{2,3})[Rr/\s]?(\d{2})$/)
+    if (!m) return null
+    const [, w, pr, ri] = m
+    return { width: parseInt(w), profile: parseInt(pr), rim: parseInt(ri) }
+  }
+
   // ── Filtered products for search ───────────────────────────────────────
   const posFilteredProducts = useMemo(() => {
     if (!posSearch || posSearch.length < 2) return []
     const s = posSearch.toLowerCase()
-    return (products || []).filter((p: any) => (p.name.toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s) || (p.make || '').toLowerCase().includes(s)) && p.quantity > 0)
+    const tyreSize = parseTyreSize(posSearch.trim())
+    return (products || []).filter((p: any) => {
+      if (p.quantity <= 0) return false
+      // Tyre-size match takes priority when a size pattern is detected
+      if (tyreSize && p.product_type === 'tyre') {
+        return p.tyre_width === tyreSize.width &&
+               p.tyre_profile === tyreSize.profile &&
+               p.tyre_rim === tyreSize.rim
+      }
+      // Normal text search — also match tyre sizes like "185/65R15" in name
+      return p.name.toLowerCase().includes(s) ||
+             (p.sku || '').toLowerCase().includes(s) ||
+             (p.make || '').toLowerCase().includes(s) ||
+             // e.g. searching "185" matches tyres with width 185
+             (p.product_type === 'tyre' && (
+               String(p.tyre_width  || '').includes(s) ||
+               `${p.tyre_width}/${p.tyre_profile}r${p.tyre_rim}`.includes(s)
+             ))
+    })
   }, [products, posSearch])
 
   // ── Create sale ────────────────────────────────────────────────────────
@@ -692,13 +719,28 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               {/* Product Search */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <label className="block text-xs font-bold text-slate-500 mb-2">Search Products</label>
-                <input value={posSearch} onChange={e => setPosSearch(e.target.value)} className="w-full px-4 py-3.5 rounded-xl border-2 border-slate-200 text-base sm:text-sm outline-none focus:border-orange-400" placeholder="Part name, SKU, make..." />
+                <input value={posSearch} onChange={e => setPosSearch(e.target.value)} className="w-full px-4 py-3.5 rounded-xl border-2 border-slate-200 text-base sm:text-sm outline-none focus:border-orange-400" placeholder="Part name, SKU, make — or tyre size e.g. 185/65R15" />
                 {posFilteredProducts.length > 0 && (
-                  <div className="mt-2 max-h-48 overflow-y-auto border border-slate-200 rounded-lg">
-                    {posFilteredProducts.slice(0, 10).map((p: any) => (
-                      <button key={p.id} onClick={() => addToCart(p)} className="w-full text-left px-3 py-2 hover:bg-orange-50 border-b border-slate-100 flex items-center justify-between text-sm">
-                        <div><span className="font-mono text-xs text-slate-400 mr-2">{p.sku}</span><span className="font-semibold">{p.name}</span><span className="text-xs text-slate-400 ml-2">({p.quantity})</span></div>
-                        <span className="font-bold text-orange-600">Rs.{p.price?.toLocaleString() || 'N/A'}</span>
+                  <div className="mt-2 max-h-56 overflow-y-auto border border-slate-200 rounded-lg">
+                    {posFilteredProducts.slice(0, 12).map((p: any) => (
+                      <button key={p.id} onClick={() => addToCart(p)} className="w-full text-left px-3 py-2.5 hover:bg-orange-50 active:bg-orange-100 border-b border-slate-100 last:border-0 flex items-center justify-between text-sm gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-mono text-[10px] text-slate-400">{p.sku}</span>
+                            {p.product_type === 'tyre' && p.tyre_width && (
+                              <span className="text-[10px] font-black text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded-full shrink-0">
+                                {p.tyre_width}/{p.tyre_profile}R{p.tyre_rim}
+                              </span>
+                            )}
+                            <span className="font-semibold truncate">{p.name}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {p.make && <span className="text-[10px] text-slate-400">{p.make}</span>}
+                            <span className="text-[10px] text-slate-400">Qty: {p.quantity}</span>
+                            <span className="text-[10px] font-semibold capitalize text-slate-400">{p.condition}</span>
+                          </div>
+                        </div>
+                        <span className="font-bold text-orange-600 shrink-0">Rs.{p.price?.toLocaleString() || '–'}</span>
                       </button>
                     ))}
                   </div>

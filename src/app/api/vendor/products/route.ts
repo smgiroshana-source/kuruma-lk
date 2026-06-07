@@ -61,6 +61,11 @@ export async function POST(req: NextRequest) {
       added_date: pd.added_date || null, is_active: true, slug,
       loc_store: pd.loc_store || null, loc_floor: pd.loc_floor || null,
       loc_sub1: pd.loc_sub1 || null, loc_sub2: pd.loc_sub2 || null,
+      // Tyre-specific fields
+      product_type: pd.product_type || 'part',
+      tyre_width:   pd.tyre_width   ? parseInt(pd.tyre_width)   : null,
+      tyre_profile: pd.tyre_profile ? parseInt(pd.tyre_profile) : null,
+      tyre_rim:     pd.tyre_rim     ? parseInt(pd.tyre_rim)     : null,
     }).select().single()
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
     revalidatePath('/')

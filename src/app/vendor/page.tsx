@@ -12,6 +12,10 @@ import TabCredit from './_shared/TabCredit'
 type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'stocktake' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
+const TYRE_WIDTHS  = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
+const TYRE_PROFILES = [25,30,35,40,45,50,55,60,65,70,75,80,85]
+const TYRE_RIMS    = [12,13,14,15,16,17,18,19,20,21,22,24]
+const TYRE_BRANDS  = ['Bridgestone','Michelin','Dunlop','MRF','Apollo','Yokohama','Continental','Pirelli','Toyo','Kumho','Nankang','Nexen','Falken','Hankook','BFGoodrich','Maxxis','Sailun','Linglong','Triangle','Other Brand']
 const PAY_METHODS = ['cash','cheque','bank','card']
 const PAY_LABELS: Record<string, string> = { cash:'Cash', cheque:'Cheque', bank:'Bank Transfer', card:'Card', advance:'Advance', credit:'Credit' }
 
@@ -397,7 +401,7 @@ export default function VendorDashboard() {
   const [soldProductInfo, setSoldProductInfo] = useState<Record<string, any>>({})
   const [soldInfoLoaded, setSoldInfoLoaded] = useState(false)
 
-  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'' })
+  const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'', product_type:'part', tyre_width:'', tyre_profile:'', tyre_rim:'' })
   const [productImages, setProductImages] = useState<File[]>([])
   const [imagePreviews, setImagePreviews] = useState<string[]>([])
   const [addLoading, setAddLoading] = useState(false)
@@ -814,7 +818,7 @@ export default function VendorDashboard() {
   }
 
   // Product handlers
-  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'' }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
+  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'', product_type:'part', tyre_width:'', tyre_profile:'', tyre_rim:'' }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files || []); setProductImages(p => [...p, ...files]); files.forEach(f => { const r = new FileReader(); r.onload = ev => setImagePreviews(p => [...p, ev.target?.result as string]); r.readAsDataURL(f) }) }
   function removeImage(i: number) { setProductImages(p => p.filter((_, x) => x !== i)); setImagePreviews(p => p.filter((_, x) => x !== i)) }
 
@@ -2175,8 +2179,78 @@ ${customerRows.map(c => `<tr>
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3"><label className="block text-xs font-bold text-blue-800 mb-1">Part ID</label><input value={newProduct.partId} onChange={e => setNewProduct({...newProduct, partId: e.target.value.toUpperCase()})} className="w-full px-3 py-2.5 rounded-lg border-2 border-blue-200 text-sm outline-none font-mono font-bold bg-white" placeholder="Auto-generated if blank" /></div>
             <div><label className="block text-xs font-semibold text-slate-600 mb-1">Name *</label><input required value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
             <div><label className="block text-xs font-semibold text-slate-600 mb-1">Description</label><textarea value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} rows={2} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none resize-none" /></div>
-            <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Category</label><select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Condition</label><select value={newProduct.condition} onChange={e => setNewProduct({...newProduct, condition: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div></div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Make</label><input value={newProduct.make} onChange={e => setNewProduct({...newProduct, make: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Toyota" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Model</label><input value={newProduct.model} onChange={e => setNewProduct({...newProduct, model: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Year</label><input value={newProduct.year} onChange={e => setNewProduct({...newProduct, year: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-semibold text-slate-600 mb-1">Category</label><select value={newProduct.category} onChange={e => {
+                const cat = e.target.value
+                const isTyre = cat === 'Wheels & Tires'
+                setNewProduct({...newProduct, category: cat, product_type: isTyre ? 'tyre' : 'part', tyre_width: isTyre ? newProduct.tyre_width : '', tyre_profile: isTyre ? newProduct.tyre_profile : '', tyre_rim: isTyre ? newProduct.tyre_rim : ''})
+              }} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></div>
+              <div><label className="block text-xs font-semibold text-slate-600 mb-1">Condition</label><select value={newProduct.condition} onChange={e => setNewProduct({...newProduct, condition: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none">{CONDITIONS.map(c => <option key={c}>{c}</option>)}</select></div>
+            </div>
+
+            {/* ── TYRE MODE: Width / Profile / Rim + Brand ── */}
+            {newProduct.category === 'Wheels & Tires' ? (<>
+              <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 space-y-3">
+                <div className="flex items-center gap-2"><span className="text-sky-600 text-sm">🏎️</span><span className="text-xs font-bold text-sky-800">Tyre Size</span>
+                  {newProduct.tyre_width && newProduct.tyre_profile && newProduct.tyre_rim && (
+                    <span className="ml-auto font-mono text-xs font-bold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
+                      {newProduct.tyre_width}/{newProduct.tyre_profile}R{newProduct.tyre_rim}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div><label className="block text-[10px] font-semibold text-sky-700 mb-1">Width (mm)</label>
+                    <select value={newProduct.tyre_width} onChange={e => {
+                      const np = {...newProduct, tyre_width: e.target.value}
+                      if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim) np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${np.make ? ' ' + np.make : ''}`
+                      setNewProduct(np)
+                    }} className="w-full px-2 py-2 rounded-lg border-2 border-sky-200 text-sm outline-none bg-white focus:border-sky-400">
+                      <option value="">–</option>{TYRE_WIDTHS.map(w => <option key={w} value={w}>{w}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="block text-[10px] font-semibold text-sky-700 mb-1">Profile (%)</label>
+                    <select value={newProduct.tyre_profile} onChange={e => {
+                      const np = {...newProduct, tyre_profile: e.target.value}
+                      if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim) np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${np.make ? ' ' + np.make : ''}`
+                      setNewProduct(np)
+                    }} className="w-full px-2 py-2 rounded-lg border-2 border-sky-200 text-sm outline-none bg-white focus:border-sky-400">
+                      <option value="">–</option>{TYRE_PROFILES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div><label className="block text-[10px] font-semibold text-sky-700 mb-1">Rim (inch)</label>
+                    <select value={newProduct.tyre_rim} onChange={e => {
+                      const np = {...newProduct, tyre_rim: e.target.value}
+                      if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim) np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${np.make ? ' ' + np.make : ''}`
+                      setNewProduct(np)
+                    }} className="w-full px-2 py-2 rounded-lg border-2 border-sky-200 text-sm outline-none bg-white focus:border-sky-400">
+                      <option value="">–</option>{TYRE_RIMS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div><label className="block text-[10px] font-semibold text-sky-700 mb-1">Brand</label>
+                  <select value={newProduct.make} onChange={e => {
+                    const np = {...newProduct, make: e.target.value}
+                    if (!np.name && np.tyre_width && np.tyre_profile && np.tyre_rim) np.name = `${np.tyre_width}/${np.tyre_profile}R${np.tyre_rim}${np.make ? ' ' + np.make : ''}`
+                    setNewProduct(np)
+                  }} className="w-full px-3 py-2 rounded-lg border-2 border-sky-200 text-sm outline-none bg-white focus:border-sky-400">
+                    <option value="">Select brand…</option>{TYRE_BRANDS.map(b => <option key={b} value={b === 'Other Brand' ? '' : b}>{b}</option>)}
+                  </select>
+                </div>
+                {newProduct.tyre_width && newProduct.tyre_profile && newProduct.tyre_rim && (
+                  <button type="button" onClick={() => setNewProduct({...newProduct, name: `${newProduct.tyre_width}/${newProduct.tyre_profile}R${newProduct.tyre_rim}${newProduct.make ? ' ' + newProduct.make : ''}`.trim()})}
+                    className="text-[11px] text-sky-700 underline hover:text-sky-900">
+                    ↑ Auto-fill name from size
+                  </button>
+                )}
+              </div>
+            </>) : (
+              /* Normal part: Make / Model / Year */
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div><label className="block text-xs font-semibold text-slate-600 mb-1">Make</label><input value={newProduct.make} onChange={e => setNewProduct({...newProduct, make: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Toyota" /></div>
+                <div><label className="block text-xs font-semibold text-slate-600 mb-1">Model</label><input value={newProduct.model} onChange={e => setNewProduct({...newProduct, model: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div>
+                <div><label className="block text-xs font-semibold text-slate-600 mb-1">Year</label><input value={newProduct.year} onChange={e => setNewProduct({...newProduct, year: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" /></div>
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">Model Code</label><input value={newProduct.modelCode} onChange={e => setNewProduct({...newProduct, modelCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="ZRE172" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Side</label><select value={newProduct.side} onChange={e => setNewProduct({...newProduct, side: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none"><option value="">Any</option><option>Front</option><option>Rear</option><option>Left</option><option>Right</option><option>Front Left</option><option>Front Right</option><option>Rear Left</option><option>Rear Right</option></select></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Color</label><input value={newProduct.color} onChange={e => setNewProduct({...newProduct, color: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Black" /></div></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="block text-xs font-semibold text-slate-600 mb-1">OEM Code</label><input value={newProduct.oemCode} onChange={e => setNewProduct({...newProduct, oemCode: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono" placeholder="A12345" /></div><div><label className="block text-xs font-semibold text-slate-600 mb-1">Opening Cost (Rs.) <span className="font-normal text-[10px] text-slate-400">excl. VAT</span></label><input type="number" value={newProduct.cost} onChange={e => setNewProduct({...newProduct, cost: e.target.value})} className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none" placeholder="Purchase cost" /></div></div>
             {newProduct.cost && parseInt(newProduct.cost) > 0 && parseInt(newProduct.quantity) > 0 && (
