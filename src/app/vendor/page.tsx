@@ -8,6 +8,7 @@ import TabPOSLkTax from './_lk_tax/TabPOS'
 import TabPOSStandard from './_standard/TabPOS'
 import type { PendingDraft } from './_lk_tax/TabPOS'
 import TabCredit from './_shared/TabCredit'
+import TabCreditNotes from './_lk_tax/TabCreditNotes'
 import WheelMartSidebar from './_lk_tax/WheelMartSidebar'
 import TabOverview from './_lk_tax/TabOverview'
 import TabSuppliers from './_lk_tax/TabSuppliers'
@@ -3753,13 +3754,25 @@ ${customerRows.map(c => `<tr>
 
         {/* CREDIT */}
         {tab === 'credit' && (
-          <TabCredit
-            vendor={vendor}
-            products={data?.products || []}
-            vendorSettings={vendorSettings}
-            showToast={showToast}
-            onDataChanged={fetchData}
-          />
+          isLkTax ? (
+            // WHEEL MART: CRN register (tax credit notes) + customer credit sub-tabs
+            <TabCreditNotes
+              vendor={vendor}
+              products={data?.products || []}
+              vendorSettings={vendorSettings}
+              showToast={showToast}
+              onDataChanged={fetchData}
+            />
+          ) : (
+            // Sakura / other vendors: customer credit & advances only
+            <TabCredit
+              vendor={vendor}
+              products={data?.products || []}
+              vendorSettings={vendorSettings}
+              showToast={showToast}
+              onDataChanged={fetchData}
+            />
+          )
         )}
 
         {/* PERIOD REPORT MODAL */}
