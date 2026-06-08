@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
   let query = admin
     .from('grns')
-    .select('*, items:grn_items(id, product_name, product_sku, quantity, unit_cost, vat_rate, vat_amount, total_cost, product_id)')
+    .select('*, items:grn_items(id, product_name, product_sku, quantity, unit_cost, vat_rate, vat_amount, total_cost, product_id, foreign_currency, foreign_amount)')
     .eq('vendor_id', vendor.id)
     .order('received_at', { ascending: false })
     .order('created_at', { ascending: false })
@@ -241,8 +241,8 @@ export async function POST(req: NextRequest) {
 
     const { data: grn } = await admin.from('grns').select('*, items:grn_items(*)').eq('id', grnId).eq('vendor_id', vendor.id).single()
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
-    if (grn.status !== 'posted') return NextResponse.json({ error: 'Only posted GRNs can be reversed' }, { status: 400 })
     if (grn.status === 'reversed') return NextResponse.json({ error: 'GRN already reversed' }, { status: 400 })
+    if (grn.status !== 'posted') return NextResponse.json({ error: 'Only posted GRNs can be reversed' }, { status: 400 })
 
     const items = grn.items || []
 
@@ -265,7 +265,7 @@ export async function POST(req: NextRequest) {
       }
     }
     await admin.from('cost_layers').delete().eq('grn_id', grnId)
-    await admin.from('grns').update({ status: 'reversed', posted_at: null, updated_at: new Date().toISOString() }).eq('id', grnId)
+    await admin.from('grns').update({ status: 'reversed', posted_at: null, reversed_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', grnId)
 
     return NextResponse.json({ success: true, message: `${grn.grn_number} reversed — stock quantities reduced, cost layers removed` })
   }

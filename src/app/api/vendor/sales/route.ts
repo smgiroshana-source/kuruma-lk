@@ -846,12 +846,9 @@ export async function POST(req: NextRequest) {
       salesUpdate.total = newTotal
       salesUpdate.subtotal = newSubtotal
     } else {
-      // Tax invoices: keep gazette amounts frozen; track return value separately
+      // Tax invoices: gazette amounts are immutable (CLAUDE.md — never mutate net_amount/vat_amount/total).
+      // Track cumulative return value only; reports derive net VAT/SSCL from returned_amount at query time.
       salesUpdate.returned_amount = (parseFloat(sale.returned_amount || 0) + totalRefund)
-      // Recompute net/vat on the *remaining* liable amount so reports stay accurate
-      const remainingTotal = Math.max(0, parseFloat(sale.total) - salesUpdate.returned_amount)
-      salesUpdate.net_amount = remainingTotal - Math.round(remainingTotal * 18 / 118)
-      salesUpdate.vat_amount = Math.round(remainingTotal * 18 / 118)
     }
     // Bug fix: set voided_at when all items returned so VAT register shows VOID correctly
     if (allReturned) salesUpdate.voided_at = returnedAt
@@ -1164,6 +1161,21 @@ export async function POST(req: NextRequest) {
         }).eq('id', fi.id)
       }
 
+      // FIFO cost consumption for items on this partial invoice
+      const { data: confirmedSaleItems } = await admin
+        .from('sale_items').select('id, product_id, quantity').eq('sale_id', newSale.id)
+      for (const si of (confirmedSaleItems || [])) {
+        if (!si.product_id) continue
+        const { data: totalCost } = await admin.rpc('consume_fifo_cost', {
+          p_vendor_id: vendor.id, p_product_id: si.product_id, p_quantity: si.quantity,
+        })
+        if (totalCost && totalCost > 0) {
+          await admin.from('sale_items')
+            .update({ unit_cost: Math.round(totalCost / si.quantity) })
+            .eq('id', si.id)
+        }
+      }
+
       // Record payments on new invoice
       for (const pl of (paymentLines || [])) {
         if (parseFloat(pl.amount) > 0) {
@@ -1247,6 +1259,24 @@ export async function POST(req: NextRequest) {
       customer_name: finalCustomerName,
       customer_phone: finalCustomerPhone,
     }).eq('id', saleId)
+
+    // FIFO cost consumption — consume cost layers for product items now that sale is finalized
+    const draftProductItems = (draft.items || []).filter((i: any) => i.product_id)
+    if (draftProductItems.length > 0) {
+      const { data: finalizedItems } = await admin
+        .from('sale_items').select('id, product_id, quantity').eq('sale_id', saleId)
+      for (const si of (finalizedItems || [])) {
+        if (!si.product_id) continue
+        const { data: totalCost } = await admin.rpc('consume_fifo_cost', {
+          p_vendor_id: vendor.id, p_product_id: si.product_id, p_quantity: si.quantity,
+        })
+        if (totalCost && totalCost > 0) {
+          await admin.from('sale_items')
+            .update({ unit_cost: Math.round(totalCost / si.quantity) })
+            .eq('id', si.id)
+        }
+      }
+    }
 
     // Record cash/cheque/bank payment lines
     for (const pl of (paymentLines || [])) {
@@ -1370,16 +1400,18 @@ export async function POST(req: NextRequest) {
       customerSales[s.customer_id].push(s)
     }
 
-    // For each customer compute the cumulative balance_due (oldest → newest)
+    // For each customer compute cumulative balance_due (oldest → newest), fire all updates in parallel
+    const updatePromises: PromiseLike<any>[] = []
     let updated = 0
     for (const sales of Object.values(customerSales)) {
       let cumulative = 0
       for (const s of sales) {
         cumulative += parseFloat(s.balance_due || 0)
-        await admin.from('sales').update({ total_amount_due: cumulative }).eq('id', s.id)
+        updatePromises.push(admin.from('sales').update({ total_amount_due: cumulative }).eq('id', s.id))
         updated++
       }
     }
+    await Promise.all(updatePromises)
     return NextResponse.json({ success: true, updated })
   }
 

@@ -166,6 +166,7 @@ export async function POST(req: NextRequest) {
       .from('expenses')
       .delete()
       .eq('id', expenseId)
+      .eq('vendor_id', vendor.id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 

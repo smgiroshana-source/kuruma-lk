@@ -66,7 +66,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [grnInlineCreating, setGrnInlineCreating] = useState(false)
   // GRN draft edit
   const [editingGrnId, setEditingGrnId] = useState<string | null>(null)
-  const [editingGrnItems, setEditingGrnItems] = useState<Array<{productId:string|null,productName:string,productSku:string,quantity:number,unitCost:number,vatRate:number}>>([])
+  const [editingGrnItems, setEditingGrnItems] = useState<Array<{productId:string|null,productName:string,productSku:string,quantity:number,unitCost:number,vatRate:number,foreignCurrency?:string,foreignAmount?:string}>>([])
   const [editingGrnSaving, setEditingGrnSaving] = useState(false)
   const [grnReversing, setGrnReversing] = useState<string | null>(null)
   // Stocktake cost prompt
@@ -280,6 +280,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         items: editingGrnItems.map(i => ({
           productId: i.productId, productName: i.productName, productSku: i.productSku,
           quantity: i.quantity, unitCost: i.unitCost, vatRate: i.vatRate,
+          foreignCurrency: i.foreignCurrency, foreignAmount: i.foreignAmount,
         }))
       }) })
       const j = await r.json()
