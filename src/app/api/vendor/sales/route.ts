@@ -403,8 +403,9 @@ export async function POST(req: NextRequest) {
       const entity = await getInvoiceEntity(invoiceEntityId)
       if (!entity) return NextResponse.json({ error: 'Invoice entity not found' }, { status: 400 })
 
-      resolvedDocType = (documentType === 'tax_invoice' && entity.invoice_mode === 'lk_tax')
-        ? 'tax_invoice' : 'receipt'
+      // Pvt Ltd (lk_tax entity) always issues tax invoices — gazette requirement.
+      // Proprietorship entities issue receipts. The client-supplied documentType is ignored.
+      resolvedDocType = entity.invoice_mode === 'lk_tax' ? 'tax_invoice' : 'receipt'
       resolvedEntityId = invoiceEntityId
 
       const supplyDate = saleDate ? new Date(saleDate) : new Date()

@@ -1146,32 +1146,39 @@ export default function VendorDashboard() {
     if (items.length === 0) { showToast('Select items to return'); return }
     setReturnLoading(true)
     try {
-      const payload: Record<string, unknown> = { action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod }
-      if (returnReason.trim()) payload.return_reason = returnReason.trim()
-      const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-      const j = await r.json()
-      if (j.success) {
-        showToast(j.message)
-        fetchSales(); fetchData()
-        // If this is a tax invoice (gazette serial), prompt to issue a credit note
-        if (returnModal.tax_serial) {
-          const totalRefund = items.reduce((sum, ri) => {
-            const item = (returnModal.items || []).find((i: any) => i.id === ri.saleItemId)
-            return sum + (item ? ri.quantity * parseFloat(item.unit_price) : 0)
-          }, 0)
-          setPendingCreditNote({
+      if (returnModal.tax_serial) {
+        // ── Tax invoice: issue Credit Note (single step — handles stock, CRN, payment) ──
+        const r = await fetch('/api/vendor/credit-notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             saleId: returnModal.id,
-            taxSerial: returnModal.tax_serial,
-            customerName: returnModal.customer_name || '',
             returnedItems: items,
-            refundAmount: totalRefund,
-            entityId: returnModal.invoice_entity_id || null,
-          })
+            reason: returnReason.trim() || 'goods_returned',
+            refundMethod,
+          }),
+        })
+        const j = await r.json()
+        if (r.ok) {
+          showToast('✅ Credit Note ' + j.creditNoteNo + ' issued')
+          setIssuedCreditNote(j.creditNote)
           setReturnModal(null); setReturnItems({}); setReturnReason('')
+          fetchSales(); fetchData()
         } else {
-          setReturnModal(null); setReturnItems({}); setReturnReason('')
+          showToast('⚠️ ' + (j.error || 'Failed to issue credit note'))
         }
-      } else showToast('Error: ' + j.error)
+      } else {
+        // ── Receipt: direct return (no credit note required) ──
+        const payload: Record<string, unknown> = { action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod }
+        if (returnReason.trim()) payload.return_reason = returnReason.trim()
+        const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        const j = await r.json()
+        if (j.success) {
+          showToast(j.message)
+          fetchSales(); fetchData()
+          setReturnModal(null); setReturnItems({}); setReturnReason('')
+        } else showToast('Error: ' + j.error)
+      }
     } catch { showToast('Network error') }
     setReturnLoading(false)
   }
@@ -3860,8 +3867,13 @@ ${customerRows.map(c => `<tr>
           <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => { setReturnModal(null); setReturnReason('') }}>
             <div className="bg-white rounded-2xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="bg-amber-50 px-5 py-4 border-b border-amber-100 flex-shrink-0">
-                <h3 className="font-bold text-base text-amber-800">↩ Return Items</h3>
+                <h3 className="font-bold text-base text-amber-800">
+                  {returnModal.tax_serial ? '🧾 Issue Credit Note' : '↩ Return Items'}
+                </h3>
                 <p className="text-xs text-amber-600 mt-1">{returnModal.invoice_no} · {returnModal.customer_name}</p>
+                {returnModal.tax_serial && (
+                  <p className="text-[10px] text-orange-500 mt-0.5 font-semibold">Credit Note (CRN) will be issued against {returnModal.tax_serial}</p>
+                )}
               </div>
               <div className="flex-1 overflow-y-auto px-5 py-4">
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Select items & quantities to return</p>

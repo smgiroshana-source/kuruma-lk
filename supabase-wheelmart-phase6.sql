@@ -1,0 +1,32 @@
+-- ============================================================
+-- WHEEL MART — Phase 6 Migration
+-- Run in Supabase: Dashboard → SQL Editor → New Query
+--
+-- Adds:
+--   1. customer_address always on sales (already exists from phase 2 but
+--      now used for all lk_tax sales, not just explicit tax_invoice requests)
+--
+-- No new tables needed — credit_notes + credit_note_items added in Phase 3.
+-- This migration is a rules/policy change only, not a schema change.
+--
+-- Business rule changes (enforced in application code):
+--   a) lk_tax (Pvt Ltd) entities always issue gazette tax invoices
+--      for every sale — no more Receipt vs Tax Invoice choice at POS.
+--   b) Returns against tax invoices always go through the Credit Note
+--      flow (CRN-XXXXX series) in a single step; receipts continue to
+--      use the direct return_items flow.
+--   c) Credit notes must be issued within 6 months of the original invoice
+--      (enforced in /api/vendor/credit-notes route).
+--   d) Customer address on tax invoices is now optional for walk-in
+--      customers (gazette allows blank for unregistered purchasers).
+-- ============================================================
+
+-- Ensure invoice_sequences can hold 'credit' period rows (no change needed —
+-- the 'credit' period is just a string in the existing table).
+-- Verify:
+-- SELECT * FROM invoice_sequences WHERE period = 'credit';
+
+-- Ensure credit_notes.issued_at has a default (was added in Phase 3).
+-- No ALTER needed — just confirm:
+-- SELECT column_default FROM information_schema.columns
+--   WHERE table_name = 'credit_notes' AND column_name = 'issued_at';

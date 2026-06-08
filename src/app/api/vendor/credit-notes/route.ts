@@ -19,8 +19,9 @@ export async function POST(req: NextRequest) {
   const vendor = await getVendor()
   if (!vendor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { saleId, returnedItems, reason } = await req.json()
+  const { saleId, returnedItems, reason, refundMethod } = await req.json()
   // returnedItems: [{ saleItemId: string, quantity: number }]
+  // refundMethod: 'advance' | 'cash' | undefined
 
   if (!saleId || !Array.isArray(returnedItems) || returnedItems.length === 0)
     return NextResponse.json({ error: 'saleId and returnedItems required' }, { status: 400 })
@@ -38,6 +39,13 @@ export async function POST(req: NextRequest) {
   if (!sale) return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
   if (!sale.tax_serial) return NextResponse.json({ error: 'Credit notes only apply to tax invoices (gazette serial required)' }, { status: 400 })
   if (!sale.invoice_entity_id) return NextResponse.json({ error: 'Sale has no invoice entity' }, { status: 400 })
+
+  // 6-month validity check (gazette requirement)
+  const invoiceDate = new Date(sale.date_supply || sale.created_at)
+  const sixMonthsLater = new Date(invoiceDate)
+  sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6)
+  if (new Date() > sixMonthsLater)
+    return NextResponse.json({ error: 'Credit notes must be issued within 6 months of the original invoice (' + invoiceDate.toLocaleDateString('en-LK') + ')' }, { status: 400 })
 
   // Get VAT rate from tax_config
   const { data: vatRow } = await admin.from('tax_config').select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').single()
@@ -111,9 +119,100 @@ export async function POST(req: NextRequest) {
 
   if (itemsError) return NextResponse.json({ error: itemsError.message }, { status: 500 })
 
+  // ── Side effects: stock restoration, sale totals, refund payment ─────────────
+  const returnedAt = new Date().toISOString()
+
+  // 3. Restore stock + FIFO cost layers + update sale_items.returned_quantity
+  for (const ri of returnedItems) {
+    const item = (sale.items || []).find((i: any) => i.id === ri.saleItemId)
+    if (!item) continue
+    const maxQty = item.quantity - (item.returned_quantity || 0)
+    const qty = Math.min(Math.max(0, ri.quantity), maxQty)
+    if (qty <= 0) continue
+
+    // Restore product stock
+    if (item.product_id) {
+      const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
+      if (product) {
+        await admin.from('products').update({ quantity: product.quantity + qty }).eq('id', item.product_id)
+      }
+      // Restore FIFO cost layer
+      if (parseInt(item.unit_cost || 0) > 0) {
+        await admin.rpc('restore_fifo_cost', {
+          p_vendor_id: vendor.id,
+          p_product_id: item.product_id,
+          p_quantity: qty,
+          p_unit_cost: parseInt(item.unit_cost),
+          p_received_at: returnedAt.slice(0, 10),
+        })
+      }
+    }
+
+    // Update sale_items.returned_quantity
+    await admin.from('sale_items').update({
+      returned_quantity: (item.returned_quantity || 0) + qty,
+    }).eq('id', item.id)
+  }
+
+  // 4. Check if all items fully returned
+  const { data: updatedItems } = await admin.from('sale_items')
+    .select('quantity, returned_quantity').eq('sale_id', sale.id)
+  const allReturned = (updatedItems || []).every((i: any) => (i.returned_quantity || 0) >= i.quantity)
+
+  // 5. Update original sale: returned_amount + balance/paid + voided_at
+  const currentBalance = parseFloat(sale.balance_due || 0)
+  const currentPaid    = parseFloat(sale.paid_amount || 0)
+  const balanceReduction = Math.min(totalAmount, currentBalance)
+  const paidReduction    = totalAmount - balanceReduction
+  const newBalance = Math.max(0, currentBalance - balanceReduction)
+  const newPaid    = Math.max(0, currentPaid - paidReduction)
+
+  const salesUpdate: Record<string, any> = {
+    returned_amount:  (parseFloat(sale.returned_amount || 0) + totalAmount),
+    balance_due:      newBalance,
+    paid_amount:      newPaid,
+    payment_status:   allReturned ? 'voided' : newBalance > 0 ? 'partial' : 'paid',
+    notes: (sale.notes || '') + '\nCRN: ' + creditNoteNo + ' | ' + returnedAt,
+  }
+  if (allReturned) salesUpdate.voided_at = returnedAt
+  await admin.from('sales').update(salesUpdate).eq('id', sale.id)
+
+  // 6. Record refund payment entries (for cash reconciliation visibility)
+  if (paidReduction > 0) {
+    // Paid portion: money must physically move back to customer
+    if (refundMethod === 'advance' && sale.customer_id) {
+      const { data: customer } = await admin.from('customers')
+        .select('advance_balance').eq('id', sale.customer_id).single()
+      if (customer) {
+        await admin.from('customers').update({
+          advance_balance: parseFloat(customer.advance_balance || 0) + paidReduction,
+        }).eq('id', sale.customer_id)
+      }
+    }
+    await admin.from('payments').insert({
+      sale_id: sale.id, vendor_id: vendor.id,
+      customer_id: sale.customer_id || null,
+      amount: -paidReduction,
+      payment_method: refundMethod === 'advance' ? 'advance' : 'cash',
+      notes: 'CRN: ' + creditNoteNo,
+    })
+  }
+  if (balanceReduction > 0) {
+    // Credit portion: outstanding debt cancelled — no cash movement
+    await admin.from('payments').insert({
+      sale_id: sale.id, vendor_id: vendor.id,
+      customer_id: sale.customer_id || null,
+      amount: -balanceReduction,
+      payment_method: 'credit_return',
+      notes: 'CRN (credit cancelled): ' + creditNoteNo,
+    })
+  }
+
   return NextResponse.json({
     creditNote: { ...cn, items: cnItems },
     creditNoteNo,
+    allReturned,
+    refundAmount: totalAmount,
   })
 }
 

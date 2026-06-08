@@ -372,7 +372,6 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ── lk_tax POS state ───────────────────────────────────────────────────
   const [posInvoiceEntities, setPosInvoiceEntities] = useState<any[]>([])
   const [posEntityId, setPosEntityId] = useState<string | null>(null)
-  const [posDocType, setPosDocType] = useState<'receipt' | 'tax_invoice'>('receipt')
   const [posCustomerAddress, setPosCustomerAddress] = useState('')
   const [posCustomerTin, setPosCustomerTin] = useState('')
   const [posCustomerVatReg, setPosCustomerVatReg] = useState(false)
@@ -382,6 +381,8 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ── lk_tax computed values ─────────────────────────────────────────────
   const posCurrentEntity = posInvoiceEntities.find((e: any) => e.id === posEntityId) || null
   const posIsVatEntity = posCurrentEntity?.invoice_mode === 'lk_tax'
+  // Pvt Ltd (lk_tax) entity always issues tax invoices; other entities issue receipts
+  const posDocType: 'receipt' | 'tax_invoice' = posIsVatEntity ? 'tax_invoice' : 'receipt'
 
   // ── On mount: load entities ────────────────────────────────────────────
   useEffect(() => {
@@ -590,11 +591,11 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     if (!posCustomer.name.trim()) errors.name = true
     if (!posCustomer.phone.trim()) errors.phone = true
     if (posCustomer.require_vehicle_no && !posVehicleNo.trim()) errors.vehicle = true
-    if (isLkTax && posDocType === 'tax_invoice' && !posCustomerAddress.trim()) errors.address = true
+    // Address is optional for walk-in customers (gazette allows blank for unregistered purchasers)
+    // TIN is required only if purchaser is VAT-registered
     if (isLkTax && posDocType === 'tax_invoice' && posCustomerVatReg && !posCustomerTin.trim()) errors.tin = true
-    if (errors.name || errors.phone || errors.vehicle || errors.address || errors.tin) {
+    if (errors.name || errors.phone || errors.vehicle || errors.tin) {
       setPosErrors(errors)
-      if (errors.address) showToast('⚠️ Customer address required for tax invoice')
       if (errors.tin) showToast('⚠️ Customer TIN required (VAT-registered purchaser)')
       if (errors.vehicle) showToast('⚠️ Vehicle number required for this customer')
       setTimeout(() => setPosErrors({}), 4000)
@@ -810,7 +811,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 <div className="flex gap-1.5 flex-wrap">
                   {posInvoiceEntities.map((e: any) => (
                     <button key={e.id}
-                      onClick={() => { setPosEntityId(e.id); if (e.invoice_mode !== 'lk_tax') setPosDocType('receipt') }}
+                      onClick={() => { setPosEntityId(e.id) }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition ${posEntityId === e.id ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-200 text-slate-600 hover:border-slate-400'}`}>
                       {e.is_default ? '★ ' : ''}{e.name.replace('MacForce Auto Engineering', 'MacForce')}
                     </button>
@@ -820,9 +821,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               {posCurrentEntity?.invoice_mode === 'lk_tax' && (
                 <div className="shrink-0">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Document</p>
-                  <div className="flex rounded-lg border-2 border-slate-200 overflow-hidden">
-                    <button onClick={() => setPosDocType('receipt')} className={`px-3 py-1.5 text-xs font-bold transition ${posDocType === 'receipt' ? 'bg-slate-700 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>🧾 Receipt</button>
-                    <button onClick={() => setPosDocType('tax_invoice')} className={`px-3 py-1.5 text-xs font-bold transition ${posDocType === 'tax_invoice' ? 'bg-orange-600 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>📋 Tax Invoice</button>
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-50 border-2 border-orange-200">
+                    <span className="text-orange-600 text-sm">📋</span>
+                    <span className="text-xs font-black text-orange-700 tracking-wide">TAX INVOICE</span>
                   </div>
                 </div>
               )}
@@ -975,11 +976,11 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 <input value={posCustomer.phone} onChange={e => { setPosCustomer({...posCustomer, phone: e.target.value}); if (posErrors.phone) setPosErrors(prev => ({ ...prev, phone: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none transition-all duration-200 ${posErrors.phone ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Phone / WhatsApp" />
                 {posCustomer.id && <p className="text-[10px] text-green-600 font-semibold">✓ Existing customer selected</p>}
 
-                {/* lk_tax: address + TIN (required for tax invoices) */}
+                {/* lk_tax: address + TIN — always shown (all Pvt Ltd sales are tax invoices) */}
                 {isLkTax && posDocType === 'tax_invoice' && (
                   <div className="space-y-1.5 pt-1 border-t border-slate-100 mt-1">
-                    <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest">Tax Invoice — Purchaser Details</p>
-                    <input value={posCustomerAddress} onChange={e => { setPosCustomerAddress(e.target.value); if ((posErrors as any).address) setPosErrors(prev => ({ ...prev, address: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none ${(posErrors as any).address ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Address *" />
+                    <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest">Purchaser Details <span className="font-normal text-slate-400 normal-case">(for tax invoice)</span></p>
+                    <input value={posCustomerAddress} onChange={e => setPosCustomerAddress(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 focus:border-orange-400 text-sm outline-none" placeholder="Address (optional for walk-in)" />
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={posCustomerVatReg} onChange={e => { setPosCustomerVatReg(e.target.checked); if (!e.target.checked) setPosCustomerTin('') }} className="w-4 h-4 accent-orange-500" />
                       <span className="text-xs font-bold text-slate-600">VAT-Registered Purchaser</span>
