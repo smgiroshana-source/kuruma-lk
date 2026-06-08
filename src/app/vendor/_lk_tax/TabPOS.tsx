@@ -47,8 +47,9 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
       return { ...i, quantity: qty, total: qty * parseFloat(i.unit_price) }
     })
   const s            = settings || {}
+  const vatRate      = Number(s.vat_rate) || 18                              // gazette: never hardcode rates
   const total        = parseFloat(sale.total) || 0
-  const vatAmount    = parseInt(sale.vat_amount) || Math.round(total * 18 / 118)
+  const vatAmount    = parseInt(sale.vat_amount) || Math.round(total * vatRate / (100 + vatRate))
   const netAmount    = parseInt(sale.net_amount) || (total - vatAmount)
   const discount     = parseFloat(sale.discount || 0)
   const serial       = sale.tax_serial || sale.invoice_no || ''
@@ -83,125 +84,135 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   })()
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>TAX INVOICE ${serial}</title>
 <style>
-/* ── Print: zero page margins; body padding IS the whitespace ── */
+/* ─── Page: zero browser margins; body padding = paper margins ─── */
 @page{size:A4 portrait;margin:0}
 *{margin:0;padding:0;box-sizing:border-box}
-/* ── Screen: grey "desk" so the A4 sheet stands out ── */
-html{background:#9ca3af;min-height:100%;padding:12mm 0 20mm}
+html{background:#8c9194;min-height:100%;padding:10mm 0 20mm}
 body{
   font-family:Arial,'Helvetica Neue',sans-serif;
-  font-size:11px;color:#000;line-height:1.5;
-  width:210mm;min-height:297mm;       /* full A4 sheet (border-box incl. padding) */
-  margin:0 auto;
-  padding:14mm 18mm 16mm;
+  font-size:11px;color:#111;line-height:1.4;
+  width:210mm;min-height:297mm;
+  margin:0 auto;padding:14mm 18mm 14mm;
   background:#fff;
-  box-shadow:0 6px 32px rgba(0,0,0,.35);
-  display:flex;flex-direction:column; /* push sigs to bottom */
+  box-shadow:0 4px 24px rgba(0,0,0,.4);
+  display:flex;flex-direction:column;
 }
 @media print{
   html{background:#fff;padding:0}
-  body{width:100%;min-height:297mm;margin:0;padding:14mm 18mm 16mm;box-shadow:none}
+  body{width:100%;min-height:297mm;margin:0;padding:14mm 18mm 14mm;box-shadow:none}
 }
-/* ── Header ── */
-.hdr{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:9px;border-bottom:2px solid #000;margin-bottom:10px}
-.hdr-left{flex:1;min-width:0;padding-right:12px}
-.hdr-logo{margin-bottom:5px}
-.hdr-name{font-size:15px;font-weight:900;line-height:1.2}
-.hdr-addr{font-size:9.5px;margin-top:2px;color:#333}
-.hdr-tin{font-size:9.5px;font-weight:700;margin-top:3px}
-.hdr-right{text-align:right;flex-shrink:0}
-.hdr-title{font-size:20px;font-weight:900;letter-spacing:2px;border:2.5px solid #000;padding:4px 12px;display:inline-block;line-height:1.2}
-.hdr-serial{font-family:'Courier New',monospace;font-size:10px;font-weight:700;margin-top:6px;word-break:break-all}
-/* ── Parties ── */
-.parties{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000}
-.p-col{padding:7px 10px}
-.p-col+.p-col{border-left:1px solid #000}
-.p-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;border-bottom:1px solid #000;padding-bottom:3px;margin-bottom:5px;color:#333}
-.p-name{font-size:11.5px;font-weight:700}
-.p-info{font-size:9.5px;margin-top:2px;color:#222}
-.p-tin{font-size:9.5px;font-weight:700;margin-top:3px}
-/* ── Dates ── */
-.dates{display:grid;grid-template-columns:1fr 1fr;border:1px solid #000;border-top:none;margin-bottom:12px}
-.d-col{padding:5px 10px;display:flex;align-items:baseline;gap:6px}
-.d-col+.d-col{border-left:1px solid #000}
-.d-lbl{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;color:#333}
-.d-val{font-size:10.5px;font-weight:700;font-family:'Courier New',monospace}
-/* ── Items table ── */
-table{width:100%;border-collapse:collapse;margin-bottom:4px}
-thead tr th{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:6px 5px 5px;text-align:left;border-top:1.5px solid #000;border-bottom:1.5px solid #000}
-td{font-size:11px;padding:5px 5px;border-bottom:1px solid #ddd;vertical-align:top}
-.c-no{width:26px;text-align:center}
-.c-qty{width:38px;text-align:center}
-.c-price{width:108px;text-align:right;white-space:nowrap}
-.c-amt{width:108px;text-align:right;font-weight:700;white-space:nowrap}
+/* ─── Header ─────────────────────────────────────────────── */
+.hdr{display:flex;justify-content:space-between;align-items:flex-start;
+     gap:16px;padding-bottom:9px;border-bottom:2px solid #000;margin-bottom:9px}
+.hl{flex:1}
+.hl-name{font-size:14px;font-weight:900;line-height:1.2}
+.hl-sub{font-size:9px;color:#444;margin-top:2px}
+.hl-tin{font-size:9px;font-weight:700;margin-top:3px}
+.hr{text-align:right;flex-shrink:0}
+.hr-badge{display:inline-block;border:2.5px solid #000;padding:5px 14px;
+          font-size:18px;font-weight:900;letter-spacing:2px;line-height:1.2}
+.hr-sno{font-size:9px;font-weight:700;margin-top:5px;
+        font-family:'Courier New',monospace;letter-spacing:.3px}
+/* ─── Unified info box (parties + dates) ─────────────────── */
+.ibox{border:1px solid #000;margin-bottom:9px}
+.irow{display:grid;grid-template-columns:1fr 1fr}
+.irow+.irow{border-top:1px solid #000}
+.ic{padding:7px 9px}
+.ic+.ic{border-left:1px solid #000}
+.ic-lbl{font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;
+        color:#666;border-bottom:1px solid #e0e0e0;padding-bottom:2px;margin-bottom:4px}
+.ic-name{font-size:11px;font-weight:700}
+.ic-sub{font-size:9px;color:#333;margin-top:1px;line-height:1.4}
+.ic-tin{font-size:9px;font-weight:700;margin-top:2px}
+.ic-tinna{font-size:9px;color:#bbb;margin-top:2px}
+.ic-dlbl{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#666}
+.ic-dval{font-size:11px;font-weight:700;font-family:'Courier New',monospace;margin-top:2px}
+/* ─── Line-items table ───────────────────────────────────── */
+table{width:100%;border-collapse:collapse;margin-bottom:7px}
+th{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+   padding:5px 5px;text-align:left;
+   border-top:1.5px solid #000;border-bottom:1.5px solid #000}
+td{font-size:11px;padding:5px 5px;border-bottom:1px solid #e8e8e8;vertical-align:top}
+.c-no{width:24px;text-align:center}
+.c-qty{width:36px;text-align:center}
+.c-price{width:100px;text-align:right;white-space:nowrap}
+.c-amt{width:100px;text-align:right;font-weight:700;white-space:nowrap}
 tbody tr:last-child td{border-bottom:1.5px solid #000}
-/* ── Totals ── */
-.tot-outer{display:flex;justify-content:flex-end;margin-bottom:10px}
-.tot-inner{width:46%}
-.tot-row{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
-.tot-lbl{color:#333}
-.tot-val{font-weight:600;font-family:'Courier New',monospace;text-align:right;min-width:80px}
-.tot-div{border-top:1px solid #aaa;margin:4px 0}
-.tot-grand{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;font-size:13.5px;font-weight:900;border-top:2px double #000;border-bottom:2px double #000;margin-top:4px}
-.tot-grand-val{font-family:'Courier New',monospace}
-/* ── Amount in words ── */
-.words{border:1px solid #000;padding:6px 10px;margin-bottom:8px}
-.w-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;color:#444;margin-bottom:2px}
-.w-val{font-size:11px;font-weight:700}
-/* ── Payment ── */
-.pmt{border:1px solid #ccc;padding:5px 10px;margin-bottom:10px}
-.pmt-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;color:#444;margin-bottom:3px}
+/* ─── Totals — right-aligned bordered table ──────────────── */
+.twrap{display:flex;justify-content:flex-end;margin-bottom:8px}
+.ttbl{width:52%;border:1px solid #000;border-collapse:collapse;margin-bottom:0}
+.ttbl td{font-size:11px;padding:5px 9px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
+.ttbl tbody tr:last-child td{border-bottom:none}
+.tlbl{color:#333;border-right:1px solid #e8e8e8;white-space:nowrap}
+.tval{text-align:right;font-weight:700;white-space:nowrap}
+.ttbl .grand td{border-top:2px double #000;font-size:13px;font-weight:900;padding:6px 9px}
+.ttbl .grand .tlbl{border-right:1px solid #bbb}
+/* ─── Amount in words ─────────────────────────────────────── */
+.words{border:1px solid #000;padding:6px 9px;margin-bottom:7px}
+.wlbl{font-size:7px;font-weight:900;text-transform:uppercase;
+      letter-spacing:1.2px;color:#666;margin-bottom:2px}
+.wval{font-size:11px;font-weight:700}
+/* ─── Payment ────────────────────────────────────────────── */
+.pmt{border:1px solid #ddd;padding:5px 9px;margin-bottom:0}
+.pmt-lbl{font-size:7px;font-weight:900;text-transform:uppercase;
+         letter-spacing:1.2px;color:#666;margin-bottom:2px}
 .pmt-val{font-size:11px;font-weight:700}
-/* ── Push spacer — grows to fill space so sigs land at bottom ── */
-.push{flex:1;min-height:12mm}
-/* ── Signatures ── */
-.sigs{display:flex;justify-content:space-between;gap:40px;margin-top:0}
+/* ─── Push + signatures + footer ────────────────────────── */
+.push{flex:1;min-height:14mm}
+.sigs{display:flex;justify-content:space-between;gap:48px}
 .sig{flex:1;text-align:center}
-.sig-line{border-top:1px solid #000;padding-top:4px;font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#333}
-/* ── Footer ── */
-.footer{text-align:center;font-size:9px;color:#555;margin-top:10px;padding-top:6px;border-top:1px dashed #999}
+.sig-line{border-top:1px solid #000;padding-top:4px;
+          font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#555}
+.footer{text-align:center;font-size:9px;color:#888;
+        margin-top:9px;padding-top:6px;border-top:1px dashed #ccc}
 </style></head><body>
 
+<!-- Header -->
 <div class="hdr">
-  <div class="hdr-left">
-    ${logoHtml ? `<div class="hdr-logo">${logoHtml}</div>` : ''}
-    <div class="hdr-name">${supplierName}</div>
-    <div class="hdr-addr">${supplierAddress}</div>
-    <div class="hdr-tin">TIN: ${supplierTin}</div>
+  <div class="hl">
+    ${logoHtml ? `<div style="margin-bottom:5px">${logoHtml}</div>` : ''}
+    <div class="hl-name">${supplierName}</div>
+    <div class="hl-sub">${supplierAddress}</div>
+    <div class="hl-tin">TIN: ${supplierTin}</div>
   </div>
-  <div class="hdr-right">
-    <div class="hdr-title">TAX INVOICE</div>
-    <div class="hdr-serial">${serial}</div>
-  </div>
-</div>
-
-<div class="parties">
-  <div class="p-col">
-    <div class="p-lbl">Supplier</div>
-    <div class="p-name">${supplierName}</div>
-    <div class="p-info">${supplierAddress}</div>
-    <div class="p-tin">TIN: ${supplierTin}</div>
-  </div>
-  <div class="p-col">
-    <div class="p-lbl">Bill To (Purchaser)</div>
-    <div class="p-name">${purchaserName || '&mdash;'}</div>
-    ${purchaserAddress ? `<div class="p-info">${purchaserAddress}</div>` : ''}
-    ${purchaserPhone   ? `<div class="p-info">${purchaserPhone}</div>`   : ''}
-    ${purchaserTin     ? `<div class="p-tin">TIN: ${purchaserTin}</div>` : ''}
+  <div class="hr">
+    <div class="hr-badge">TAX INVOICE</div>
+    <div class="hr-sno">${serial}</div>
   </div>
 </div>
 
-<div class="dates">
-  <div class="d-col">
-    <span class="d-lbl">Date of Invoice:</span>
-    <span class="d-val">${invoiceDate}</span>
+<!-- Supplier / Purchaser / Dates -->
+<div class="ibox">
+  <div class="irow">
+    <div class="ic">
+      <div class="ic-lbl">Supplier</div>
+      <div class="ic-name">${supplierName}</div>
+      <div class="ic-sub">${supplierAddress}</div>
+      <div class="ic-tin">TIN: ${supplierTin}</div>
+    </div>
+    <div class="ic">
+      <div class="ic-lbl">Bill To (Purchaser)</div>
+      <div class="ic-name">${purchaserName || '&mdash;'}</div>
+      ${purchaserAddress ? `<div class="ic-sub">${purchaserAddress}</div>` : ''}
+      ${purchaserPhone   ? `<div class="ic-sub">${purchaserPhone}</div>`   : ''}
+      ${purchaserTin
+        ? `<div class="ic-tin">TIN: ${purchaserTin}</div>`
+        : `<div class="ic-tinna">TIN: Not Registered</div>`}
+    </div>
   </div>
-  <div class="d-col">
-    <span class="d-lbl">Date of Supply:</span>
-    <span class="d-val">${supplyDate}</span>
+  <div class="irow">
+    <div class="ic">
+      <div class="ic-dlbl">Date of Invoice</div>
+      <div class="ic-dval">${invoiceDate}</div>
+    </div>
+    <div class="ic">
+      <div class="ic-dlbl">Date of Supply</div>
+      <div class="ic-dval">${supplyDate}</div>
+    </div>
   </div>
 </div>
 
+<!-- Line items -->
 <table>
   <thead>
     <tr>
@@ -215,26 +226,27 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
   <tbody>${lineRows}</tbody>
 </table>
 
-<div class="tot-outer">
-  <div class="tot-inner">
-    ${discount > 0 ? `<div class="tot-row"><span class="tot-lbl">Discount</span><span class="tot-val">&#8722;&nbsp;${discount.toLocaleString()}</span></div>` : ''}
-    <div class="tot-div"></div>
-    <div class="tot-row"><span class="tot-lbl">Net Amount (excl. VAT)</span><span class="tot-val">${netAmount.toLocaleString()}</span></div>
-    <div class="tot-row"><span class="tot-lbl">VAT @ 18%</span><span class="tot-val">${vatAmount.toLocaleString()}</span></div>
-    <div class="tot-grand">
-      <span>TOTAL (Rs.)</span>
-      <span class="tot-grand-val">${total.toLocaleString()}</span>
-    </div>
-  </div>
+<!-- Totals -->
+<div class="twrap">
+  <table class="ttbl">
+    ${discount > 0
+      ? `<tr><td class="tlbl">Discount</td><td class="tval">&#8722;&nbsp;${discount.toLocaleString()}</td></tr>`
+      : ''}
+    <tr><td class="tlbl">Net Amount (excl. VAT)</td><td class="tval">${netAmount.toLocaleString()}</td></tr>
+    <tr><td class="tlbl">VAT @ ${vatRate}%</td><td class="tval">${vatAmount.toLocaleString()}</td></tr>
+    <tr class="grand"><td class="tlbl">TOTAL (Rs.)</td><td class="tval">${total.toLocaleString()}</td></tr>
+  </table>
 </div>
 
+<!-- Amount in words -->
 <div class="words">
-  <div class="w-lbl">Amount in Words</div>
-  <div class="w-val">${totalWords}</div>
+  <div class="wlbl">Amount in Words</div>
+  <div class="wval">${totalWords}</div>
 </div>
 
 ${paymentHtml}
 
+<!-- Push spacer → signatures always at page bottom -->
 <div class="push"></div>
 
 <div class="sigs">
