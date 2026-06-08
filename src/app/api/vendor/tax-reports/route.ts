@@ -205,9 +205,13 @@ export async function GET(req: NextRequest) {
 
   // ── Input VAT Register ─────────────────────────────────────────────────────
   if (type === 'input_vat') {
+    // Only GRNs from VAT-registered suppliers are claimable as input VAT (IRD requirement).
+    // supplier_vat_registered is snapshotted at GRN creation time.
+    // Older GRNs without the column are included (no filter) so historical data isn't lost —
+    // they are flagged with a warning in the response.
     const { data: grns, error: grnsError } = await admin
       .from('grns')
-      .select('id, grn_number, received_at, supplier_name, supplier_invoice_no, net_cost, input_vat, total_cost')
+      .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, net_cost, input_vat, total_cost')
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
@@ -219,13 +223,16 @@ export async function GET(req: NextRequest) {
     if (grnsError) return NextResponse.json({ error: grnsError.message }, { status: 500 })
 
     const rows = (grns || []).map((g: any) => ({
-      grnNumber:          g.grn_number,
-      receivedAt:         g.received_at,
-      supplierName:       g.supplier_name || '—',
-      supplierInvoiceNo:  g.supplier_invoice_no || null,
-      netCost:            parseInt(g.net_cost    || 0),
-      inputVat:           parseInt(g.input_vat   || 0),
-      totalCost:          parseInt(g.total_cost  || 0),
+      grnNumber:             g.grn_number,
+      receivedAt:            g.received_at,
+      supplierName:          g.supplier_name || '—',
+      supplierTin:           g.supplier_tin  || null,
+      supplierVatRegistered: g.supplier_vat_registered ?? null,  // null = legacy GRN (pre-fix)
+      supplierInvoiceNo:     g.supplier_invoice_no || null,
+      netCost:               parseInt(g.net_cost   || 0),
+      inputVat:              parseInt(g.input_vat  || 0),
+      totalCost:             parseInt(g.total_cost || 0),
+      claimable:             g.supplier_vat_registered !== false,  // true for legacy + VAT-reg
     }))
 
     // Aggregate by month
@@ -244,11 +251,16 @@ export async function GET(req: NextRequest) {
       ...monthMap[month],
     }))
 
+    const claimableRows    = rows.filter(r => r.claimable)
+    const nonClaimableRows = rows.filter(r => !r.claimable)
+
     const totals = {
-      netCost:   rows.reduce((s, r) => s + r.netCost,   0),
-      inputVat:  rows.reduce((s, r) => s + r.inputVat,  0),
-      totalCost: rows.reduce((s, r) => s + r.totalCost, 0),
-      count:     rows.length,
+      netCost:            claimableRows.reduce((s, r) => s + r.netCost,   0),
+      inputVat:           claimableRows.reduce((s, r) => s + r.inputVat,  0),
+      totalCost:          claimableRows.reduce((s, r) => s + r.totalCost, 0),
+      count:              claimableRows.length,
+      nonClaimableCount:  nonClaimableRows.length,
+      nonClaimableVat:    nonClaimableRows.reduce((s, r) => s + r.inputVat, 0),
     }
 
     return NextResponse.json({ rows, months, totals, entity: lkTaxEntities[0].name })
@@ -285,17 +297,23 @@ export async function GET(req: NextRequest) {
     const outputTotal    = validInvoices.reduce((s: number, r: any) => s + parseInt(r.total || 0), 0)
                          - (creditNotes || []).reduce((s: number, r: any) => s + parseInt(r.total || 0), 0)
 
-    // ── Input VAT: posted GRNs in range ──
+    // ── Input VAT: posted GRNs from VAT-registered suppliers only ──
+    // supplier_vat_registered=false GRNs are excluded — those invoices are not
+    // valid tax invoices and the IRD will disallow the claim.
+    // supplier_vat_registered=null means legacy GRN (created before the column existed) —
+    // included with a conservative assumption; accountant should verify those manually.
     const { data: grns } = await admin
       .from('grns')
-      .select('input_vat')
+      .select('input_vat, supplier_vat_registered')
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
       .gte('received_at', from)
       .lte('received_at', to)
 
-    const inputVat = (grns || []).reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+    const inputVat = (grns || [])
+      .filter((g: any) => g.supplier_vat_registered !== false)   // exclude known non-VAT suppliers
+      .reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
 
     const netPayable = outputVat - inputVat
 

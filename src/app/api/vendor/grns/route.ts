@@ -53,6 +53,16 @@ export async function POST(req: NextRequest) {
     const { supplierId, supplierName, supplierInvoiceNo, receivedAt, notes, items } = body
     // items: [{ productId, productName, productSku, quantity, unitCost, vatRate }]
 
+    // Snapshot supplier TIN + VAT status at the time of receiving
+    // (mirrors how we snapshot customer_tin on sales — needed for IRD input VAT claim)
+    let supplierTin: string | null = null
+    let supplierVatRegistered = false
+    if (supplierId) {
+      const { data: sup } = await admin.from('suppliers')
+        .select('tin, vat_registered').eq('id', supplierId).single()
+      if (sup) { supplierTin = sup.tin || null; supplierVatRegistered = !!sup.vat_registered }
+    }
+
     if (!items || items.length === 0)
       return NextResponse.json({ error: 'At least one item required' }, { status: 400 })
 
@@ -96,10 +106,12 @@ export async function POST(req: NextRequest) {
     // Insert GRN header
     const { data: grn, error: grnErr } = await admin.from('grns').insert({
       vendor_id:           vendor.id,
-      supplier_id:         supplierId || null,
-      supplier_name:       supplierName || null,
-      grn_number:          grnNumber,
-      supplier_invoice_no: supplierInvoiceNo || null,
+      supplier_id:           supplierId || null,
+      supplier_name:         supplierName || null,
+      supplier_tin:          supplierTin,
+      supplier_vat_registered: supplierVatRegistered,
+      grn_number:            grnNumber,
+      supplier_invoice_no:   supplierInvoiceNo || null,
       received_at:         receivedAt || new Date().toISOString().slice(0, 10),
       notes:               notes || null,
       status:              'draft',
