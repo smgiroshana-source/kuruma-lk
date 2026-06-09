@@ -785,8 +785,10 @@ export default function VendorDashboard() {
     } catch {}
   }
 
-  async function fetchData(full?: boolean) {
-    setLoading(true)
+  async function fetchData(full?: boolean, silent?: boolean) {
+    // silent=true: skip setLoading(true) so the full-page spinner doesn't flash and unmount
+    // child components (e.g. POS after a sale). Data is still refreshed in the background.
+    if (!silent) setLoading(true)
     setProductsLoading(true)
     try {
       // Fire both requests simultaneously — quick shows stats fast, full loads in parallel
@@ -796,13 +798,13 @@ export default function VendorDashboard() {
       // Phase 1: Quick load — vendor info + stats only (fast)
       const quickR = await quickPromise
       if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
-      if (quickR.ok) { const quickData = await quickR.json(); setData(quickData); setLoading(false) }
+      if (quickR.ok) { const quickData = await quickR.json(); setData(quickData); if (!silent) setLoading(false) }
 
       // Phase 2: Full load — already in flight, just await the result
       const fullR = await fullPromise
       if (fullR.ok) { const fullData = await fullR.json(); setData(fullData) }
     } catch {}
-    setLoading(false)
+    if (!silent) setLoading(false)
     setProductsLoading(false)
   }
   async function fetchAllDrafts() {
@@ -2630,15 +2632,17 @@ ${customerRows.map(c => `<tr>
             )}
         </div>)}
 
-        {/* POS */}
-        {tab === 'pos' && (
-          isLkTax ? (
+        {/* POS — always mounted so mid-transaction state survives tab switches (Bug #2).
+              onDataChanged uses silent=true so the full-page loading spinner doesn't flash
+              and unmount the POS component after a sale, preserving the receipt screen (Bug #1). */}
+        <div className={tab === 'pos' ? '' : 'hidden'}>
+          {isLkTax ? (
             <TabPOSLkTax
               vendor={vendor}
               products={products}
               vendorSettings={vendorSettings}
               showToast={showToast}
-              onDataChanged={fetchData}
+              onDataChanged={() => fetchData(undefined, true)}
               pendingDraft={pendingPosDraft}
               onDraftLoaded={() => setPendingPosDraft(null)}
             />
@@ -2648,12 +2652,12 @@ ${customerRows.map(c => `<tr>
               products={products}
               vendorSettings={vendorSettings}
               showToast={showToast}
-              onDataChanged={fetchData}
+              onDataChanged={() => fetchData(undefined, true)}
               pendingDraft={pendingPosDraft}
               onDraftLoaded={() => setPendingPosDraft(null)}
             />
-          )
-        )}
+          )}
+        </div>
 
 
 
