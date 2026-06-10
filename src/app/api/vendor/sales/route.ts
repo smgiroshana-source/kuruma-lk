@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { adjustProductQuantity } from '@/lib/stock'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -367,6 +368,16 @@ export async function POST(req: NextRequest) {
 
     if (!items || items.length === 0) return NextResponse.json({ error: 'No items in sale' }, { status: 400 })
 
+    // Validate + normalise item inputs (integer LKR, positive quantities)
+    for (const item of items) {
+      const q = Number(item.quantity)
+      const p = Number(item.unitPrice)
+      if (!Number.isFinite(q) || q < 1) return NextResponse.json({ error: `Invalid quantity for "${item.productName || 'item'}"` }, { status: 400 })
+      if (!Number.isFinite(p) || p < 0) return NextResponse.json({ error: `Invalid price for "${item.productName || 'item'}"` }, { status: 400 })
+      item.quantity = Math.round(q)
+      item.unitPrice = Math.round(p)
+    }
+
     // Auto-create customer if name provided but no ID
     let resolvedCustomerId = customerId || null
     if (!resolvedCustomerId && customerName?.trim()) {
@@ -385,7 +396,8 @@ export async function POST(req: NextRequest) {
     }
 
     const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0)
-    const total = Math.max(0, subtotal - (discount || 0))
+    const roundedDiscount = Math.min(subtotal, Math.max(0, Math.round(Number(discount) || 0)))
+    const total = Math.max(0, subtotal - roundedDiscount)
 
     // ── lk_tax: atomic serial + VAT calculation ────────────────
     const invoiceMode = await getInvoiceMode(vendor.id)
@@ -409,6 +421,16 @@ export async function POST(req: NextRequest) {
       resolvedEntityId = invoiceEntityId
 
       const supplyDate = saleDate ? new Date(saleDate) : new Date()
+
+      // Tax invoice serials embed the YYMMM period — backdating into a prior
+      // month would break the gapless monthly sequence. Allow only current month.
+      if (resolvedDocType === 'tax_invoice' && saleDate) {
+        const now = new Date()
+        if (supplyDate.getFullYear() !== now.getFullYear() || supplyDate.getMonth() !== now.getMonth()) {
+          return NextResponse.json({ error: 'Tax invoice date must be within the current month' }, { status: 400 })
+        }
+      }
+
       const serial = await reserveSerial(invoiceEntityId, entity, resolvedDocType, supplyDate)
       invoiceNo = serial.invoiceNo
       receiptNo = serial.receiptNo
@@ -426,7 +448,7 @@ export async function POST(req: NextRequest) {
         if (customerVatRegistered !== undefined) custPatch.vat_registered = customerVatRegistered
         if (customerTin?.trim() && customerVatRegistered) custPatch.tin = customerTin.trim()
         if (Object.keys(custPatch).length > 0) {
-          await admin.from('customers').update(custPatch).eq('id', resolvedCustomerId)
+          await admin.from('customers').update(custPatch).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
         }
       }
     } else {
@@ -439,7 +461,8 @@ export async function POST(req: NextRequest) {
     // Step 2: Check customer advance balance
     let customerAdvance = 0
     if (resolvedCustomerId) {
-      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).single()
+      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).eq('vendor_id', vendor.id).single()
+      if (!cust) return NextResponse.json({ error: 'Customer not found' }, { status: 400 })
       customerAdvance = parseFloat(cust?.advance_balance || 0)
     }
 
@@ -466,7 +489,7 @@ export async function POST(req: NextRequest) {
     const saleRecord: any = {
       vendor_id: vendor.id, customer_id: resolvedCustomerId,
       invoice_no: invoiceNo, customer_name: customerName || 'Walk-in Customer',
-      customer_phone: customerPhone || null, subtotal, discount: discount || 0,
+      customer_phone: customerPhone || null, subtotal, discount: roundedDiscount,
       total, paid_amount: paidForThisBill, balance_due: billBalance,
       payment_method: primaryMethod, payment_status: paymentStatus,
       notes: notes || null,
@@ -506,7 +529,15 @@ export async function POST(req: NextRequest) {
       sscl_stream: item.ssclStream || (item.productId ? 'PART' : 'SVC'),
     }))
     const { error: itemsError } = await admin.from('sale_items').insert(saleItems)
-    if (itemsError) { await admin.from('sales').delete().eq('id', sale.id); return NextResponse.json({ error: itemsError.message }, { status: 400 }) }
+    if (itemsError) {
+      if (taxSerial) {
+        // Gazette serial already reserved — keep the row as VOID to preserve the gapless sequence.
+        await admin.from('sales').update({ payment_status: 'voided', voided_at: new Date().toISOString(), notes: 'VOID — sale items failed to save' }).eq('id', sale.id)
+      } else {
+        await admin.from('sales').delete().eq('id', sale.id)
+      }
+      return NextResponse.json({ error: itemsError.message }, { status: 400 })
+    }
 
     // Record all payment lines in one batch insert
     const paymentRecords: any[] = []
@@ -527,7 +558,10 @@ export async function POST(req: NextRequest) {
         notes: 'Used from advance balance',
       })
     }
-    if (paymentRecords.length > 0) await admin.from('payments').insert(paymentRecords)
+    if (paymentRecords.length > 0) {
+      const { error: payError } = await admin.from('payments').insert(paymentRecords)
+      if (payError) console.error('Payment records insert failed for sale', sale.id, payError.message)
+    }
 
     // Step 5: If there's excess payment AND outstanding invoices, apply to oldest first
     let excessAppliedToOutstanding = 0
@@ -570,33 +604,24 @@ export async function POST(req: NextRequest) {
       // Whatever is still remaining goes to advance
       if (remaining > 0 && resolvedCustomerId) {
         const newAdvance = Math.max(0, customerAdvance - advanceUsedForBill) + remaining
-        await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
+        await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
       } else {
         // Just deduct what was used
         const newAdvance = Math.max(0, customerAdvance - advanceUsedForBill)
-        if (resolvedCustomerId) await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
+        if (resolvedCustomerId) await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
       }
     } else {
       // No outstanding or not applying - excess goes straight to advance
       let newAdvance = Math.max(0, customerAdvance - advanceUsedForBill)
       if (excessPayment > 0) newAdvance += excessPayment
-      if (resolvedCustomerId) await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
+      if (resolvedCustomerId) await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
     }
 
-    // Step 6: Auto-deduct stock — fetch all product quantities in parallel, then update in parallel
+    // Step 6: Auto-deduct stock (atomic per product)
     const stockItems = items.filter((item: any) => item.productId)
     if (stockItems.length > 0) {
-      const productResults = await Promise.all(
-        stockItems.map((item: any) =>
-          admin.from('products').select('quantity').eq('id', item.productId).eq('vendor_id', vendor.id).single()
-        )
-      )
       await Promise.all(
-        stockItems.map((item: any, idx: number) => {
-          const product = productResults[idx].data
-          if (!product) return Promise.resolve()
-          return admin.from('products').update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq('id', item.productId).eq('vendor_id', vendor.id)
-        })
+        stockItems.map((item: any) => adjustProductQuantity(admin, item.productId, vendor.id, -item.quantity))
       )
     }
 
@@ -677,8 +702,7 @@ export async function POST(req: NextRequest) {
     const voidDate = new Date().toISOString().slice(0, 10)
     for (const item of (sale.items || [])) {
       if (item.product_id) {
-        const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
-        if (product) await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id)
+        await adjustProductQuantity(admin, item.product_id, vendor.id, item.quantity)
         // Restore FIFO layer at original unit_cost (puts stock back for future sales)
         if (parseInt(item.unit_cost || 0) > 0) {
           await admin.rpc('restore_fifo_cost', {
@@ -775,6 +799,11 @@ export async function POST(req: NextRequest) {
       .eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!sale) return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
     if (sale.payment_status === 'voided') return NextResponse.json({ error: 'Sale is already voided' }, { status: 400 })
+    if (sale.tax_serial) {
+      // CLAUDE.md: a return against a tax invoice requires a Credit Note (CRN) —
+      // the gazette-stamped amounts are immutable and VAT must be reversed legally.
+      return NextResponse.json({ error: 'This is a tax invoice — process the return as a Credit Note instead' }, { status: 400 })
+    }
 
     let totalRefund = 0
     const returnedDetails: string[] = []
@@ -791,8 +820,7 @@ export async function POST(req: NextRequest) {
 
       // Restore stock
       if (saleItem.product_id) {
-        const { data: product } = await admin.from('products').select('quantity').eq('id', saleItem.product_id).single()
-        if (product) await admin.from('products').update({ quantity: product.quantity + returnQty }).eq('id', saleItem.product_id)
+        await adjustProductQuantity(admin, saleItem.product_id, vendor.id, returnQty)
       }
 
       // Update sale item returned quantity
@@ -831,27 +859,17 @@ export async function POST(req: NextRequest) {
     const { data: updatedItems } = await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)
     const allReturned = (updatedItems || []).every((i: any) => (i.returned_quantity || 0) >= i.quantity)
 
-    const isTaxInvoice = !!sale.tax_serial   // gazette serial present → lk_tax invoice
     const returnedAt = new Date().toISOString()
 
-    // For tax invoices: freeze gazette-stamped amounts; only update payment tracking.
-    // For receipts: mutate totals freely (no legal document constraint).
+    // Receipts only here (tax invoices are rejected above) — totals may mutate freely.
     const salesUpdate: Record<string, any> = {
       paid_amount: newPaidAmount,
       balance_due: newBalanceDue,
       payment_status: allReturned ? 'voided' : newBalanceDue > 0 ? 'partial' : 'paid',
-      notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund')
+      notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund'),
+      total: newTotal,
+      subtotal: newSubtotal,
     }
-    if (!isTaxInvoice) {
-      // Receipts: update totals directly
-      salesUpdate.total = newTotal
-      salesUpdate.subtotal = newSubtotal
-    } else {
-      // Tax invoices: gazette amounts are immutable (CLAUDE.md — never mutate net_amount/vat_amount/total).
-      // Track cumulative return value only; reports derive net VAT/SSCL from returned_amount at query time.
-      salesUpdate.returned_amount = (parseFloat(sale.returned_amount || 0) + totalRefund)
-    }
-    // Bug fix: set voided_at when all items returned so VAT register shows VOID correctly
     if (allReturned) salesUpdate.voided_at = returnedAt
 
     await admin.from('sales').update(salesUpdate).eq('id', saleId)
@@ -861,7 +879,7 @@ export async function POST(req: NextRequest) {
     // Advance balance update still requires a linked customer.
     if (totalRefund > 0) {
       if (sale.customer_id && refundMethod === 'advance') {
-        const { data: customer } = await admin.from('customers').select('advance_balance').eq('id', sale.customer_id).single()
+        const { data: customer } = await admin.from('customers').select('advance_balance').eq('id', sale.customer_id).eq('vendor_id', vendor.id).single()
         if (customer) {
           // Only add the portion that was actually paid (not the portion that just cancels outstanding debt)
           await admin.from('customers').update({
@@ -946,8 +964,7 @@ export async function POST(req: NextRequest) {
     // Reduce stock — items are physically leaving the shop
     for (const item of items) {
       if (item.productId) {
-        const { data: product } = await admin.from('products').select('quantity').eq('id', item.productId).eq('vendor_id', vendor.id).single()
-        if (product) await admin.from('products').update({ quantity: Math.max(0, product.quantity - item.quantity) }).eq('id', item.productId).eq('vendor_id', vendor.id)
+        await adjustProductQuantity(admin, item.productId, vendor.id, -item.quantity)
       }
     }
 
@@ -1007,8 +1024,7 @@ export async function POST(req: NextRequest) {
 
     // Restore stock for this item
     if (item.product_id) {
-      const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
-      if (product) await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id)
+      await adjustProductQuantity(admin, item.product_id, vendor.id, item.quantity)
     }
 
     // Remove this item from the draft
@@ -1040,8 +1056,7 @@ export async function POST(req: NextRequest) {
     // Restore stock for all items
     for (const item of (draft.items || [])) {
       if (item.product_id) {
-        const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
-        if (product) await admin.from('products').update({ quantity: product.quantity + item.quantity }).eq('id', item.product_id)
+        await adjustProductQuantity(admin, item.product_id, vendor.id, item.quantity)
       }
     }
 
@@ -1072,10 +1087,55 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'finalize_draft') {
-    const { saleId, customerId: bodyCustomerId, useAdvance, items: finalItems, payments: paymentLines, discount, vehicleNo, notes, saleDate, customerName, customerPhone } = body
+    const {
+      saleId, customerId: bodyCustomerId, useAdvance, items: finalItems, payments: paymentLines,
+      discount, vehicleNo, notes, saleDate, customerName, customerPhone,
+      // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
+      invoiceEntityId, customerAddress, customerTin, customerVatRegistered,
+    } = body
     const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
     if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
+
+    // ── lk_tax: resolve entity + document type (same rules as create_sale) ──
+    const finalizeInvoiceMode = await getInvoiceMode(vendor.id)
+    const finalizeIsLkTax = finalizeInvoiceMode === 'lk_tax' && !!invoiceEntityId
+    let finalizeEntity: { id: string; invoice_mode: string; receipt_prefix: string; serial_qqqq: string } | null = null
+    let finalizeDocType: 'receipt' | 'tax_invoice' = 'receipt'
+    if (finalizeIsLkTax) {
+      finalizeEntity = await getInvoiceEntity(invoiceEntityId) as any
+      if (!finalizeEntity) return NextResponse.json({ error: 'Invoice entity not found' }, { status: 400 })
+      finalizeDocType = finalizeEntity.invoice_mode === 'lk_tax' ? 'tax_invoice' : 'receipt'
+      if (finalizeDocType === 'tax_invoice' && saleDate) {
+        const sd = new Date(saleDate)
+        const now = new Date()
+        if (sd.getFullYear() !== now.getFullYear() || sd.getMonth() !== now.getMonth()) {
+          return NextResponse.json({ error: 'Tax invoice date must be within the current month' }, { status: 400 })
+        }
+      }
+    }
+    const finalizeVatRate = finalizeIsLkTax ? await getVatRate(vendor.id) : 0
+
+    /** Reserves serial + computes VAT split for a finalized lk_tax sale. */
+    const buildLkTaxFields = async (total: number) => {
+      const supplyDate = saleDate ? new Date(saleDate) : new Date()
+      const serial = await reserveSerial(invoiceEntityId, finalizeEntity!, finalizeDocType, supplyDate)
+      const vatAmount = Math.round(total * finalizeVatRate / (100 + finalizeVatRate))
+      const fields: Record<string, any> = {
+        invoice_entity_id: invoiceEntityId,
+        document_type: finalizeDocType,
+        receipt_no: serial.receiptNo,
+        tax_serial: serial.taxSerial,
+        net_amount: total - vatAmount,
+        vat_amount: vatAmount,
+        date_supply: supplyDate.toISOString().split('T')[0],
+      }
+      if (finalizeDocType === 'tax_invoice') {
+        fields.customer_address = customerAddress?.trim() || null
+        fields.customer_tin = (customerVatRegistered && customerTin?.trim()) ? customerTin.trim() : null
+      }
+      return { fields, invoiceNo: serial.invoiceNo }
+    }
 
     let resolvedCustomerId = bodyCustomerId || draft.customer_id || null
 
@@ -1102,7 +1162,7 @@ export async function POST(req: NextRequest) {
     let canonicalCustomerPhone: string | null = null
     if (resolvedCustomerId) {
       const { data: linkedCust } = await admin.from('customers')
-        .select('name, phone').eq('id', resolvedCustomerId).maybeSingle()
+        .select('name, phone').eq('id', resolvedCustomerId).eq('vendor_id', vendor.id).maybeSingle()
       if (linkedCust) {
         canonicalCustomerName = linkedCust.name
         canonicalCustomerPhone = linkedCust.phone
@@ -1110,6 +1170,17 @@ export async function POST(req: NextRequest) {
     }
     const finalCustomerName  = canonicalCustomerName  || customerName || draft.customer_name
     const finalCustomerPhone = canonicalCustomerPhone || customerPhone || draft.customer_phone
+
+    // Snapshot / update customer address + TIN for tax invoices (mirrors create_sale)
+    if (finalizeDocType === 'tax_invoice' && resolvedCustomerId) {
+      const custPatch: any = {}
+      if (customerAddress?.trim()) custPatch.address = customerAddress.trim()
+      if (customerVatRegistered !== undefined) custPatch.vat_registered = customerVatRegistered
+      if (customerTin?.trim() && customerVatRegistered) custPatch.tin = customerTin.trim()
+      if (Object.keys(custPatch).length > 0) {
+        await admin.from('customers').update(custPatch).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
+      }
+    }
 
     // ── Partial finalization: peel confirmed items into a new invoice, leave draft intact ──
     const confirmedItems = (finalItems || []).filter((fi: any) => parseFloat(fi.unitPrice || 0) > 0)
@@ -1120,14 +1191,23 @@ export async function POST(req: NextRequest) {
 
     if (pendingItems.length > 0) {
       // ── PARTIAL PATH: create a brand-new invoice for confirmed items only ──
-      const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
       const partialSubtotal = confirmedItems.reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0)
-      const discountAmt = discount || 0
+      const discountAmt = Math.min(partialSubtotal, Math.max(0, Math.round(Number(discount) || 0)))
       const partialTotal = Math.max(0, partialSubtotal - discountAmt)
+
+      let invoiceNo: string
+      let lkTaxFields: Record<string, any> = {}
+      if (finalizeIsLkTax) {
+        const lk = await buildLkTaxFields(partialTotal)
+        invoiceNo = lk.invoiceNo
+        lkTaxFields = lk.fields
+      } else {
+        invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+      }
 
       let customerAdvance = 0
       if (resolvedCustomerId && useAdvance) {
-        const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).single()
+        const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).eq('vendor_id', vendor.id).single()
         customerAdvance = parseFloat(cust?.advance_balance || 0)
       }
       const cashPaid = (paymentLines || []).reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
@@ -1151,6 +1231,7 @@ export async function POST(req: NextRequest) {
         vehicle_no: vehicleNo || draft.vehicle_no,
         notes: notes || null,
         created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
+        ...lkTaxFields,
       }).select().single()
       if (newSaleErr || !newSale) return NextResponse.json({ error: newSaleErr?.message || 'Failed to create invoice' }, { status: 400 })
 
@@ -1192,7 +1273,7 @@ export async function POST(req: NextRequest) {
           sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
           amount: advanceUsed, payment_method: 'advance', notes: 'Used from advance balance',
         })
-        await admin.from('customers').update({ advance_balance: Math.max(0, customerAdvance - advanceUsed) }).eq('id', resolvedCustomerId)
+        await admin.from('customers').update({ advance_balance: Math.max(0, customerAdvance - advanceUsed) }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
       }
 
       // Update the original draft: remove confirmed items' prices, zero out totals
@@ -1216,13 +1297,13 @@ export async function POST(req: NextRequest) {
     }
 
     const subtotal = (finalItems || []).reduce((s: number, i: any) => s + i.quantity * i.unitPrice, 0)
-    const discountAmt = discount || 0
+    const discountAmt = Math.min(subtotal, Math.max(0, Math.round(Number(discount) || 0)))
     const total = Math.max(0, subtotal - discountAmt)
 
     // Check customer advance (same logic as create_sale)
     let customerAdvance = 0
     if (resolvedCustomerId && useAdvance) {
-      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).single()
+      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).eq('vendor_id', vendor.id).single()
       customerAdvance = parseFloat(cust?.advance_balance || 0)
     }
 
@@ -1244,7 +1325,15 @@ export async function POST(req: NextRequest) {
       : (advanceUsedForBill > 0 ? 'advance' : billBalance > 0 ? 'credit' : 'cash')
 
     // Assign the real invoice number now (draft had none)
-    const invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+    let invoiceNo: string
+    let fullLkTaxFields: Record<string, any> = {}
+    if (finalizeIsLkTax) {
+      const lk = await buildLkTaxFields(total)
+      invoiceNo = lk.invoiceNo
+      fullLkTaxFields = lk.fields
+    } else {
+      invoiceNo = await generateInvoiceNo(vendor.id, vendor.name)
+    }
 
     // Stamp the finalization date (not draft creation date) so it lands in today's reports
     await admin.from('sales').update({
@@ -1259,6 +1348,7 @@ export async function POST(req: NextRequest) {
       created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
       customer_name: finalCustomerName,
       customer_phone: finalCustomerPhone,
+      ...fullLkTaxFields,
     }).eq('id', saleId)
 
     // FIFO cost consumption — consume cost layers for product items now that sale is finalized
@@ -1337,12 +1427,12 @@ export async function POST(req: NextRequest) {
         }
         // Remaining excess + whatever advance wasn't used for the bill → new advance balance
         const newAdvance = Math.max(0, customerAdvance - advanceUsedForBill) + remaining
-        await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
+        await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
       } else {
         // No overpayment — just deduct the advance that was used
         if (advanceUsedForBill > 0) {
           const newAdvance = Math.max(0, customerAdvance - advanceUsedForBill)
-          await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId)
+          await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
         }
       }
     }

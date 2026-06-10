@@ -140,29 +140,46 @@ export async function GET(req: NextRequest) {
       .gte('created_at', fromTs)
       .lte('created_at', toTs)
 
-    if (!sales || sales.length === 0) {
-      return NextResponse.json({ months: [], totals: { partTurnover: 0, svcTurnover: 0, ssclDue: 0 }, config: { ssclRate, liableBasePart, liableBaseSvc } })
-    }
-
-    const saleIds = sales.map((s: any) => s.id)
+    const saleIds = (sales || []).map((s: any) => s.id)
     const saleDateMap: Record<string, string> = {}
-    for (const s of sales) saleDateMap[s.id] = s.created_at
-
-    // Get all sale items for these sales
-    const { data: items, error: itemsError } = await admin
-      .from('sale_items')
-      .select('sale_id, sscl_stream, total')
-      .in('sale_id', saleIds)
-
-    if (itemsError) return NextResponse.json({ error: itemsError.message }, { status: 500 })
+    for (const s of (sales || [])) saleDateMap[s.id] = s.created_at
 
     // Aggregate by month × stream
     const monthMap: Record<string, { PART: number; SVC: number }> = {}
-    for (const item of (items || [])) {
-      const monthKey = saleDateMap[item.sale_id]?.slice(0, 7) ?? 'unknown'
+
+    if (saleIds.length > 0) {
+      const { data: items, error: itemsError } = await admin
+        .from('sale_items')
+        .select('sale_id, sscl_stream, total')
+        .in('sale_id', saleIds)
+
+      if (itemsError) return NextResponse.json({ error: itemsError.message }, { status: 500 })
+
+      for (const item of (items || [])) {
+        const monthKey = saleDateMap[item.sale_id]?.slice(0, 7) ?? 'unknown'
+        if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
+        const stream = (item.sscl_stream || 'PART') as 'PART' | 'SVC'
+        monthMap[monthKey][stream] += parseFloat(item.total || 0)
+      }
+    }
+
+    // Credit notes reduce SSCL-liable turnover in the period they are ISSUED
+    // (CLAUDE.md), per line-item stream.
+    const { data: ssclCns } = await admin
+      .from('credit_notes')
+      .select('issued_at, items:credit_note_items(sscl_stream, total)')
+      .eq('vendor_id', vendor.id)
+      .in('invoice_entity_id', entityIds)
+      .gte('issued_at', fromTs)
+      .lte('issued_at', toTs)
+
+    for (const cn of (ssclCns || [])) {
+      const monthKey = (cn.issued_at || '').slice(0, 7) || 'unknown'
       if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
-      const stream = (item.sscl_stream || 'PART') as 'PART' | 'SVC'
-      monthMap[monthKey][stream] += parseFloat(item.total || 0)
+      for (const it of (cn.items || [])) {
+        const stream = (it.sscl_stream || 'PART') as 'PART' | 'SVC'
+        monthMap[monthKey][stream] -= parseFloat(it.total || 0)
+      }
     }
 
     // Build report rows
@@ -311,9 +328,11 @@ export async function GET(req: NextRequest) {
       .gte('received_at', from)
       .lte('received_at', to)
 
-    const inputVat = (grns || [])
-      .filter((g: any) => g.supplier_vat_registered !== false)   // exclude known non-VAT suppliers
-      .reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+    const claimableGrns = (grns || []).filter((g: any) => g.supplier_vat_registered !== false)   // exclude known non-VAT suppliers
+    const inputVat = claimableGrns.reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+    // Legacy GRNs (created before the VAT-registered snapshot existed) are included
+    // in inputVat but flagged so the accountant can verify them manually.
+    const legacyCount = claimableGrns.filter((g: any) => g.supplier_vat_registered == null).length
 
     const netPayable = outputVat - inputVat
 
@@ -322,6 +341,7 @@ export async function GET(req: NextRequest) {
       outputNetSales,
       outputTotal,
       inputVat,
+      legacyCount,
       netPayable,
       invoiceCount: validInvoices.length,
       crnCount:     (creditNotes || []).length,

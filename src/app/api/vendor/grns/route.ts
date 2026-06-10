@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { adjustProductQuantity } from '@/lib/stock'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -55,11 +56,12 @@ export async function POST(req: NextRequest) {
 
     // Snapshot supplier TIN + VAT status at the time of receiving
     // (mirrors how we snapshot customer_tin on sales — needed for IRD input VAT claim)
+    // null = unknown (manual supplier with no record) — don't assert "not VAT-registered"
     let supplierTin: string | null = null
-    let supplierVatRegistered = false
+    let supplierVatRegistered: boolean | null = null
     if (supplierId) {
       const { data: sup } = await admin.from('suppliers')
-        .select('tin, vat_registered').eq('id', supplierId).single()
+        .select('tin, vat_registered').eq('id', supplierId).eq('vendor_id', vendor.id).single()
       if (sup) { supplierTin = sup.tin || null; supplierVatRegistered = !!sup.vat_registered }
     }
 
@@ -77,7 +79,9 @@ export async function POST(req: NextRequest) {
     let inputVat  = 0
     const grnItemRows: any[] = []
     for (const item of items) {
-      const totalLine = Math.round(item.quantity * item.unitCost)
+      // Round unit cost FIRST so stored unit_cost × qty always equals the line total
+      const unitCost  = Math.round(item.unitCost)
+      const totalLine = item.quantity * unitCost
       const vatAmt    = Math.round(totalLine * (item.vatRate || 0) / 100)
       netCost  += totalLine
       inputVat += vatAmt
@@ -86,7 +90,7 @@ export async function POST(req: NextRequest) {
         product_name:     item.productName,
         product_sku:      item.productSku || null,
         quantity:         item.quantity,
-        unit_cost:        Math.round(item.unitCost),
+        unit_cost:        unitCost,
         vat_rate:         item.vatRate || 0,
         vat_amount:       vatAmt,
         total_cost:       totalLine,
@@ -152,20 +156,17 @@ export async function POST(req: NextRequest) {
     const items = grn.items || []
     if (items.length === 0) return NextResponse.json({ error: 'GRN has no items' }, { status: 400 })
 
-    // 1. Update stock quantities for each product line
+    // 0. Atomically claim the GRN (guards against double-posting from two tabs/clicks)
+    const { data: claimed } = await admin.from('grns')
+      .update({ status: 'posted', posted_at: new Date().toISOString() })
+      .eq('id', grnId).eq('vendor_id', vendor.id).eq('status', 'draft')
+      .select('id').maybeSingle()
+    if (!claimed) return NextResponse.json({ error: 'GRN already posted' }, { status: 400 })
+
+    // 1. Update stock quantities for each product line (atomic per product)
     for (const item of items) {
       if (item.product_id) {
-        const { data: product } = await admin
-          .from('products')
-          .select('quantity')
-          .eq('id', item.product_id)
-          .single()
-
-        if (product) {
-          await admin.from('products').update({
-            quantity: (product.quantity || 0) + item.quantity
-          }).eq('id', item.product_id)
-        }
+        await adjustProductQuantity(admin, item.product_id, vendor.id, item.quantity)
       }
     }
 
@@ -185,14 +186,15 @@ export async function POST(req: NextRequest) {
 
     if (costLayerRows.length > 0) {
       const { error: layerErr } = await admin.from('cost_layers').insert(costLayerRows)
-      if (layerErr) return NextResponse.json({ error: 'Cost layer error: ' + layerErr.message }, { status: 500 })
+      if (layerErr) {
+        // Roll back: restore stock and reopen the GRN as draft
+        for (const item of items) {
+          if (item.product_id) await adjustProductQuantity(admin, item.product_id, vendor.id, -item.quantity)
+        }
+        await admin.from('grns').update({ status: 'draft', posted_at: null }).eq('id', grnId)
+        return NextResponse.json({ error: 'Cost layer error: ' + layerErr.message }, { status: 500 })
+      }
     }
-
-    // 3. Mark GRN as posted
-    await admin.from('grns').update({
-      status:    'posted',
-      posted_at: new Date().toISOString(),
-    }).eq('id', grnId)
 
     const totalQty = items.reduce((s: number, i: any) => s + i.quantity, 0)
     return NextResponse.json({
@@ -217,7 +219,8 @@ export async function POST(req: NextRequest) {
     for (const item of items) {
       if (!item.quantity || item.quantity < 1) return NextResponse.json({ error: 'All quantities must be ≥ 1' }, { status: 400 })
       if (item.unitCost == null || item.unitCost < 0) return NextResponse.json({ error: 'Unit cost must be ≥ 0' }, { status: 400 })
-      const totalLine = Math.round(item.quantity * item.unitCost)
+      const unitCost  = Math.round(item.unitCost)
+      const totalLine = item.quantity * unitCost
       const vatAmt    = Math.round(totalLine * (item.vatRate || 0) / 100)
       netCost  += totalLine
       inputVat += vatAmt
@@ -227,7 +230,7 @@ export async function POST(req: NextRequest) {
         product_name:     item.productName,
         product_sku:      item.productSku || null,
         quantity:         item.quantity,
-        unit_cost:        Math.round(item.unitCost),
+        unit_cost:        unitCost,
         vat_rate:         item.vatRate || 0,
         vat_amount:       vatAmt,
         total_cost:       totalLine,
@@ -237,10 +240,13 @@ export async function POST(req: NextRequest) {
     }
     const totalCost = netCost + inputVat
 
-    // Replace all items atomically
-    await admin.from('grn_items').delete().eq('grn_id', grnId)
+    // Replace items: insert new rows FIRST, then delete the old ones —
+    // a failed insert no longer leaves the GRN with no items at all.
+    const { data: oldItems } = await admin.from('grn_items').select('id').eq('grn_id', grnId)
     const { error: itemsErr } = await admin.from('grn_items').insert(rows)
     if (itemsErr) return NextResponse.json({ error: itemsErr.message }, { status: 500 })
+    const oldIds = (oldItems || []).map((i: any) => i.id)
+    if (oldIds.length > 0) await admin.from('grn_items').delete().in('id', oldIds)
 
     await admin.from('grns').update({ net_cost: netCost, input_vat: inputVat, total_cost: totalCost, updated_at: new Date().toISOString() }).eq('id', grnId)
     return NextResponse.json({ success: true, message: `${grn.grn_number} updated` })
@@ -270,10 +276,7 @@ export async function POST(req: NextRequest) {
     // Reverse: reduce product quantities + delete cost layers + mark reversed
     for (const item of items) {
       if (item.product_id) {
-        const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
-        if (product) {
-          await admin.from('products').update({ quantity: Math.max(0, (product.quantity || 0) - item.quantity) }).eq('id', item.product_id)
-        }
+        await adjustProductQuantity(admin, item.product_id, vendor.id, -item.quantity)
       }
     }
     await admin.from('cost_layers').delete().eq('grn_id', grnId)

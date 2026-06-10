@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { adjustProductQuantity } from '@/lib/stock'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -40,10 +41,13 @@ export async function POST(req: NextRequest) {
   if (!sale.tax_serial) return NextResponse.json({ error: 'Credit notes only apply to tax invoices (gazette serial required)' }, { status: 400 })
   if (!sale.invoice_entity_id) return NextResponse.json({ error: 'Sale has no invoice entity' }, { status: 400 })
 
-  // 6-month validity check (gazette requirement)
+  // 6-month validity check (gazette requirement).
+  // setMonth overflows short months (Aug 31 +6mo → Mar 3) — clamp to month end.
   const invoiceDate = new Date(sale.date_supply || sale.created_at)
   const sixMonthsLater = new Date(invoiceDate)
+  const origDay = sixMonthsLater.getDate()
   sixMonthsLater.setMonth(sixMonthsLater.getMonth() + 6)
+  if (sixMonthsLater.getDate() < origDay) sixMonthsLater.setDate(0)
   if (new Date() > sixMonthsLater)
     return NextResponse.json({ error: 'Credit notes must be issued within 6 months of the original invoice (' + invoiceDate.toLocaleDateString('en-LK') + ')' }, { status: 400 })
 
@@ -51,7 +55,11 @@ export async function POST(req: NextRequest) {
   const { data: vatRow } = await admin.from('tax_config').select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').single()
   const vatRate = vatRow ? parseFloat(vatRow.value) : 18
 
-  // Build credit note items — cap at available quantity
+  // Build credit note items — cap at available quantity.
+  // If the original invoice had a discount, prorate it across lines so the
+  // credit never exceeds what the customer actually paid for those items.
+  const saleSubtotal = parseFloat(sale.subtotal || 0)
+  const discountFactor = saleSubtotal > 0 ? parseFloat(sale.total || 0) / saleSubtotal : 1
   let totalAmount = 0
   const cnItems: any[] = []
 
@@ -61,7 +69,7 @@ export async function POST(req: NextRequest) {
     const maxQty = item.quantity - (item.returned_quantity || 0)
     const qty = Math.min(Math.max(0, ri.quantity), maxQty)
     if (qty <= 0) continue
-    const unitPrice = Math.round(parseFloat(item.unit_price || 0))
+    const unitPrice = Math.round(parseFloat(item.unit_price || 0) * discountFactor)
     const lineTotal = qty * unitPrice
     totalAmount += lineTotal
     cnItems.push({
@@ -117,7 +125,12 @@ export async function POST(req: NextRequest) {
     .from('credit_note_items')
     .insert(cnItems.map(i => ({ ...i, credit_note_id: cn.id })))
 
-  if (itemsError) return NextResponse.json({ error: itemsError.message }, { status: 500 })
+  if (itemsError) {
+    // Remove the half-created header so reports never see a CRN with no lines.
+    // (The reserved CRN number is lost — acceptable vs. a phantom VAT reduction.)
+    await admin.from('credit_notes').delete().eq('id', cn.id)
+    return NextResponse.json({ error: itemsError.message }, { status: 500 })
+  }
 
   // ── Side effects: stock restoration, sale totals, refund payment ─────────────
   const returnedAt = new Date().toISOString()
@@ -132,10 +145,7 @@ export async function POST(req: NextRequest) {
 
     // Restore product stock
     if (item.product_id) {
-      const { data: product } = await admin.from('products').select('quantity').eq('id', item.product_id).single()
-      if (product) {
-        await admin.from('products').update({ quantity: product.quantity + qty }).eq('id', item.product_id)
-      }
+      await adjustProductQuantity(admin, item.product_id, vendor.id, qty)
       // Restore FIFO cost layer
       if (parseInt(item.unit_cost || 0) > 0) {
         await admin.rpc('restore_fifo_cost', {
@@ -182,11 +192,11 @@ export async function POST(req: NextRequest) {
     // Paid portion: money must physically move back to customer
     if (refundMethod === 'advance' && sale.customer_id) {
       const { data: customer } = await admin.from('customers')
-        .select('advance_balance').eq('id', sale.customer_id).single()
+        .select('advance_balance').eq('id', sale.customer_id).eq('vendor_id', vendor.id).single()
       if (customer) {
         await admin.from('customers').update({
           advance_balance: parseFloat(customer.advance_balance || 0) + paidReduction,
-        }).eq('id', sale.customer_id)
+        }).eq('id', sale.customer_id).eq('vendor_id', vendor.id)
       }
     }
     await admin.from('payments').insert({
