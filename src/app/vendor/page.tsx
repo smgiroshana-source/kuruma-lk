@@ -2,6 +2,7 @@
 import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constants'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { colomboToday } from '@/lib/dates'
+import { saleStatusChip } from '@/lib/saleStatus'
 
 // "Business day" of a sale in Asia/Colombo: sales after the 19:30 cutoff belong
 // to the NEXT day's report. Both the date and the hour must be computed in
@@ -3069,13 +3070,16 @@ ${customerRows.map(c => `<tr>
                       const vehicle = (sale.vehicle_no || '').toLowerCase()
                       if (!vehicle.includes(salesFilterVehicle.toLowerCase().replace(/[-\s]/g, ''))) return false
                     }
-                    // General search (invoice, product name/sku)
+    // Unified search: invoice, product name/sku, customer name, phone, vehicle
                     if (salesSearch) {
                       const sq = salesSearch.toLowerCase()
                       const invoice = (sale.invoice_no || '').toLowerCase()
                       const items = (sale.items || []).map((i: any) => `${i.product_sku || ''} ${i.product_name || ''}`).join(' ').toLowerCase()
                       const name = (sale.customer?.name || sale.customer_name || '').toLowerCase()
-                      if (!invoice.includes(sq) && !items.includes(sq) && !name.includes(sq)) return false
+                      const phone = (sale.customer_phone || sale.customer?.phone || '').toLowerCase()
+                      const vehicle = (sale.vehicle_no || '').toLowerCase().replace(/[-\s]/g, '')
+                      const sqVehicle = sq.replace(/[-\s]/g, '')
+                      if (!invoice.includes(sq) && !items.includes(sq) && !name.includes(sq) && !phone.includes(sq) && !(sqVehicle && vehicle.includes(sqVehicle))) return false
                     }
                     return true
                   }).sort((a: any, b: any) => {
@@ -3088,7 +3092,7 @@ ${customerRows.map(c => `<tr>
                   <div>
                     {/* Search + Filter toggle */}
                     <div className="flex gap-2 mb-2">
-                      <input type="text" value={salesSearch} onChange={e => setSalesSearch(e.target.value)} placeholder="Search invoice, product, customer..." className="flex-1 px-4 py-2 rounded-xl border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                      <input type="text" value={salesSearch} onChange={e => setSalesSearch(e.target.value)} placeholder="Search invoice, customer, phone, vehicle, product..." className="flex-1 px-4 py-2 rounded-xl border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                       <button onClick={() => setShowSalesFilter(!showSalesFilter)} className={'px-3 py-2 rounded-xl border-2 text-sm font-bold transition ' + (showSalesFilter || activeFilterCount > 0 ? 'border-orange-400 bg-orange-50 text-orange-600' : 'border-slate-200 text-slate-500')}>
                         ☰ Filter{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
                       </button>
@@ -3145,7 +3149,7 @@ ${customerRows.map(c => `<tr>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs font-mono font-semibold text-slate-600 hidden sm:table-cell">{sale.vehicle_no || '—'}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs font-semibold whitespace-nowrap">{sale.customer?.name || sale.customer_name}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-right font-bold text-orange-600 whitespace-nowrap">Rs.{parseFloat(sale.total).toLocaleString()}</td>
-                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + (sale.payment_status === 'voided' ? 'bg-red-100 text-red-600' : sale.payment_status === 'paid' ? 'bg-green-100 text-green-600' : sale.payment_status === 'partial' ? 'bg-amber-100 text-amber-600' : 'bg-red-100 text-red-600')}>{sale.payment_status === 'voided' ? 'VOID' : sale.payment_status.toUpperCase()}</span>{hasReturns && <span className="block text-[9px] font-bold text-red-500 mt-0.5">-Rs.{totalReturned.toLocaleString()}</span>}</td>
+                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status).cls}>{saleStatusChip(sale.payment_status).label}</span>{hasReturns && <span className="block text-[9px] font-bold text-red-500 mt-0.5">-Rs.{totalReturned.toLocaleString()}</span>}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</td>
                                 </tr>
                                 {isExpanded && (
@@ -3799,7 +3803,7 @@ ${customerRows.map(c => `<tr>
                                 <span className="text-[10px] text-slate-400 ml-1.5">{formatDateShort(sale.created_at)}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + (sale.payment_status === 'voided' ? 'bg-red-100 text-red-600' : sale.payment_status === 'paid' ? 'bg-green-100 text-green-600' : 'bg-amber-100 text-amber-600')}>{sale.payment_status.toUpperCase()}</span>
+                                <span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status).cls}>{saleStatusChip(sale.payment_status).label}</span>
                                 <span className="font-black text-sm text-orange-600">Rs.{parseFloat(sale.total).toLocaleString()}</span>
                               </div>
                             </div>
