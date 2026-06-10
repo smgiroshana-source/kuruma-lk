@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
+import { colomboToday } from '@/lib/dates'
 
 function locLabel(p: any) { return [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ') }
 function confirmedAgo(dateStr: string | null): { label: string; cls: string } | null {
@@ -59,7 +60,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
 
     setStocktakeSaving(true)
     try {
-      await Promise.all([
+      const responses = await Promise.all([
         ...qtyEntries.map(([id, qty]) =>
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'update', productId: id, data: { quantity: qty, last_stock_confirmed_at: now } }) })),
@@ -67,11 +68,18 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'update', productId: id, data: { last_stock_confirmed_at: now } }) }))
       ])
-      const total = qtyEntries.length + confirmOnly.length
-      showToast(`${total} product${total !== 1 ? 's' : ''} saved & confirmed`)
-      setStockQtyEdits({})
-      setStockConfirmSet(new Set())
-      await onDataChanged()
+      const failedCount = responses.filter(r => !r.ok).length
+      if (failedCount > 0) {
+        // Keep the pending edits so the count isn't silently lost — user can retry
+        showToast(`⚠️ ${failedCount} update${failedCount !== 1 ? 's' : ''} failed — please retry`)
+        await onDataChanged()
+      } else {
+        const total = qtyEntries.length + confirmOnly.length
+        showToast(`${total} product${total !== 1 ? 's' : ''} saved & confirmed`)
+        setStockQtyEdits({})
+        setStockConfirmSet(new Set())
+        await onDataChanged()
+      }
     } catch { showToast('Error saving') }
     setStocktakeSaving(false)
   }
@@ -79,16 +87,28 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   async function saveStocktakeWithCost() {
     if (!stocktakeCostPrompt) return
     setStocktakeCostSaving(true)
-    const today = new Date().toISOString().slice(0, 10)
+    const today = colomboToday()
     try {
-      // Seed cost layers for items where cost was provided
-      await Promise.all(stocktakeCostPrompt.map(async item => {
+      // Seed cost layers for items where cost was provided. Track failures and
+      // clear seeded costs so a retry doesn't double-insert FIFO layers.
+      const results = await Promise.all(stocktakeCostPrompt.map(async item => {
         const cost = parseInt(item.cost) || 0
-        if (cost > 0) {
-          await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        if (cost <= 0) return { id: item.id, ok: true }
+        try {
+          const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'seed_cost_layer', productId: item.id, unitCost: cost, quantity: item.delta, receivedAt: today }) })
-        }
+          return { id: item.id, ok: r.ok }
+        } catch { return { id: item.id, ok: false } }
       }))
+      const failed = results.filter(r => !r.ok)
+      if (failed.length > 0) {
+        const failedIds = new Set(failed.map(f => f.id))
+        // Blank out the costs that DID succeed so pressing Save again won't re-seed them
+        setStocktakeCostPrompt(prev => prev ? prev.map(it => failedIds.has(it.id) ? it : { ...it, cost: '' }) : prev)
+        showToast(`⚠️ ${failed.length} cost layer${failed.length !== 1 ? 's' : ''} failed to save — fix and retry`)
+        setStocktakeCostSaving(false)
+        return
+      }
       setStocktakeCostPrompt(null)
       await saveAllStockChanges(true) // proceed without re-prompting
     } catch { showToast('Error seeding cost layers') }
@@ -254,7 +274,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
                       <input type="number" min="0" value={curQty}
-                        onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: parseInt(e.target.value) || 0}))}
+                        onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, parseInt(e.target.value) || 0)}))}
                         className="w-20 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
@@ -365,11 +385,13 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                           disabled={isClearing}
                           onClick={async () => {
                             setAssignLoading('clear-' + p.id)
-                            await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: null, loc_floor: null, loc_sub1: null, loc_sub2: null } }) })
-                            await onDataChanged()
-                            setAssignLoading(null)
-                            showToast('Location cleared')
+                            try {
+                              const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: null, loc_floor: null, loc_sub1: null, loc_sub2: null } }) })
+                              if (r.ok) { await onDataChanged(); showToast('Location cleared') }
+                              else showToast('⚠️ Failed to clear location')
+                            } catch { showToast('Network error') }
+                            finally { setAssignLoading(null) }
                           }}
                           className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 active:bg-red-100 border border-slate-200 text-lg font-bold disabled:opacity-40 transition">
                           {isClearing ? '…' : '✕'}
@@ -410,11 +432,13 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                         onClick={async () => {
                           if (!anyAssignLoc) return
                           setAssignLoading(p.id)
-                          await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: assignLoc.store || null, loc_floor: assignLoc.floor || null, loc_sub1: assignLoc.sub1 || null, loc_sub2: assignLoc.sub2 || null } }) })
-                          await onDataChanged()
-                          setAssignLoading(null)
-                          showToast(`📍 ${p.sku} assigned`)
+                          try {
+                            const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: assignLoc.store || null, loc_floor: assignLoc.floor || null, loc_sub1: assignLoc.sub1 || null, loc_sub2: assignLoc.sub2 || null } }) })
+                            if (r.ok) { await onDataChanged(); showToast(`📍 ${p.sku} assigned`) }
+                            else showToast('⚠️ Failed to assign location')
+                          } catch { showToast('Network error') }
+                          finally { setAssignLoading(null) }
                         }}
                         className="bg-amber-500 active:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-40 shrink-0">
                         {isSaving ? '…' : 'Assign'}
@@ -458,8 +482,8 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                 className="w-full bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl">
                 {stocktakeCostSaving ? '⏳ Saving…' : '✅ Save with Cost Tracking'}
               </button>
-              <button onClick={() => { setStocktakeCostPrompt(null); saveAllStockChanges(true) }}
-                className="w-full text-sm text-slate-400 font-semibold py-2 hover:text-slate-600">
+              <button onClick={() => { setStocktakeCostPrompt(null); saveAllStockChanges(true) }} disabled={stocktakeCostSaving}
+                className="w-full text-sm text-slate-400 font-semibold py-2 hover:text-slate-600 disabled:opacity-40">
                 Save without cost tracking (GP won't be accurate for these units)
               </button>
             </div>

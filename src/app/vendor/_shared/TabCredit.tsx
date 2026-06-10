@@ -1,5 +1,6 @@
 'use client'
 import { toWhatsAppNumber } from '@/lib/constants'
+import { escapeHtml } from '@/lib/escapeHtml'
 import { useState, useEffect } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
@@ -84,15 +85,20 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
       const j = await r.json()
       if (j.success) {
         if (newCustomer.credit && parseFloat(newCustomer.credit) > 0) {
-          await fetch('/api/vendor/sales', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'create_sale', customerId: j.customer.id,
-              items: [{ productId: null, productName: 'Opening Balance (Past Transactions)', productSku: 'OPENING-BAL', unitPrice: parseFloat(newCustomer.credit), quantity: 1 }],
-              payments: [], notes: 'Opening credit balance from past transactions',
-              skipStock: true,
+          // Opening-balance sale — surface failure instead of silently registering
+          // the customer with no opening credit.
+          try {
+            const obRes = await fetch('/api/vendor/sales', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: 'create_sale', customerId: j.customer.id,
+                items: [{ productId: null, productName: 'Opening Balance (Past Transactions)', productSku: 'OPENING-BAL', unitPrice: parseFloat(newCustomer.credit), quantity: 1 }],
+                payments: [], notes: 'Opening credit balance from past transactions',
+              })
             })
-          })
+            const obJ = await obRes.json()
+            if (!obRes.ok || !obJ.success) showToast('⚠️ Customer saved, but opening balance failed: ' + (obJ.error || 'unknown error'))
+          } catch { showToast('⚠️ Customer saved, but opening balance failed (network)') }
         }
         showToast('Customer registered!')
         setNewCustomer({ name: '', phone: '', whatsapp: '', email: '', address: '', notes: '', advance: '', credit: '', require_vehicle_no: false })
@@ -117,7 +123,7 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
         showToast(type === 'add' ? 'Advance added!' : 'Advance refunded!')
         setAdjustAdvanceAmount('')
         fetchCreditCustomers()
-        if (editingCustomer) setEditingCustomer({ ...editingCustomer, advance_balance: j.advance || (editingCustomer.advance_balance + (type === 'add' ? amount : -amount)) })
+        if (editingCustomer) setEditingCustomer({ ...editingCustomer, advance_balance: j.advance ?? (editingCustomer.advance_balance + (type === 'add' ? amount : -amount)) })
       } else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
     setEditCustomerLoading(false)
@@ -125,7 +131,18 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
 
   async function loadOutstanding(customer: any) {
     setSelectedCreditCustomer(customer); setOutstandingSales([]); setRecentPayments([]); setRecentPaymentsOpen(false); setBulkSettleConfirm(false)
-    try { const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: customer.id }) }); if (r.ok) { const j = await r.json(); setOutstandingSales(j.sales || []) } } catch {}
+    try {
+      const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: customer.id }) })
+      if (r.ok) {
+        const j = await r.json()
+        setOutstandingSales(j.sales || [])
+        // get_outstanding auto-offsets any advance against outstanding invoices —
+        // refresh the customer list so the left-hand cards reflect the new balances.
+        if (parseFloat(customer.advance_balance ?? customer.advance ?? 0) > 0) fetchCreditCustomers()
+      } else {
+        showToast('Could not load outstanding invoices')
+      }
+    } catch { showToast('Network error loading outstanding invoices') }
     loadRecentPayments(customer.id)
   }
 
@@ -209,7 +226,7 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
     const totalDue = sales.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
     const advanceBalance = parseFloat(customer.advance_balance || 0)
     const netDue = Math.max(0, totalDue - advanceBalance)
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Credit Report - ${customer.name}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Credit Report - ${escapeHtml(customer.name)}</title>
 <style>
   @page { size: A4; margin: 15mm; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -242,29 +259,29 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
   @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style></head><body>
 <div class="header">
-  <div class="shop-name">${vendorInfo?.name || 'kuruma.lk'}</div>
-  ${vendorInfo?.location ? `<div style="font-size:12px;color:#666">${vendorInfo.location} ${vendorInfo?.phone ? '| Tel: ' + vendorInfo.phone : ''}</div>` : ''}
+  <div class="shop-name">${escapeHtml(vendorInfo?.name) || 'kuruma.lk'}</div>
+  ${vendorInfo?.location ? `<div style="font-size:12px;color:#666">${escapeHtml(vendorInfo.location)} ${vendorInfo?.phone ? '| Tel: ' + escapeHtml(vendorInfo.phone) : ''}</div>` : ''}
   <div class="report-title">Credit Statement</div>
 </div>
 <div class="date-generated">Generated: ${new Date().toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' } as any)}</div>
 <div class="customer-info">
   <h3>Customer Details</h3>
-  <p class="customer-name">${customer.name}</p>
-  ${customer.phone ? `<p>Phone: ${customer.phone}</p>` : ''}
-  ${customer.email ? `<p>Email: ${customer.email}</p>` : ''}
-  ${customer.address ? `<p>Address: ${customer.address}</p>` : ''}
+  <p class="customer-name">${escapeHtml(customer.name)}</p>
+  ${customer.phone ? `<p>Phone: ${escapeHtml(customer.phone)}</p>` : ''}
+  ${customer.email ? `<p>Email: ${escapeHtml(customer.email)}</p>` : ''}
+  ${customer.address ? `<p>Address: ${escapeHtml(customer.address)}</p>` : ''}
 </div>
 ${sales.length > 0 ? `
 <table>
   <thead><tr><th>Invoice #</th><th>Date</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Balance Due</th></tr></thead>
   <tbody>
     ${sales.map((s: any) => `<tr>
-      <td><strong>${s.invoice_no}</strong></td>
+      <td><strong>${escapeHtml(s.invoice_no)}</strong></td>
       <td>${formatDateShort(s.created_at)}</td>
-      <td style="font-size:11px;color:#666">${(s.items || []).map((i: any) => i.product_name).join(', ')}</td>
-      <td class="text-right">Rs.${parseFloat(s.total).toLocaleString()}</td>
-      <td class="text-right amount-paid">Rs.${parseFloat(s.paid_amount).toLocaleString()}</td>
-      <td class="text-right amount-due">Rs.${parseFloat(s.balance_due).toLocaleString()}</td>
+      <td style="font-size:11px;color:#666">${escapeHtml((s.items || []).map((i: any) => i.product_name).join(', '))}</td>
+      <td class="text-right">Rs.${(parseFloat(s.total) || 0).toLocaleString()}</td>
+      <td class="text-right amount-paid">Rs.${(parseFloat(s.paid_amount) || 0).toLocaleString()}</td>
+      <td class="text-right amount-due">Rs.${(parseFloat(s.balance_due) || 0).toLocaleString()}</td>
     </tr>`).join('')}
   </tbody>
 </table>
@@ -276,7 +293,7 @@ ${advanceBalance > 0 ? `
 ` : `<div class="standalone-total-box"><span class="total-label" style="font-size:16px">TOTAL OUTSTANDING</span><span class="total-amount" style="font-size:28px">Rs. ${totalDue.toLocaleString()}</span></div>`}
 <div class="footer">
   <p>This is a computer-generated statement. Please settle outstanding amounts at your earliest convenience.</p>
-  <p style="margin-top:5px">Contact: ${vendorInfo?.phone || ''} ${vendorInfo?.whatsapp ? '| WhatsApp: ' + vendorInfo.whatsapp : ''}</p>
+  <p style="margin-top:5px">Contact: ${escapeHtml(vendorInfo?.phone)} ${vendorInfo?.whatsapp ? '| WhatsApp: ' + escapeHtml(vendorInfo.whatsapp) : ''}</p>
   <p style="margin-top:8px;font-weight:700">Powered by kuruma.lk</p>
 </div>
 </body></html>`

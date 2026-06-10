@@ -1,6 +1,8 @@
 'use client'
 import { toWhatsAppNumber } from '@/lib/constants'
-import { useState, useEffect, useMemo } from 'react'
+import { colomboToday } from '@/lib/dates'
+import { escapeHtml } from '@/lib/escapeHtml'
+import { useState, useEffect, useMemo, useRef } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
 const PAY_LABELS: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', bank: 'Bank Transfer', card: 'Card', advance: 'Advance', credit: 'Credit' }
@@ -24,22 +26,22 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
   const payments = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
   const isThermal = format === 'thermal'
   const s = settings || {}
-  const shopName = s.invoice_title || vendor?.name || 'kuruma.lk'
-  const logoHtml = (s.logo_url && s.invoice_show_logo !== false && !isThermal) ? `<img src="${s.logo_url}" style="height:60px;max-width:120px;object-fit:contain;margin-bottom:4px" />` : ''
-  const thermalLogoHtml = (s.logo_url && s.invoice_show_logo !== false && isThermal) ? `<img src="${s.logo_url}" style="height:30px;max-width:60px;object-fit:contain;margin-bottom:2px" />` : ''
-  const footerText = s.invoice_footer || 'Thank you for your business!'
-  const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${s.invoice_terms.replace(/\n/g, '<br/>')}</div>` : ''
-  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
+  const shopName = escapeHtml(s.invoice_title || vendor?.name) || 'kuruma.lk'
+  const logoHtml = (s.logo_url && s.invoice_show_logo !== false && !isThermal) ? `<img src="${escapeHtml(s.logo_url)}" style="height:60px;max-width:120px;object-fit:contain;margin-bottom:4px" />` : ''
+  const thermalLogoHtml = (s.logo_url && s.invoice_show_logo !== false && isThermal) ? `<img src="${escapeHtml(s.logo_url)}" style="height:30px;max-width:60px;object-fit:contain;margin-bottom:2px" />` : ''
+  const footerText = escapeHtml(s.invoice_footer) || 'Thank you for your business!'
+  const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${escapeHtml(s.invoice_terms).replace(/\n/g, '<br/>')}</div>` : ''
+  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${escapeHtml((p.payment_method || 'cash').toUpperCase())}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
   const a4Style = `@page{size:A4;margin:15mm 18mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:13px;color:#222;font-weight:400;max-width:720px;margin:0 auto;padding:25px 30px}@media print{body{padding:0;max-width:100%}}.header{text-align:center;padding:20px 0 15px;margin-bottom:0}.shop-name{font-size:24px;font-weight:700;color:#000;letter-spacing:-0.5px}.header-sub{font-size:11px;color:#444;margin-top:2px;line-height:1.6}.invoice-title{display:flex;justify-content:space-between;align-items:center;padding:10px 0;margin-top:15px;border-top:2px solid #000;border-bottom:1px solid #aaa}.invoice-title h2{font-size:18px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:2px}.invoice-no{font-size:18px;font-weight:700;color:#000;font-family:'Courier New',monospace}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:12px 0}.info-cell{padding:8px 0;font-size:12px;border-bottom:1px solid #ccc}.info-cell:nth-child(even){text-align:right}.info-label{color:#555;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:2px}.info-value{font-weight:600;color:#000;font-size:13px}table{width:100%;border-collapse:collapse;margin:15px 0}thead{background:#eee}th{text-align:left;font-size:10px;font-weight:700;padding:8px 10px;color:#222;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #aaa}td{padding:10px;font-size:13px;font-weight:500;color:#111;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{margin-top:10px;border-top:1px solid #aaa;padding-top:5px}.total-row{display:flex;justify-content:space-between;padding:4px 10px;font-size:13px;font-weight:600;color:#222}.grand-total{display:flex;justify-content:space-between;font-weight:800;font-size:20px;color:#000;padding:12px 10px;margin-top:5px;background:#eee;border-radius:4px}.balance-due{font-weight:700;font-size:16px;text-align:right;margin-top:15px;padding:12px 15px;border:2px solid #000;color:#000;border-radius:4px}.payments-section{margin-top:10px;padding:8px 10px;background:#f0f0f0;border-radius:4px}.payments-label{font-size:9px;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}.note-section{margin-top:10px;padding:8px 12px;font-size:12px;font-style:italic;color:#333;border-left:3px solid #999}.footer{text-align:center;padding:25px 0 10px;font-size:10px;color:#888;margin-top:30px;border-top:1px solid #ccc}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}thead{background:#eee !important}.grand-total{background:#eee !important}}`
   const thermalStyle = `@page{size:80mm auto;margin:2mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Courier New',monospace;font-size:12px;color:#000;width:300px;max-width:100%;margin:0 auto}.header{text-align:center;padding:5px 0;border-bottom:1px dashed #000}.shop-name{font-size:16px;font-weight:900}table{width:100%;border-collapse:collapse;margin:5px 0}th{text-align:left;font-size:10px;font-weight:900;padding:3px 2px;border-bottom:1px dashed #000}td{padding:3px 2px;font-size:11px;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{border-top:1px dashed #000;padding-top:5px}.total-row{display:flex;justify-content:space-between;padding:2px 0;font-size:12px;font-weight:700}.grand-total{font-weight:900;font-size:16px;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:5px 0;margin-top:5px}.footer{text-align:center;padding:8px 0 5px;font-size:10px;border-top:1px dashed #000;margin-top:5px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${sale.invoice_no}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${escapeHtml(sale.invoice_no)}</title>
 <style>${isThermal ? thermalStyle : a4Style}</style></head><body>
-<div class="header">${isThermal ? thermalLogoHtml : logoHtml}<div class="shop-name">${shopName}</div><div class="header-sub">${[vendor?.location, vendor?.address].filter(Boolean).join(', ')}${vendor?.phone ? `<br/>Tel: ${vendor.phone}${vendor?.whatsapp && vendor.whatsapp !== vendor.phone ? ' | WhatsApp: ' + vendor.whatsapp : ''}` : ''}${s.tax_id ? `<br/>Tax/VAT: ${s.tax_id}` : ''}${s.email ? `<br/>${s.email}` : ''}</div></div>
-${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${sale.invoice_no}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${sale.customer_name}${sale.customer_phone ? ' (' + sale.customer_phone + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${sale.vehicle_no}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${sale.invoice_no}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${sale.vehicle_no || '—'}</span></div><div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${sale.customer_name}${sale.customer_phone ? ' (' + sale.customer_phone + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
-<table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? i.product_sku + ' - ' : ''}${i.product_name}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
+<div class="header">${isThermal ? thermalLogoHtml : logoHtml}<div class="shop-name">${shopName}</div><div class="header-sub">${escapeHtml([vendor?.location, vendor?.address].filter(Boolean).join(', '))}${vendor?.phone ? `<br/>Tel: ${escapeHtml(vendor.phone)}${vendor?.whatsapp && vendor.whatsapp !== vendor.phone ? ' | WhatsApp: ' + escapeHtml(vendor.whatsapp) : ''}` : ''}${s.tax_id ? `<br/>Tax/VAT: ${escapeHtml(s.tax_id)}` : ''}${s.email ? `<br/>${escapeHtml(s.email)}` : ''}</div></div>
+${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${escapeHtml(sale.invoice_no)}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${escapeHtml(sale.vehicle_no)}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${escapeHtml(sale.invoice_no)}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${escapeHtml(sale.vehicle_no) || '—'}</span></div><div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
+<table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? escapeHtml(i.product_sku) + ' - ' : ''}${escapeHtml(i.product_name)}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? (isThermal ? `<div style="margin-top:6px"><div style="font-size:10px;font-weight:600;margin-bottom:3px">Payments</div>${paymentLines}</div>` : `<div class="payments-section"><div class="payments-label">Payments</div>${paymentLines}</div>`) : ''}
-${cleanPrintNotes(sale.notes) ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${cleanPrintNotes(sale.notes)}</div>` : `<div class="note-section">Note: ${cleanPrintNotes(sale.notes)}</div>`) : ''}
+${cleanPrintNotes(sale.notes) ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${escapeHtml(cleanPrintNotes(sale.notes))}</div>` : `<div class="note-section">Note: ${escapeHtml(cleanPrintNotes(sale.notes))}</div>`) : ''}
 ${(() => {
   const totalDue = parseFloat(sale.total_amount_due || sale.totalAmountDue || 0)
   const currentInvoiceDue = parseFloat(sale.balance_due || 0)
@@ -65,15 +67,24 @@ ${termsHtml}
 
 function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
   const waPhone = toWhatsAppNumber(phone)
-  const items = (sale.items || []).map((i: any) => `• ${i.product_sku || ''} ${i.product_name} x${i.quantity} = Rs.${parseFloat(i.total).toLocaleString()}`).join('%0A')
-  const payments = (sale.payments || []).map((p: any) => `  ${(p.payment_method || 'cash').toUpperCase()}: Rs.${parseFloat(p.amount).toLocaleString()}`).join('%0A')
-  let msg = `*Invoice: ${sale.invoice_no}*%0A${vendor?.name || 'kuruma.lk'}%0A${formatDate(sale.created_at)}${sale.vehicle_no ? '%0AVehicle: ' + sale.vehicle_no : ''}%0A%0A${items}%0A%0ASubtotal: Rs.${parseFloat(sale.subtotal).toLocaleString()}`
-  if (parseFloat(sale.discount) > 0) msg += `%0ADiscount: -Rs.${parseFloat(sale.discount).toLocaleString()}`
-  msg += `%0A*TOTAL: Rs.${parseFloat(sale.total).toLocaleString()}*`
-  if (payments) msg += `%0A%0APayments:%0A${payments}`
-  if (parseFloat(sale.balance_due) > 0) msg += `%0A%0A⚠️ *TOTAL AMOUNT DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}*`
-  msg += `%0A%0AThank you! - ${vendor?.name || 'kuruma.lk'}`
-  window.open(`https://wa.me/${waPhone}?text=${msg}`, '_blank')
+  // Exclude fully-returned items (mirror printInvoice) and internal credit_return rows
+  const items = (sale.items || [])
+    .filter((i: any) => (i.returned_quantity || 0) < i.quantity)
+    .map((i: any) => {
+      const qty = i.quantity - (i.returned_quantity || 0)
+      return `• ${i.product_sku || ''} ${i.product_name} x${qty} = Rs.${(qty * parseFloat(i.unit_price || 0)).toLocaleString()}`
+    }).join('\n')
+  const payments = (sale.payments || [])
+    .filter((p: any) => p.payment_method !== 'credit_return')
+    .map((p: any) => `  ${(p.payment_method || 'cash').toUpperCase()}: Rs.${parseFloat(p.amount).toLocaleString()}`).join('\n')
+  let msg = `*Invoice: ${sale.invoice_no}*\n${vendor?.name || 'kuruma.lk'}\n${formatDate(sale.created_at)}${sale.vehicle_no ? '\nVehicle: ' + sale.vehicle_no : ''}\n\n${items}\n\nSubtotal: Rs.${parseFloat(sale.subtotal).toLocaleString()}`
+  if (parseFloat(sale.discount) > 0) msg += `\nDiscount: -Rs.${parseFloat(sale.discount).toLocaleString()}`
+  msg += `\n*TOTAL: Rs.${parseFloat(sale.total).toLocaleString()}*`
+  if (payments) msg += `\n\nPayments:\n${payments}`
+  if (parseFloat(sale.balance_due) > 0) msg += `\n\n⚠️ *This Invoice Due: Rs.${parseFloat(sale.balance_due).toLocaleString()}*`
+  msg += `\n\nThank you! - ${vendor?.name || 'kuruma.lk'}`
+  // encodeURIComponent — a '&' or '#' in a product/customer name truncates the message otherwise
+  window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`, '_blank')
 }
 
 export interface PendingDraft {
@@ -104,7 +115,7 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
   const [posDiscount, setPosDiscount] = useState('')
   const [posPayments, setPosPayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
   const [posNotes, setPosNotes] = useState('')
-  const [posDate, setPosDate] = useState(new Date().toISOString().split('T')[0])
+  const [posDate, setPosDate] = useState(colomboToday())
   const [posVehicleNo, setPosVehicleNo] = useState('')
   const [posLoading, setPosLoading] = useState(false)
   const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean; vehicle?: boolean }>({})
@@ -117,11 +128,6 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
   const [returningItem, setReturningItem] = useState<string | null>(null)
   const [posDraftId, setPosDraftId] = useState<string | null>(null)
   const [posDraftInvoiceNo, setPosDraftInvoiceNo] = useState('')
-  const [allDrafts, setAllDrafts] = useState<any[]>([])
-
-  useEffect(() => {
-    fetchAllDrafts()
-  }, [])
 
   // ── Consume pendingDraft from page.tsx (Finalise → from Sales tab) ─────
   useEffect(() => {
@@ -133,26 +139,12 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
     setPosDraftInvoiceNo(pendingDraft.draftInvoiceNo)
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
     setPosDiscount(''); setPosNotes(''); setPosPreview(false)
-    setPosDate(new Date().toISOString().split('T')[0])
+    setPosDate(colomboToday())
     onDraftLoaded?.()
   }, [pendingDraft])
 
-  async function fetchAllDrafts() {
-    try {
-      const r = await fetch('/api/vendor/sales?period=all')
-      if (r.ok) {
-        const j = await r.json()
-        setAllDrafts(
-          (j.sales || [])
-            .filter((s: any) => s.payment_status === 'draft')
-            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-        )
-      }
-    } catch {}
-  }
-
   async function sendEODReport() {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = colomboToday()
     showToast('Fetching today\'s sales...')
     try {
       const r = await fetch(`/api/vendor/sales?from=${today}&to=${today}`)
@@ -192,6 +184,7 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
         if (methods.bank) lines.push(`  🏦 Bank: Rs.${methods.bank.toLocaleString()}`)
         if (methods.card) lines.push(`  💳 Card: Rs.${methods.card.toLocaleString()}`)
         if (methods.advance) lines.push(`  🔄 Advance: Rs.${methods.advance.toLocaleString()}`)
+        if (methods.settlement) lines.push(`  🧾 Settlements: Rs.${methods.settlement.toLocaleString()}`)
       }
       lines.push(``)
       lines.push(`— ${vendorInfo?.name || 'kuruma.lk'}`)
@@ -202,11 +195,18 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
   }
 
   // ── Customer search ────────────────────────────────────────────────────
+  const customerSearchSeq = useRef(0)
   async function searchCustomers(query: string) {
     if (query.length < 2) { setCustomerSuggestions([]); return }
+    const seq = ++customerSearchSeq.current
     try {
       const r = await fetch(`/api/vendor/customers?search=${encodeURIComponent(query)}`)
-      if (r.ok) { const j = await r.json(); setCustomerSuggestions(j.customers || []) }
+      if (r.ok && seq === customerSearchSeq.current) {
+        // Drop out-of-order responses — a slow result for "ka" must not
+        // overwrite the fresher results for "kamal"
+        const j = await r.json()
+        if (seq === customerSearchSeq.current) setCustomerSuggestions(j.customers || [])
+      }
     } catch {}
   }
 
@@ -218,7 +218,9 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
     fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: customer.id }) })
       .then(r => r.json()).then(j => {
         const outstanding = (j.sales || []).reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
-        setPosCustomer((prev: any) => ({ ...prev, outstanding }))
+        // Only merge if this customer is still the selected one (guards against
+        // a slow response attaching customer A's outstanding to customer B)
+        setPosCustomer((prev: any) => prev.id === customer.id ? { ...prev, outstanding } : prev)
       }).catch(() => {})
   }
 
@@ -231,14 +233,14 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
     })
     setPosSearch('')
   }
-  function updateCartQty(i: number, q: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, quantity: Math.max(1, Math.min(q, item.maxStock)) } : item)) }
+  function updateCartQty(i: number, q: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, quantity: Math.max(1, item.maxStock == null ? q : Math.min(q, item.maxStock)) } : item)) }
   function updateCartPrice(i: number, price: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, unitPrice: price } : item)) }
   function removeFromCart(i: number) { setPosCart(p => p.filter((_, x) => x !== i)) }
 
   // ── Computed totals ────────────────────────────────────────────────────
   const { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment } = useMemo(() => {
     const posSubtotal = posCart.reduce((s, i) => s + i.quantity * i.unitPrice, 0)
-    const posDiscountAmt = parseFloat(posDiscount) || 0
+    const posDiscountAmt = Math.min(posSubtotal, Math.max(0, Math.round(parseFloat(posDiscount) || 0)))
     const posTotal = Math.max(0, posSubtotal - posDiscountAmt)
     const posPaidAmount = posPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
     const posAdvanceApplied = useAdvance && posCustomer.advance > 0 ? Math.min(posCustomer.advance, Math.max(0, posTotal - posPaidAmount)) : 0
@@ -273,6 +275,7 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
   }
 
   async function confirmCreateSale() {
+    if (posLoading) return
     setPosLoading(true)
     try {
       const action = posDraftId ? 'finalize_draft' : 'create_sale'
@@ -282,7 +285,8 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
             saleId: posDraftId,
             customerId: posCustomer.id || null,
             useAdvance,
-            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity })),
+            // productId/Name/Sku let the API insert rows for items added during finalize
+            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity, productId: i.productId || null, productName: i.productName, productSku: i.productSku || null })),
             payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
             discount: posDiscountAmt,
             vehicleNo: posVehicleNo || null,
@@ -304,23 +308,23 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
           }
 
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      const j = await r.json()
-      if (j.success) {
+      const j = await r.json().catch(() => null)
+      if (r.ok && j?.success) {
         setPosReceipt({ sale: { ...j.sale, totalAmountDue: j.totalAmountDue || 0 }, vendor, advanceUsed: j.advanceUsed || 0, appliedToOutstanding: j.appliedToOutstanding || 0, settledInvoices: j.settledInvoices || [], newAdvance: j.newAdvance || 0 })
         showToast(j.message)
         setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-        setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false)
+        setPosNotes(''); setPosDate(colomboToday()); setPosVehicleNo(''); setUseAdvance(false)
         setPosDraftId(null); setPosDraftInvoiceNo('')
         setPosPreview(false)
         await onDataChanged()
-        fetchAllDrafts()
-      } else showToast('Error: ' + j.error)
+      } else showToast('Error: ' + (j?.error || `request failed (${r.status})`))
     } catch { showToast('Network error') }
     setPosLoading(false)
   }
 
   async function handleCreateDraft() {
+    if (posLoading) return
     if (posCart.length === 0) { showToast('Add items to cart'); return }
     if (!posCustomer.name.trim()) { setPosErrors(prev => ({ ...prev, name: true })); return }
     setPosLoading(true)
@@ -332,14 +336,16 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
           customerName: posCustomer.name, customerPhone: posCustomer.phone,
           items: posCart.map(i => ({ productId: i.productId, productName: i.productName, productSku: i.productSku, quantity: i.quantity, unitPrice: i.unitPrice, unitCost: i.unitCost })),
           vehicleNo: posVehicleNo || null,
+          notes: posNotes || null,
         })
       })
-      const j = await res.json()
-      if (j.success) {
-        showToast('📦 ' + j.invoiceNo + ' sent on approval')
-        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo('')
-        await onDataChanged(); fetchAllDrafts()
-      } else showToast(j.error || 'Error')
+      const j = await res.json().catch(() => null)
+      if (res.ok && j?.success) {
+        showToast('📦 ' + (j.draft?.invoice_no || j.invoiceNo || 'Draft') + ' sent on approval')
+        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo('')
+        setPosNotes(''); setPosDiscount('')
+        await onDataChanged()
+      } else showToast(j?.error || `Error (${res.status})`)
     } catch { showToast('Network error') }
     setPosLoading(false)
   }
@@ -398,7 +404,7 @@ export default function TabPOSStandard({ vendor, products, vendorSettings, showT
               {posOverpayment > 0 && <div className="flex justify-between font-bold text-cyan-700 bg-cyan-50 rounded-xl px-3 py-2"><span>{posCustomer.outstanding > 0 ? 'Excess → applied to outstanding' : 'Excess → advance'}</span><span>Rs.{posOverpayment.toLocaleString()}</span></div>}
             </div>
             <div className="flex gap-3 px-5 pb-6">
-              <button onClick={() => setPosPreview(false)} className="flex-1 border-2 border-slate-300 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-50 text-sm">← Back to Edit</button>
+              <button onClick={() => setPosPreview(false)} disabled={posLoading} className="flex-1 border-2 border-slate-300 text-slate-700 font-bold py-3.5 rounded-xl hover:bg-slate-50 text-sm disabled:opacity-50">← Back to Edit</button>
               <button onClick={confirmCreateSale} disabled={posLoading} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black py-3.5 rounded-xl text-sm disabled:opacity-50">
                 {posLoading ? 'Creating…' : '✅ Confirm'}
               </button>

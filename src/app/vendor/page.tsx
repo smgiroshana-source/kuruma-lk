@@ -1,8 +1,25 @@
 'use client'
 import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constants'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { colomboToday } from '@/lib/dates'
 
-import { useState, useEffect, useRef, startTransition, useMemo } from 'react'
+// "Business day" of a sale in Asia/Colombo: sales after the 19:30 cutoff belong
+// to the NEXT day's report. Both the date and the hour must be computed in
+// Colombo time — toISOString() is UTC (yesterday before 05:30 local).
+function colomboBusinessDay(isoTimestamp: string): string {
+  const d = new Date(isoTimestamp)
+  const datePart = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+  const hour = parseInt(d.toLocaleString('en-GB', { timeZone: 'Asia/Colombo', hour: '2-digit', hour12: false }))
+  const minute = parseInt(d.toLocaleString('en-GB', { timeZone: 'Asia/Colombo', minute: '2-digit' }))
+  if (hour > 19 || (hour === 19 && minute >= 30)) {
+    const next = new Date(datePart + 'T00:00:00Z')
+    next.setUTCDate(next.getUTCDate() + 1)
+    return next.toISOString().slice(0, 10)
+  }
+  return datePart
+}
+
+import { useState, useEffect, useRef, startTransition, useMemo, Fragment } from 'react'
 import TabStockLkTax from './_lk_tax/TabStock'
 import TabStockStandard from './_standard/TabStock'
 import TabPOSLkTax from './_lk_tax/TabPOS'
@@ -480,15 +497,24 @@ ${termsHtml}
 
 function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
   const waPhone = toWhatsAppNumber(phone)
-  const items = (sale.items || []).map((i: any) => `• ${i.product_sku || ''} ${i.product_name} x${i.quantity} = Rs.${parseFloat(i.total).toLocaleString()}`).join('%0A')
-  const payments = (sale.payments || []).map((p: any) => `  ${(p.payment_method || 'cash').toUpperCase()}: Rs.${parseFloat(p.amount).toLocaleString()}`).join('%0A')
-  let msg = `*Invoice: ${sale.invoice_no}*%0A${vendor?.name || 'kuruma.lk'}%0A${formatDate(sale.created_at)}${sale.vehicle_no ? '%0AVehicle: ' + sale.vehicle_no : ''}%0A%0A${items}%0A%0ASubtotal: Rs.${parseFloat(sale.subtotal).toLocaleString()}`
-  if (parseFloat(sale.discount) > 0) msg += `%0ADiscount: -Rs.${parseFloat(sale.discount).toLocaleString()}`
-  msg += `%0A*TOTAL: Rs.${parseFloat(sale.total).toLocaleString()}*`
-  if (payments) msg += `%0A%0APayments:%0A${payments}`
-  if (parseFloat(sale.balance_due) > 0) msg += `%0A%0A⚠️ *TOTAL AMOUNT DUE: Rs.${parseFloat(sale.balance_due).toLocaleString()}*`
-  msg += `%0A%0AThank you! - ${vendor?.name || 'kuruma.lk'}`
-  window.open(`https://wa.me/${waPhone}?text=${msg}`, '_blank')
+  // Exclude fully-returned items (mirror printInvoice) and internal credit_return rows
+  const items = (sale.items || [])
+    .filter((i: any) => (i.returned_quantity || 0) < i.quantity)
+    .map((i: any) => {
+      const qty = i.quantity - (i.returned_quantity || 0)
+      return `• ${i.product_sku || ''} ${i.product_name} x${qty} = Rs.${(qty * parseFloat(i.unit_price || 0)).toLocaleString()}`
+    }).join('\n')
+  const payments = (sale.payments || [])
+    .filter((p: any) => p.payment_method !== 'credit_return')
+    .map((p: any) => `  ${(p.payment_method || 'cash').toUpperCase()}: Rs.${parseFloat(p.amount).toLocaleString()}`).join('\n')
+  let msg = `*Invoice: ${sale.invoice_no}*\n${vendor?.name || 'kuruma.lk'}\n${formatDate(sale.created_at)}${sale.vehicle_no ? '\nVehicle: ' + sale.vehicle_no : ''}\n\n${items}\n\nSubtotal: Rs.${parseFloat(sale.subtotal).toLocaleString()}`
+  if (parseFloat(sale.discount) > 0) msg += `\nDiscount: -Rs.${parseFloat(sale.discount).toLocaleString()}`
+  msg += `\n*TOTAL: Rs.${parseFloat(sale.total).toLocaleString()}*`
+  if (payments) msg += `\n\nPayments:\n${payments}`
+  if (parseFloat(sale.balance_due) > 0) msg += `\n\n⚠️ *This Invoice Due: Rs.${parseFloat(sale.balance_due).toLocaleString()}*`
+  msg += `\n\nThank you! - ${vendor?.name || 'kuruma.lk'}`
+  // encodeURIComponent — '&', '#' or '%' in a product/customer name truncates the message otherwise
+  window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`, '_blank')
 }
 
 export default function VendorDashboard() {
@@ -511,6 +537,17 @@ export default function VendorDashboard() {
   const [subItemCheck, setSubItemCheck] = useState('')                   // base number to check sub-items for
   const [soldProductInfo, setSoldProductInfo] = useState<Record<string, any>>({})
   const [soldInfoLoaded, setSoldInfoLoaded] = useState(false)
+
+  // Fetch sold info lazily when "show sold out" is enabled — in an effect, not
+  // during render (render-phase fetch/setState double-fires under StrictMode)
+  useEffect(() => {
+    if (!showSoldOut || soldInfoLoaded) return
+    setSoldInfoLoaded(true)
+    fetch('/api/vendor/products/sold-info')
+      .then(r => r.json())
+      .then(j => { if (j.soldInfo) setSoldProductInfo(j.soldInfo) })
+      .catch(() => {})
+  }, [showSoldOut, soldInfoLoaded])
 
   const [newProduct, setNewProduct] = useState({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'', product_type:'part', tyre_width:'', tyre_profile:'', tyre_rim:'' })
   const [productImages, setProductImages] = useState<File[]>([])
@@ -548,9 +585,9 @@ export default function VendorDashboard() {
   const [salesFilterVehicle, setSalesFilterVehicle] = useState('')
   const [showSalesFilter, setShowSalesFilter] = useState(false)
   const [salesView, setSalesView] = useState('overview')
-  const [reportDate, setReportDate] = useState(new Date().toISOString().slice(0, 10))
+  const [reportDate, setReportDate] = useState(colomboToday())
   const [reportFrom, setReportFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
-  const [reportTo, setReportTo] = useState(new Date().toISOString().slice(0, 10))
+  const [reportTo, setReportTo] = useState(colomboToday())
   const [periodReportModal, setPeriodReportModal] = useState(false)
   const [periodReportLoading, setPeriodReportLoading] = useState(false)
   const [periodReportSales, setPeriodReportSales] = useState<any[]>([])
@@ -604,6 +641,7 @@ export default function VendorDashboard() {
 
   // Void sale modal
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
+  const [dailyReportLoading, setDailyReportLoading] = useState(false)
   const [returnModal, setReturnModal] = useState<any>(null)
   const [returnItems, setReturnItems] = useState<Record<string, number>>({})
   const [returnReason, setReturnReason] = useState('')
@@ -725,7 +763,10 @@ export default function VendorDashboard() {
     setPasswordLoading(false)
   }
 
+  const shopInfoSaving = useRef(false)
   async function updateShopInfo(fields: any) {
+    if (shopInfoSaving.current) return // double-tap guard — duplicate change requests
+    shopInfoSaving.current = true
     try {
       const res = await fetch('/api/vendor/settings', {
         method: 'POST',
@@ -751,6 +792,7 @@ export default function VendorDashboard() {
         showToast('Error: ' + (j.error || 'Failed'))
       }
     } catch { showToast('Error updating shop info') }
+    shopInfoSaving.current = false
   }
 
   // GRN / supplier / stocktake functions moved into _lk_tax/TabStock and _standard/TabStock components
@@ -764,8 +806,11 @@ export default function VendorDashboard() {
     setStaffLoading(false)
   }
 
+  const staffSaving = useRef(false)
   async function addStaffMember() {
+    if (staffSaving.current) return // double-tap guard — duplicate staff accounts
     if (!newStaff.email || !newStaff.name) { showToast('Name and email required'); return }
+    staffSaving.current = true
     try {
       const res = await fetch('/api/vendor/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add_staff', ...newStaff }) })
       const j = await res.json()
@@ -776,6 +821,7 @@ export default function VendorDashboard() {
         fetchStaff()
       } else { showToast(j.error || 'Failed') }
     } catch { showToast('Error adding staff') }
+    staffSaving.current = false
   }
 
   async function removeStaff(staffId: string) {
@@ -1307,17 +1353,13 @@ export default function VendorDashboard() {
 
   // ─── REPORT GENERATORS ───
   function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[]) {
-    // 7:30 PM cutoff: sales after 19:30 go to next day
-    const cutoffHour = 19, cutoffMin = 30
+    // 7:30 PM Colombo cutoff: sales after 19:30 go to next day's report
     const filtered = salesList.filter((s: any) => {
       if (s.payment_status === 'voided') return false
+      if (s.payment_status === 'draft') return false // on-approval drafts aren't revenue yet
       // Exclude opening balance entries — not real sales
       if ((s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')) return false
-      const d = new Date(s.created_at)
-      const saleDate = d.getHours() > cutoffHour || (d.getHours() === cutoffHour && d.getMinutes() >= cutoffMin)
-        ? new Date(d.getTime() + 86400000).toISOString().slice(0, 10)
-        : d.toISOString().slice(0, 10)
-      return saleDate === reportDate
+      return colomboBusinessDay(s.created_at) === reportDate
     })
     const dayCollections = collections || []
     const totalCollections = dayCollections.reduce((s: number, c: any) => s + c.amount, 0)
@@ -1360,7 +1402,7 @@ export default function VendorDashboard() {
     // Collected = actual new cash/cheque/bank received today (excludes advance draw-downs)
     const totalCashCollected = Object.values(methodTotals).reduce((s, v) => s + v, 0)
 
-    const shopName = settings?.invoice_title || vendorInfo?.name || 'kuruma.lk'
+    const shopName = escapeHtml(settings?.invoice_title || vendorInfo?.name) || 'kuruma.lk'
     const dateStr = new Date(reportDate).toLocaleDateString('en-LK', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Daily Report - ${reportDate}</title>
@@ -1372,7 +1414,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 .method-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:15px 0}.method-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}.method-box .val{font-size:18px;font-weight:900}.method-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
 .footer{text-align:center;padding:20px 0;color:#94a3b8;font-size:10px;border-top:1px solid #e2e8f0;margin-top:20px}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
-<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
+<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + escapeHtml(vendorInfo.location) + (vendorInfo?.phone ? ' | Tel: ' + escapeHtml(vendorInfo.phone) : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
 
 <div class="summary">
 <div class="summary-box">${totalCashReturnAmount > 0
@@ -1396,8 +1438,8 @@ ${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color
 <table><thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr></thead><tbody>
 ${filtered.map((s: any) => {
       const activeItems = (s.items || []).filter((i: any) => (i.returned_quantity || 0) < i.quantity)
-      const itemNames = activeItems.map((i: any) => i.product_name).join(', ')
-      return '<tr><td><strong>' + s.invoice_no + '</strong></td><td>' + (s.customer_name || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + itemNames + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>'
+      const itemNames = escapeHtml(activeItems.map((i: any) => i.product_name).join(', '))
+      return '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong></td><td>' + (escapeHtml(s.customer_name) || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + itemNames + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>'
     }).join('')}
 </tbody></table>
 
@@ -1416,7 +1458,7 @@ ${dayCollections.length > 0 ? (() => {
       return '<h3 style="font-size:13px;font-weight:800;color:#059669;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Credit Collections (' + dayCollections.length + ') — Rs.' + cashCollectionsTotal.toLocaleString() + '</h3>' +
         '<div style="margin-bottom:10px;font-size:12px;color:#333">' + methodSummary + '</div>' +
         '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Method</th><th class="text-right">Amount</th></tr></thead><tbody>' +
-        dayCollections.map((c: any) => '<tr><td><strong>' + (c.invoice_no || '-') + '</strong></td><td>' + c.customer_name + '</td><td>' + (c.payment_method || 'cash').toUpperCase() + (c.cheque_number ? ' #' + c.cheque_number : '') + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') +
+        dayCollections.map((c: any) => '<tr><td><strong>' + (escapeHtml(c.invoice_no) || '-') + '</strong></td><td>' + escapeHtml(c.customer_name) + '</td><td>' + escapeHtml((c.payment_method || 'cash').toUpperCase()) + (c.cheque_number ? ' #' + escapeHtml(c.cheque_number) : '') + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') +
         '</tbody></table>'
     })() : ''}
 
@@ -1441,6 +1483,7 @@ ${(() => {
     setPeriodReportLoading(true)
     try {
       const r = await fetch(`/api/vendor/sales?from=${reportFrom}&to=${reportTo}`)
+      if (!r.ok) { showToast(`Failed to fetch sales (${r.status})`); setPeriodReportLoading(false); return }
       const j = await r.json()
       const sales = (j.sales || []).filter((s: any) =>
         s.payment_status !== 'voided' &&
@@ -1490,7 +1533,7 @@ ${(() => {
     })
     const customerRows = Object.values(byCustomer).sort((a, b) => b.total - a.total)
 
-    const shopName = settings?.invoice_title || vendorInfo?.name || 'kuruma.lk'
+    const shopName = escapeHtml(settings?.invoice_title || vendorInfo?.name) || 'kuruma.lk'
     const fromStr = new Date(fromDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })
     const toStr = new Date(toDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })
 
@@ -1503,7 +1546,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 .method-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:15px 0}.method-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}.method-box .val{font-size:18px;font-weight:900}.method-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
 .footer{text-align:center;padding:20px 0;color:#94a3b8;font-size:10px;border-top:1px solid #e2e8f0;margin-top:20px}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
-<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + vendorInfo.location + (vendorInfo?.phone ? ' | Tel: ' + vendorInfo.phone : '') + '</div>' : ''}<div class="report-title">Sales Report</div><div class="date">${fromStr} — ${toStr}</div></div>
+<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + escapeHtml(vendorInfo.location) + (vendorInfo?.phone ? ' | Tel: ' + escapeHtml(vendorInfo.phone) : '') + '</div>' : ''}<div class="report-title">Sales Report</div><div class="date">${fromStr} — ${toStr}</div></div>
 
 <div class="summary">
 <div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
@@ -1530,8 +1573,8 @@ ${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="co
   <th class="text-right">Balance Due</th>
 </tr></thead><tbody>
 ${customerRows.map(c => `<tr>
-  <td><strong>${c.name}</strong></td>
-  <td style="font-size:11px;color:#64748b">${c.phone}</td>
+  <td><strong>${escapeHtml(c.name)}</strong></td>
+  <td style="font-size:11px;color:#64748b">${escapeHtml(c.phone)}</td>
   <td class="text-right">${c.invoices}</td>
   <td class="text-right">Rs.${c.total.toLocaleString()}</td>
   <td class="text-right" style="color:#16a34a">Rs.${c.paid.toLocaleString()}</td>
@@ -1552,15 +1595,11 @@ ${customerRows.map(c => `<tr>
   }
 
   function whatsAppDailyReport(salesList: any[], vendorInfo: any, reportDate: string, toPhone?: string) {
-    const cutoffHour = 19, cutoffMin = 30
     const filtered = salesList.filter((s: any) => {
       if (s.payment_status === 'voided') return false
+      if (s.payment_status === 'draft') return false // on-approval drafts aren't revenue yet
       if ((s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')) return false
-      const d = new Date(s.created_at)
-      const saleDate = d.getHours() > cutoffHour || (d.getHours() === cutoffHour && d.getMinutes() >= cutoffMin)
-        ? new Date(d.getTime() + 86400000).toISOString().slice(0, 10)
-        : d.toISOString().slice(0, 10)
-      return saleDate === reportDate
+      return colomboBusinessDay(s.created_at) === reportDate
     })
 
     const total = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
@@ -1622,10 +1661,14 @@ ${customerRows.map(c => `<tr>
 
   // ── End of Day Report ───────────────────────────────────────────────────
   async function sendEODReport() {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = colomboToday()
     showToast('Fetching today\'s sales...')
     try {
-      const r = await fetch(`/api/vendor/sales?from=${today}&to=${today}`)
+      // Fetch from yesterday too: the 19:30 business-day cutoff means sales made
+      // after 19:30 YESTERDAY belong to today's report.
+      const yesterday = new Date(today + 'T00:00:00Z'); yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+      const r = await fetch(`/api/vendor/sales?from=${yesterday.toISOString().slice(0, 10)}&to=${today}`)
+      if (!r.ok) { showToast(`Failed to fetch sales (${r.status})`); return }
       const j = await r.json()
       const sales = j.sales || []
       const vendor = j.vendor || data?.vendor
@@ -1642,8 +1685,9 @@ ${customerRows.map(c => `<tr>
     setExportLoading(true)
     try {
       const r = await fetch(`/api/vendor/sales?from=${exportFrom}&to=${exportTo}`)
+      if (!r.ok) { showToast(`Failed to fetch sales (${r.status})`); setExportLoading(false); return }
       const j = await r.json()
-      const allSales = (j.sales || []).filter((s: any) => s.payment_status !== 'voided')
+      const allSales = (j.sales || []).filter((s: any) => s.payment_status !== 'voided' && s.payment_status !== 'draft')
       const sales = allSales.filter((s: any) => !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL'))
       if (!sales.length) { showToast('No sales in that date range'); setExportLoading(false); return }
 
@@ -1660,9 +1704,9 @@ ${customerRows.map(c => `<tr>
       const rows = sales.map((s: any) => `
         <tr>
           <td>${new Date(s.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-          <td class="mono">${s.invoice_no}</td>
-          <td>${s.customer?.name || s.customer_name || 'Walk-in'}</td>
-          <td>${s.customer?.phone || s.customer_phone || ''}</td>
+          <td class="mono">${escapeHtml(s.invoice_no)}</td>
+          <td>${escapeHtml(s.customer?.name || s.customer_name) || 'Walk-in'}</td>
+          <td>${escapeHtml(s.customer?.phone || s.customer_phone)}</td>
           <td class="right">${(s.items || []).reduce((is: number, i: any) => is + i.quantity, 0)}</td>
           <td class="right">${s.discount > 0 ? 'Rs.' + parseFloat(s.discount).toLocaleString() : '-'}</td>
           <td class="right bold">Rs.${parseFloat(s.total).toLocaleString()}</td>
@@ -1705,8 +1749,8 @@ ${customerRows.map(c => `<tr>
       </style></head><body>
       <div class="header">
         <div>
-          <div class="shop-name">${vendor?.name || 'kuruma.lk'}</div>
-          <div class="shop-sub">${vendor?.location || ''}${vendor?.phone ? ' | ' + vendor.phone : ''}</div>
+          <div class="shop-name">${escapeHtml(vendor?.name) || 'kuruma.lk'}</div>
+          <div class="shop-sub">${escapeHtml(vendor?.location)}${vendor?.phone ? ' | ' + escapeHtml(vendor.phone) : ''}</div>
         </div>
         <div>
           <div class="report-title">Sales Summary Report</div>
@@ -1758,8 +1802,12 @@ ${customerRows.map(c => `<tr>
     setExportLoading(true)
     try {
       const r = await fetch(`/api/vendor/sales?from=${exportFrom}&to=${exportTo}`)
+      if (!r.ok) { showToast(`Failed to fetch sales (${r.status})`); setExportLoading(false); return }
       const j = await r.json()
-      const sales = (j.sales || []).filter((s: any) => s.payment_status !== 'voided')
+      // Exclude voided, drafts (not revenue) and opening-balance rows from exports
+      const sales = (j.sales || []).filter((s: any) =>
+        s.payment_status !== 'voided' && s.payment_status !== 'draft' &&
+        !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL'))
       if (!sales.length) { showToast('No sales in that date range'); setExportLoading(false); return }
 
       const esc = (v: any) => {
@@ -2172,15 +2220,6 @@ ${customerRows.map(c => `<tr>
                   {label}{sheetSort.col === col ? (sheetSort.dir === 'asc' ? ' ↑' : ' ↓') : <span className="opacity-0 group-hover:opacity-30"> ↕</span>}
                 </th>
               )
-
-              // Fetch sold info lazily when showSoldOut is enabled
-              if (showSoldOut && !soldInfoLoaded) {
-                setSoldInfoLoaded(true)
-                fetch('/api/vendor/products/sold-info')
-                  .then(r => r.json())
-                  .then(j => { if (j.soldInfo) setSoldProductInfo(j.soldInfo) })
-                  .catch(() => {})
-              }
 
               return (
                 <div>
@@ -2667,7 +2706,7 @@ ${customerRows.map(c => `<tr>
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <h1 className="text-2xl font-black">📊 Sales & Analytics</h1>
             <div className="flex gap-2 items-center flex-wrap">
-              <button onClick={() => { const today = new Date().toISOString().slice(0,10); setExportFrom(today); setExportTo(today); setShowExportModal(true) }} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">⬇ Export CSV</button>
+              <button onClick={() => { const today = colomboToday(); setExportFrom(today); setExportTo(today); setShowExportModal(true) }} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">⬇ Export CSV</button>
             <div className="flex gap-1 bg-white rounded-lg border border-slate-200 p-1">
               {[{v:'today',l:'Today'},{v:'week',l:'Week'},{v:'month',l:'Month'},{v:'all',l:'All'}].map(p => (
                 <button key={p.v} onClick={() => setSalesPeriod(p.v)} className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${salesPeriod === p.v ? 'bg-orange-500 text-white' : 'text-slate-500 active:bg-slate-100'}`}>{p.l}</button>
@@ -2974,7 +3013,7 @@ ${customerRows.map(c => `<tr>
                                   <span className="text-xs font-bold text-slate-900">Rs.{p.amount.toLocaleString()} <span className="text-slate-400 font-normal">({Math.round(pct)}%)</span></span>
                                 </div>
                                 <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                                  <div className="h-full bg-orange-400 rounded-full" style={{ width: `${pct}%` }} />
+                                  <div className="h-full bg-orange-400 rounded-full" style={{ width: `${Math.min(pct, 100)}%` }} />
                                 </div>
                               </div>
                             )
@@ -3092,8 +3131,8 @@ ${customerRows.map(c => `<tr>
                               const totalReturned = (sale.items || []).reduce((s: number, i: any) => s + ((i.returned_quantity || 0) * parseFloat(i.unit_price || 0)), 0)
                               const saleCogs = (sale.items || []).reduce((s: number, i: any) => s + (parseInt(i.unit_cost || 0) * i.quantity), 0)
                               const saleGp = parseFloat(sale.total) - saleCogs
-                              const saleGpPct = saleCogs > 0 ? Math.round(saleGp / parseFloat(sale.total) * 100) : null
-                              return (<>
+                              const saleGpPct = saleCogs > 0 && parseFloat(sale.total) > 0 ? Math.round(saleGp / parseFloat(sale.total) * 100) : null
+                              return (<Fragment key={sale.id}>
                                 <tr key={sale.id} onClick={() => setExpandedSale(isExpanded ? null : sale.id)} className={'border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition ' + (sale.payment_status === 'voided' ? 'opacity-50' : '') + (hasReturns && sale.payment_status !== 'voided' ? ' bg-red-50/30' : '') + (isExpanded ? ' bg-orange-50/50' : '')}>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatDateShort(sale.created_at)}</td>
                                   <td className="px-2 sm:px-3 py-2.5"><span className="font-mono text-[10px] font-bold bg-slate-100 px-1.5 py-0.5 rounded">{sale.invoice_no}</span>{hasReturns && <span className="block text-[8px] font-bold text-red-500 mt-0.5">↩ RETURN</span>}</td>
@@ -3132,11 +3171,14 @@ ${customerRows.map(c => `<tr>
                                         </div>
                                       </div>
                                       {sale.payment_status !== 'voided' && <button onClick={e => { e.stopPropagation(); setReturnModal(sale); setReturnItems({}) }} className="text-[11px] font-semibold text-amber-600 px-3 py-1.5 rounded border border-amber-200 active:bg-amber-50">↩ Return</button>}
+                                      {sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && !isLkTax && (
+                                        <button onClick={e => { e.stopPropagation(); setVoidModal({ saleId: sale.id, total: parseFloat(sale.total || 0), paid: parseFloat(sale.paid_amount || 0), customerName: sale.customer?.name || sale.customer_name || 'Walk-in' }) }} className="text-[11px] font-semibold text-red-600 px-3 py-1.5 rounded border border-red-200 active:bg-red-50">🚫 Void</button>
+                                      )}
                                       {sale.customer_id && <button onClick={e => { e.stopPropagation(); setCustomerHistoryId(sale.customer_id); setCustomerHistoryName(sale.customer?.name || sale.customer_name) }} className="text-[11px] font-semibold text-purple-600 px-3 py-1.5 rounded border border-purple-200 active:bg-purple-50">👤 History</button>}
                                     </div>
                                   </td></tr>
                                 )}
-                              </>)
+                              </Fragment>)
                             })}
                           </tbody>
                         </table>
@@ -3181,14 +3223,34 @@ ${customerRows.map(c => `<tr>
                       <p className="text-xs text-slate-400 mb-3">Business day: 7:30 PM previous day to 7:30 PM selected day</p>
                       <div className="flex items-end gap-3 flex-wrap">
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <button onClick={async () => {
+                        <button disabled={dailyReportLoading} onClick={async () => {
+                          setDailyReportLoading(true)
                           showToast('Fetching sales...')
-                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || []) } catch { showToast('Failed') }
-                        }} className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
-                        <button onClick={async () => {
+                          // Fetch from the previous day too — sales after the 19:30 cutoff
+                          // the evening before belong to this report date.
+                          try {
+                            const prev = new Date(reportDate + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
+                            const r = await fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${reportDate}`)
+                            if (!r.ok) { showToast(`Failed (${r.status})`) } else {
+                              const j = await r.json()
+                              generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [])
+                            }
+                          } catch { showToast('Failed') }
+                          setDailyReportLoading(false)
+                        }} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+                        <button disabled={dailyReportLoading} onClick={async () => {
+                          setDailyReportLoading(true)
                           showToast('Fetching sales...')
-                          try { const r = await fetch(`/api/vendor/sales?from=${reportDate}&to=${reportDate}`); const j = await r.json(); whatsAppDailyReport(j.sales || [], data?.vendor, reportDate) } catch { showToast('Failed') }
-                        }} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp Summary</button>
+                          try {
+                            const prev = new Date(reportDate + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
+                            const r = await fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${reportDate}`)
+                            if (!r.ok) { showToast(`Failed (${r.status})`) } else {
+                              const j = await r.json()
+                              whatsAppDailyReport(j.sales || [], j.vendor || data?.vendor, reportDate, (j.vendor || data?.vendor)?.whatsapp || (j.vendor || data?.vendor)?.phone)
+                            }
+                          } catch { showToast('Failed') }
+                          setDailyReportLoading(false)
+                        }} className="bg-green-500 hover:bg-green-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp Summary</button>
                       </div>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-5">
@@ -3200,7 +3262,7 @@ ${customerRows.map(c => `<tr>
                         <button onClick={openPeriodReport} disabled={periodReportLoading} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">{periodReportLoading ? '⏳ Loading…' : '📊 View Report'}</button>
                       </div>
                       <div className="flex gap-2 mt-3">
-                        {[{l:"This Week",f:7},{l:"This Month",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(new Date().toISOString().slice(0, 10)) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
+                        {[{l:"Last 7 Days",f:7},{l:"Last 30 Days",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(colomboToday()) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
                       </div>
                     </div>
                   </div>
@@ -3957,11 +4019,13 @@ ${customerRows.map(c => `<tr>
                       </div>
                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Refund Method</p>
                       <div className="space-y-2">
-                        <button onClick={() => handleReturn('advance')} disabled={returnLoading}
+                        {/* Advance only works for registered customers — for walk-ins the
+                            server can't credit anyone and the money would vanish */}
+                        {returnModal.customer_id && <button onClick={() => handleReturn('advance')} disabled={returnLoading}
                           className="w-full text-left px-4 py-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 active:bg-emerald-100 transition disabled:opacity-50">
                           <div className="font-bold text-sm text-emerald-800">💰 Add Rs.{totalRefund.toLocaleString()} to Advance</div>
                           <p className="text-xs text-emerald-600 mt-0.5">Customer can use it for future purchases</p>
-                        </button>
+                        </button>}
                         <button onClick={() => handleReturn('cash')} disabled={returnLoading}
                           className="w-full text-left px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 active:bg-slate-100 transition disabled:opacity-50">
                           <div className="font-bold text-sm text-slate-800">💵 Cash Refund Rs.{totalRefund.toLocaleString()}</div>

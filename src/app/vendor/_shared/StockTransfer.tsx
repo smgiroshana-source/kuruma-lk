@@ -371,7 +371,12 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
       })
       const j = await r.json()
       if (r.ok && j.success) {
-        showToast(`✅ ${j.transferred} item(s) transferred to ${destVendorName}`)
+        if (j.errors && j.errors.length > 0) {
+          // Partial success — make the failures visible instead of a success-only toast
+          showToast(`⚠️ ${j.transferred} transferred, ${j.errors.length} failed: ${j.errors.join('; ')}`)
+        } else {
+          showToast(`✅ ${j.transferred} item(s) transferred to ${destVendorName}`)
+        }
         resetForm()
         onDataChanged()
         // Refresh history if open
