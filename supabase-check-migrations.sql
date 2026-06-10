@@ -165,6 +165,55 @@ UNION ALL SELECT '   index: idx_expenses_date', CASE WHEN EXISTS (
 ) THEN '✅ EXISTS' ELSE '❌ MISSING' END
 
 UNION ALL SELECT '', ''
+UNION ALL SELECT '══ FILE 4: supabase-wheelmart-phase3.sql (tax series) ══', ''
+
+UNION ALL SELECT '   column sales.returned_amount', CASE WHEN EXISTS (
+  SELECT 1 FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'sales' AND column_name = 'returned_amount'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
+UNION ALL SELECT '   table: credit_notes', CASE WHEN EXISTS (
+  SELECT 1 FROM information_schema.tables
+  WHERE table_schema = 'public' AND table_name = 'credit_notes'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
+UNION ALL SELECT '   table: credit_note_items', CASE WHEN EXISTS (
+  SELECT 1 FROM information_schema.tables
+  WHERE table_schema = 'public' AND table_name = 'credit_note_items'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
+UNION ALL SELECT '══ FILE 5: supabase-wheelmart-phase7.sql ══', ''
+
+UNION ALL SELECT '   column grns.supplier_tin', CASE WHEN EXISTS (
+  SELECT 1 FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'grns' AND column_name = 'supplier_tin'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
+UNION ALL SELECT '   column grns.supplier_vat_registered', CASE WHEN EXISTS (
+  SELECT 1 FROM information_schema.columns
+  WHERE table_schema = 'public' AND table_name = 'grns' AND column_name = 'supplier_vat_registered'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
+UNION ALL SELECT '══ FILE 6: supabase-wheelmart-phase8.sql ══', ''
+
+UNION ALL SELECT '   function: adjust_product_quantity', CASE WHEN EXISTS (
+  SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public' AND p.proname = 'adjust_product_quantity'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
+UNION ALL SELECT '══ ONE-OFF DATA FIXES ══', ''
+
+UNION ALL SELECT '   crn-backfill (CRN for 26JUN_PART_00001)', CASE
+  WHEN NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='credit_notes')
+    THEN '❌ run phase3 first'
+  WHEN EXISTS (SELECT 1 FROM credit_notes WHERE original_serial = '26JUN_PART_00001')
+    THEN '✅ DONE' ELSE '❌ MISSING (supabase-crn-backfill-00001.sql)' END
+
+UNION ALL SELECT '   promote-rcp00001 (→ 26JUN_PART_00003)', CASE
+  WHEN EXISTS (SELECT 1 FROM sales WHERE tax_serial = '26JUN_PART_00003')
+    THEN '✅ DONE' ELSE '❌ MISSING (supabase-promote-rcp00001.sql)' END
+
+UNION ALL SELECT '', ''
 UNION ALL SELECT '══ SUMMARY ══', ''
 
 UNION ALL SELECT
@@ -191,4 +240,10 @@ FROM (
   UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='customer_vehicles')
   UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='cash_sessions')
   UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='expenses')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sales' AND column_name='returned_amount')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='credit_notes')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='credit_note_items')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='grns' AND column_name='supplier_tin')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='grns' AND column_name='supplier_vat_registered')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname='public' AND p.proname='adjust_product_quantity')
 ) missing;
