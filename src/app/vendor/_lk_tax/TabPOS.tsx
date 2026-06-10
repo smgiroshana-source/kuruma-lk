@@ -587,6 +587,28 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     })
   }, [products, posSearch])
 
+  // ── Quick picks: most recently sold products (per-vendor, this device) ──
+  const quickPickKey = 'kuruma-pos-recents-' + (vendor?.id || '')
+  const [quickPickIds, setQuickPickIds] = useState<string[]>([])
+  useEffect(() => {
+    try { setQuickPickIds(JSON.parse(localStorage.getItem(quickPickKey) || '[]')) } catch {}
+  }, [quickPickKey])
+  const quickPicks = useMemo(() =>
+    quickPickIds
+      .map(id => (products || []).find((p: any) => p.id === id && p.quantity > 0))
+      .filter(Boolean)
+      .slice(0, 10),
+  [quickPickIds, products])
+  function recordQuickPicks(cart: any[]) {
+    try {
+      const ids = cart.map(i => i.productId).filter(Boolean)
+      if (!ids.length) return
+      const next = [...ids, ...quickPickIds.filter(id => !ids.includes(id))].slice(0, 12)
+      setQuickPickIds(next)
+      localStorage.setItem(quickPickKey, JSON.stringify(next))
+    } catch {}
+  }
+
   // ── Create sale ────────────────────────────────────────────────────────
   function handleCreateSale() {
     if (posCart.length === 0) { showToast('Add items to cart'); return }
@@ -665,6 +687,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const j = await r.json()
       if (j.success) {
+        recordQuickPicks(posCart)
         setPosReceipt({ sale: { ...j.sale, totalAmountDue: j.totalAmountDue || 0 }, vendor, advanceUsed: j.advanceUsed || 0, appliedToOutstanding: j.appliedToOutstanding || 0, settledInvoices: j.settledInvoices || [], newAdvance: j.newAdvance || 0 })
         showToast(j.message)
         setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
@@ -851,6 +874,19 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
             <div className="lg:col-span-2 space-y-3 lg:space-y-4 order-last lg:order-none">
               {/* Product Search */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
+                {quickPicks.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">⚡ Quick Picks</p>
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+                      {quickPicks.map((p: any) => (
+                        <button key={p.id} onClick={() => addToCart(p)} className="shrink-0 max-w-[150px] px-3 py-2 rounded-xl border-2 border-slate-200 bg-white active:border-orange-400 active:bg-orange-50 hover:border-orange-300 text-left min-h-[44px]">
+                          <p className="text-xs font-bold text-slate-800 truncate">{p.product_type === 'tyre' && p.tyre_width ? `${p.tyre_width}/${p.tyre_profile}R${p.tyre_rim} ` : ''}{p.name}</p>
+                          <p className="text-[10px] text-slate-400">Rs.{(p.price || 0).toLocaleString()} · {p.quantity} left</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <label className="block text-xs font-bold text-slate-500 mb-2">Search Products</label>
                 <input value={posSearch} onChange={e => setPosSearch(e.target.value)} className="w-full px-4 py-3.5 rounded-xl border-2 border-slate-200 text-base sm:text-sm outline-none focus:border-orange-400" placeholder="Part name, SKU, make — or tyre size e.g. 185/65R15" />
                 {posFilteredProducts.length > 0 && (
@@ -888,7 +924,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                   <table className="w-full text-sm">
                     <thead><tr className="bg-slate-50">
                       <th className="px-2 sm:px-4 py-2 text-left text-xs font-bold text-slate-500">Item</th>
-                      <th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-16 sm:w-20">Qty</th>
+                      <th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-28 sm:w-36">Qty</th>
                       <th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-20 sm:w-28">Price</th>
                       <th className="px-2 sm:px-4 py-2 text-right text-xs font-bold text-slate-500 w-20 sm:w-24">Total</th>
                       <th className="w-8"></th>
@@ -902,7 +938,11 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             {item.ssclStream === 'SVC' && <span className="ml-1 text-[9px] font-black bg-blue-100 text-blue-700 px-1 rounded">SVC</span>}
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-12 sm:w-16 px-1 sm:px-2 py-1 border border-slate-200 rounded text-center text-sm" />
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => updateCartQty(i, item.quantity - 1)} className="w-9 h-9 sm:w-11 sm:h-11 shrink-0 rounded-lg bg-slate-100 text-slate-700 font-bold text-xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
+                              <input type="number" min="1" max={item.maxStock} value={item.quantity} onChange={e => updateCartQty(i, parseInt(e.target.value) || 1)} className="w-10 sm:w-12 px-1 py-1 border border-slate-200 rounded text-center text-sm h-9 sm:h-11" />
+                              <button onClick={() => updateCartQty(i, item.quantity + 1)} className="w-9 h-9 sm:w-11 sm:h-11 shrink-0 rounded-lg bg-slate-100 text-slate-700 font-bold text-xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
+                            </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
                             <input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className="w-20 sm:w-24 px-1 sm:px-2 py-1 border border-slate-200 rounded text-sm" />
@@ -952,7 +992,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                     <div className="flex justify-between text-sm"><span className="text-slate-300">VAT {posVatRate}%</span><span>Rs.{posVatAmount.toLocaleString()}</span></div>
                   </div>
                 )}
-                <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
+                <div className="flex justify-between items-baseline font-black"><span className="text-xl">TOTAL</span><span className="text-4xl tracking-tight">Rs.{posTotal.toLocaleString()}</span></div>
                 {posAdvanceApplied > 0 && <div className="flex justify-between text-sm mt-1"><span className="text-cyan-300">From Advance</span><span className="text-cyan-300">Rs.{posAdvanceApplied.toLocaleString()}</span></div>}
                 {posOverpayment > 0 && posCustomer.outstanding > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-600">
@@ -1072,7 +1112,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 {posBalance > 0 && <span className="text-red-300">Credit Rs.{posBalance.toLocaleString()}</span>}
                 {posAdvanceApplied > 0 && <span className="text-cyan-300">Adv Rs.{posAdvanceApplied.toLocaleString()}</span>}
               </div>
-              <span className="text-xl font-black">Rs.{posTotal.toLocaleString()}</span>
+              <span className="text-3xl font-black tracking-tight">Rs.{posTotal.toLocaleString()}</span>
             </div>
             <div className="flex">
               {!posDraftId && (
