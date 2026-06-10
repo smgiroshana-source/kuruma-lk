@@ -63,16 +63,16 @@ UNION ALL SELECT '   index: idx_stock_movements_recent', CASE WHEN EXISTS (
 
 UNION ALL SELECT '── PHASE 2 ──', ''
 
-UNION ALL SELECT col, CASE WHEN EXISTS (
+UNION ALL SELECT '   column suppliers.' || col, CASE WHEN EXISTS (
   SELECT 1 FROM information_schema.columns
   WHERE table_schema = 'public' AND table_name = 'suppliers' AND column_name = col
 ) THEN '✅ EXISTS' ELSE '❌ MISSING' END
 FROM (VALUES
-  ('   column suppliers.address'),
-  ('   column suppliers.payment_terms'),
-  ('   column suppliers.notes'),
-  ('   column suppliers.is_active'),
-  ('   column suppliers.created_at')
+  ('address'),
+  ('payment_terms'),
+  ('notes'),
+  ('is_active'),
+  ('created_at')
 ) AS t(col)
 
 UNION ALL SELECT '   table: supplier_invoices', CASE WHEN EXISTS (
