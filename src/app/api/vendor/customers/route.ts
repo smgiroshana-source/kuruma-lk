@@ -27,7 +27,11 @@ export async function GET(req: NextRequest) {
   let query = admin.from('customers').select('*').eq('vendor_id', vendor.id).order('name')
 
   if (search && search.length >= 2) {
-    query = query.or(`name.ilike.%${search}%,phone.ilike.%${search}%`)
+    // Strip characters that have meaning in the PostgREST .or() filter syntax
+    const safeSearch = search.replace(/[,()\\]/g, ' ').trim()
+    if (safeSearch.length >= 2) {
+      query = query.or(`name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%`)
+    }
   }
 
   const { data: customers } = await query.limit(withCredit ? 1000 : 50)
@@ -110,8 +114,17 @@ export async function POST(req: NextRequest) {
   if (action === 'delete') {
     const { customerId } = body
     if (!customerId) return NextResponse.json({ error: 'Missing customerId' }, { status: 400 })
-    const { data: existing } = await admin.from('customers').select('vendor_id').eq('id', customerId).single()
+    const { data: existing } = await admin.from('customers').select('vendor_id, advance_balance').eq('id', customerId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    // Block deletion while money is still attached to the customer
+    if (parseFloat(existing.advance_balance || 0) > 0)
+      return NextResponse.json({ error: 'Customer has an advance balance — refund it before deleting' }, { status: 400 })
+    const { data: owing } = await admin.from('sales').select('id')
+      .eq('vendor_id', vendor.id).eq('customer_id', customerId)
+      .gt('balance_due', 0).neq('payment_status', 'voided').limit(1)
+    if (owing && owing.length > 0)
+      return NextResponse.json({ error: 'Customer has outstanding invoices — settle them before deleting' }, { status: 400 })
 
     const { error } = await admin.from('customers').delete().eq('id', customerId)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -135,6 +148,7 @@ export async function POST(req: NextRequest) {
         .from('customers')
         .update({ advance_balance: 0 })
         .eq('id', customerId)
+        .eq('vendor_id', vendor.id)
         .eq('advance_balance', existingAdvance)   // only succeeds if value hasn't changed
         .select('id')
       if (claimed && claimed.length > 0) {
@@ -158,9 +172,14 @@ export async function POST(req: NextRequest) {
         }
         if (paymentInserts.length > 0) await admin.from('payments').insert(paymentInserts)
         await Promise.all(saleUpdates.map((u: any) => admin.from('sales').update({ paid_amount: u.paid_amount, balance_due: u.balance_due, payment_status: u.payment_status }).eq('id', u.id)))
-        // Put any un-applied remainder back
+        // Put any un-applied remainder back — read-and-add rather than blind
+        // overwrite so an add_advance landing mid-offset isn't lost.
         if (remaining > 0) {
-          await admin.from('customers').update({ advance_balance: remaining }).eq('id', customerId)
+          const { data: nowCust } = await admin.from('customers')
+            .select('advance_balance').eq('id', customerId).eq('vendor_id', vendor.id).single()
+          await admin.from('customers')
+            .update({ advance_balance: parseFloat(nowCust?.advance_balance || 0) + remaining })
+            .eq('id', customerId).eq('vendor_id', vendor.id)
         }
       }
     }
@@ -238,6 +257,12 @@ export async function POST(req: NextRequest) {
     const { customerId, payments: paymentLines } = body
     if (!paymentLines || paymentLines.length === 0) return NextResponse.json({ error: 'No payments provided' }, { status: 400 })
 
+    // SECURITY: the customer must belong to this vendor — otherwise the excess-to-advance
+    // write below would land on another tenant's customer.
+    const { data: ownedCustomer } = await admin.from('customers')
+      .select('id').eq('id', customerId).eq('vendor_id', vendor.id).single()
+    if (!ownedCustomer) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
+
     const totalPayment = paymentLines.reduce((sum: number, p: any) => sum + (parseFloat(p.amount) || 0), 0)
     if (totalPayment <= 0) return NextResponse.json({ error: 'Payment must be positive' }, { status: 400 })
 
@@ -294,9 +319,9 @@ export async function POST(req: NextRequest) {
 
     // Excess goes to advance
     if (remaining > 0 && customerId) {
-      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', customerId).single()
+      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', customerId).eq('vendor_id', vendor.id).single()
       const currentAdvance = parseFloat(cust?.advance_balance || 0)
-      await admin.from('customers').update({ advance_balance: currentAdvance + remaining }).eq('id', customerId)
+      await admin.from('customers').update({ advance_balance: currentAdvance + remaining }).eq('id', customerId).eq('vendor_id', vendor.id)
     }
 
     const applied = totalPayment - remaining
@@ -320,19 +345,42 @@ export async function POST(req: NextRequest) {
       .eq('id', paymentId).eq('vendor_id', vendor.id).single()
     if (!payment) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
 
+    // Refuse record types that simple reversal math would corrupt:
+    //  - negative rows are RETURN refunds (reversing would INCREASE paid_amount)
+    //  - settlement rows originated from another invoice's overpayment
+    //  - credit_return rows are internal balance cancellations
+    if (parseFloat(payment.amount) < 0)
+      return NextResponse.json({ error: 'This is a refund record — it cannot be reversed here' }, { status: 400 })
+    if (payment.payment_method === 'settlement' || payment.payment_method === 'credit_return')
+      return NextResponse.json({ error: 'This is an internal settlement record — adjust the original payment instead' }, { status: 400 })
+
     // Delete the payment record
     await admin.from('payments').delete().eq('id', paymentId)
 
-    // Restore the sale's paid_amount and balance_due
-    const { data: sale } = await admin.from('sales')
-      .select('paid_amount, balance_due, total').eq('id', payment.sale_id).single()
-    if (sale) {
-      const newPaid = Math.max(0, parseFloat(sale.paid_amount) - payment.amount)
-      const newBalance = Math.max(0, parseFloat(sale.total) - newPaid)
-      const newStatus = newPaid <= 0 ? 'credit' : newBalance <= 0 ? 'paid' : 'partial'
-      await admin.from('sales').update({
-        paid_amount: newPaid, balance_due: newBalance, payment_status: newStatus,
-      }).eq('id', payment.sale_id)
+    // An 'advance' payment consumed the customer's deposit — give it back
+    if (payment.payment_method === 'advance' && payment.customer_id) {
+      const { data: cust } = await admin.from('customers')
+        .select('advance_balance').eq('id', payment.customer_id).eq('vendor_id', vendor.id).single()
+      if (cust) {
+        await admin.from('customers')
+          .update({ advance_balance: parseFloat(cust.advance_balance || 0) + parseFloat(payment.amount) })
+          .eq('id', payment.customer_id).eq('vendor_id', vendor.id)
+      }
+    }
+
+    // Restore the sale's paid_amount and balance_due (sale_id is null for plain
+    // advance deposits — those have no invoice to restore)
+    if (payment.sale_id) {
+      const { data: sale } = await admin.from('sales')
+        .select('paid_amount, balance_due, total').eq('id', payment.sale_id).eq('vendor_id', vendor.id).single()
+      if (sale) {
+        const newPaid = Math.max(0, parseFloat(sale.paid_amount) - payment.amount)
+        const newBalance = Math.max(0, parseFloat(sale.total) - newPaid)
+        const newStatus = newPaid <= 0 ? 'credit' : newBalance <= 0 ? 'paid' : 'partial'
+        await admin.from('sales').update({
+          paid_amount: newPaid, balance_due: newBalance, payment_status: newStatus,
+        }).eq('id', payment.sale_id)
+      }
     }
 
     return NextResponse.json({ success: true, message: `Rs.${payment.amount.toLocaleString()} payment reversed` })
@@ -347,6 +395,7 @@ export async function POST(req: NextRequest) {
       .select('id, sale_id, amount, payment_method, cheque_number, bank_ref, notes, created_at, sale:sales(invoice_no)')
       .eq('vendor_id', vendor.id)
       .eq('customer_id', customerId)
+      .gt('amount', 0) // refund/return rows can't be safely reversed — hide them
       .gte('created_at', since.toISOString())
       .order('created_at', { ascending: false })
       .limit(20)
@@ -393,12 +442,16 @@ export async function POST(req: NextRequest) {
       paid_amount: newPaid, balance_due: newBalance, payment_status: newStatus,
     }).eq('id', saleId)
 
-    // If overpayment, add to customer advance — use sale's actual customer_id, not the passed one
+    // If overpayment, add to customer advance — use sale's actual customer_id, not the
+    // passed one, and ALWAYS scope to this vendor (a client-supplied customerId must
+    // never write to another tenant's customer).
     const realCustomerId = sale.customer_id || customerId
     if (overpayment > 0 && realCustomerId) {
-      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', realCustomerId).single()
-      const currentAdvance = parseFloat(cust?.advance_balance || 0)
-      await admin.from('customers').update({ advance_balance: currentAdvance + overpayment }).eq('id', realCustomerId)
+      const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', realCustomerId).eq('vendor_id', vendor.id).single()
+      if (cust) {
+        const currentAdvance = parseFloat(cust.advance_balance || 0)
+        await admin.from('customers').update({ advance_balance: currentAdvance + overpayment }).eq('id', realCustomerId).eq('vendor_id', vendor.id)
+      }
     }
 
     let msg = `Rs.${amountApplied.toLocaleString()} recorded. ${newBalance > 0 ? 'Balance: Rs.' + newBalance.toLocaleString() : 'Fully settled!'}`
@@ -425,7 +478,7 @@ export async function POST(req: NextRequest) {
     if (!cust) return NextResponse.json({ error: 'Customer not found' }, { status: 404 })
 
     const newAdvance = parseFloat(cust.advance_balance || 0) + advAmount
-    await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', customerId)
+    await admin.from('customers').update({ advance_balance: newAdvance }).eq('id', customerId).eq('vendor_id', vendor.id)
 
     // Record as a payment without a sale (for audit trail)
     await admin.from('payments').insert({
@@ -466,7 +519,7 @@ export async function POST(req: NextRequest) {
       remaining -= apply
       cleared.push(sale.invoice_no)
     }
-    await admin.from('customers').update({ advance_balance: Math.max(0, remaining) }).eq('id', customerId)
+    await admin.from('customers').update({ advance_balance: Math.max(0, remaining) }).eq('id', customerId).eq('vendor_id', vendor.id)
 
     let msg = `Rs.${advAmount.toLocaleString()} advance added.`
     if (cleared.length > 0) {
@@ -490,9 +543,9 @@ export async function POST(req: NextRequest) {
     const currentAdvance = parseFloat(cust.advance_balance || 0)
     if (refundAmount > currentAdvance) return NextResponse.json({ error: 'Refund exceeds advance balance' }, { status: 400 })
 
-    await admin.from('customers').update({ advance_balance: currentAdvance - refundAmount }).eq('id', customerId)
+    await admin.from('customers').update({ advance_balance: currentAdvance - refundAmount }).eq('id', customerId).eq('vendor_id', vendor.id)
 
-    return NextResponse.json({ success: true, message: `Rs.${refundAmount.toLocaleString()} refunded. Remaining advance: Rs.${(currentAdvance - refundAmount).toLocaleString()}` })
+    return NextResponse.json({ success: true, advance: currentAdvance - refundAmount, message: `Rs.${refundAmount.toLocaleString()} refunded. Remaining advance: Rs.${(currentAdvance - refundAmount).toLocaleString()}` })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

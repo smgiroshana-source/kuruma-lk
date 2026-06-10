@@ -2,6 +2,30 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { adjustProductQuantity } from '@/lib/stock'
+
+/**
+ * Transfers are restricted to linked shops — vendors owned by the source shop's
+ * owner, or that the calling user owns / is active staff of. Without this, ANY
+ * approved marketplace vendor could create products in (and reprice) another
+ * tenant's catalog.
+ */
+async function getLinkedVendors(admin: ReturnType<typeof createAdminClient>, sourceVendor: any, userId: string) {
+  const [bySourceOwner, byCallerOwner, byStaff] = await Promise.all([
+    admin.from('vendors').select('id, name').eq('status', 'approved').eq('user_id', sourceVendor.user_id),
+    admin.from('vendors').select('id, name').eq('status', 'approved').eq('user_id', userId),
+    admin.from('vendor_staff').select('vendor:vendors(id, name, status)').eq('user_id', userId).eq('active', true),
+  ])
+  const map = new Map<string, { id: string; name: string }>()
+  for (const v of (bySourceOwner.data || [])) map.set(v.id, v)
+  for (const v of (byCallerOwner.data || [])) map.set(v.id, v)
+  for (const row of (byStaff.data || []) as any[]) {
+    const v = row.vendor
+    if (v && v.status === 'approved') map.set(v.id, { id: v.id, name: v.name })
+  }
+  map.delete(sourceVendor.id)
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
+}
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -23,15 +47,10 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
   const action = req.nextUrl.searchParams.get('action')
 
-  // ── List other approved vendors ───────────────────────────────────────────
+  // ── List sibling shops (same owner) as transfer destinations ──────────────
   if (action === 'list_vendors') {
-    const { data: vendors } = await admin
-      .from('vendors')
-      .select('id, name')
-      .eq('status', 'approved')
-      .neq('id', vendor.id)
-      .order('name')
-    return NextResponse.json({ vendors: vendors || [] })
+    const vendors = await getLinkedVendors(admin, vendor, userId)
+    return NextResponse.json({ vendors })
   }
 
   // ── Transfer history (sent from this vendor) ──────────────────────────────
@@ -70,8 +89,8 @@ export async function POST(req: NextRequest) {
     if (!toVendorId || !items?.length)
       return NextResponse.json({ success: false, error: 'toVendorId and items required' }, { status: 400 })
 
-    const { data: destVendor } = await admin.from('vendors').select('id, name').eq('id', toVendorId).eq('status', 'approved').single()
-    if (!destVendor) return NextResponse.json({ success: false, error: 'Destination vendor not found' }, { status: 404 })
+    const destVendor = (await getLinkedVendors(admin, vendor, userId)).find(v => v.id === toVendorId)
+    if (!destVendor) return NextResponse.json({ success: false, error: 'Destination must be one of your own shops' }, { status: 403 })
 
     const productIds = items.map(i => i.fromProductId)
     const { data: sourceProducts } = await admin.from('products').select('*').eq('vendor_id', vendor.id).in('id', productIds)
@@ -111,20 +130,57 @@ export async function POST(req: NextRequest) {
     if (!toVendorId || !items?.length)
       return NextResponse.json({ success: false, error: 'toVendorId and items required' }, { status: 400 })
 
-    const { data: destVendor } = await admin.from('vendors').select('id, name').eq('id', toVendorId).eq('status', 'approved').single()
-    if (!destVendor) return NextResponse.json({ success: false, error: 'Destination vendor not found' }, { status: 404 })
+    const destVendor = (await getLinkedVendors(admin, vendor, userId)).find(v => v.id === toVendorId)
+    if (!destVendor) return NextResponse.json({ success: false, error: 'Destination must be one of your own shops' }, { status: 403 })
 
-    const productIds = items.map(i => i.fromProductId)
+    // Aggregate duplicate rows for the same product — processing them separately
+    // would credit the destination twice while only the last source overwrite
+    // sticks (minting stock), and lets two individually-valid rows jointly
+    // exceed available stock.
+    const aggregated = new Map<string, { fromProductId: string; quantity: number; transferCost?: number; transferPrice?: number; notes?: string }>()
+    for (const item of items) {
+      const q = Number(item.quantity)
+      if (!Number.isInteger(q) || q < 1)
+        return NextResponse.json({ success: false, error: 'Quantities must be whole numbers of at least 1' }, { status: 400 })
+      const existing = aggregated.get(item.fromProductId)
+      if (existing) existing.quantity += q
+      else aggregated.set(item.fromProductId, { ...item, quantity: q })
+    }
+
+    const productIds = [...aggregated.keys()]
     const { data: sourceProducts } = await admin.from('products').select('*').eq('vendor_id', vendor.id).in('id', productIds)
     const sourceMap = new Map((sourceProducts || []).map((p: any) => [p.id, p]))
 
     const transferRecords: any[] = []
     const errors: string[] = []
 
-    for (const item of items) {
+    for (const item of aggregated.values()) {
       const src = sourceMap.get(item.fromProductId)
       if (!src) { errors.push(`Product ${item.fromProductId} not found`); continue }
       if (item.quantity > src.quantity) { errors.push(`${src.name}: insufficient stock`); continue }
+
+      // Claim source stock FIRST with an optimistic conditional update —
+      // a POS sale landing mid-transfer would otherwise be silently erased
+      // by a blind overwrite.
+      const { data: claimed } = await admin.from('products')
+        .update({ quantity: src.quantity - item.quantity })
+        .eq('id', src.id).eq('vendor_id', vendor.id)
+        .eq('quantity', src.quantity)
+        .select('id')
+      if (!claimed || claimed.length === 0) {
+        errors.push(`${src.name}: stock changed during transfer — please retry`)
+        continue
+      }
+
+      // Move FIFO cost out of the source so costing stays truthful on both sides
+      let movedUnitCost: number | null = item.transferCost != null ? Math.round(item.transferCost) : null
+      const { data: consumedCost } = await admin.rpc('consume_fifo_cost', {
+        p_vendor_id: vendor.id, p_product_id: src.id, p_quantity: item.quantity,
+      })
+      if (movedUnitCost == null && consumedCost && consumedCost > 0) {
+        movedUnitCost = Math.round(consumedCost / item.quantity)
+      }
+      if (movedUnitCost == null && parseInt(src.cost || 0) > 0) movedUnitCost = parseInt(src.cost)
 
       // Check if SKU already exists at destination
       const { data: destExisting } = await admin.from('products').select('id, quantity').eq('vendor_id', toVendorId).eq('sku', src.sku).maybeSingle()
@@ -133,11 +189,14 @@ export async function POST(req: NextRequest) {
       let destProductName: string
 
       if (destExisting) {
-        // Update quantity + optionally cost/price at destination
-        const destUpdate: any = { quantity: destExisting.quantity + item.quantity }
-        if (item.transferCost)  destUpdate.cost  = item.transferCost
-        if (item.transferPrice) destUpdate.price = item.transferPrice
-        await admin.from('products').update(destUpdate).eq('id', destExisting.id)
+        // Atomic increment at destination + optionally update cost/price
+        await adjustProductQuantity(admin, destExisting.id, toVendorId, item.quantity)
+        const destUpdate: any = {}
+        if (item.transferCost  != null) destUpdate.cost  = item.transferCost
+        if (item.transferPrice != null) destUpdate.price = item.transferPrice
+        if (Object.keys(destUpdate).length > 0) {
+          await admin.from('products').update(destUpdate).eq('id', destExisting.id).eq('vendor_id', toVendorId)
+        }
         destProductId   = destExisting.id
         destProductName = src.name
       } else {
@@ -153,13 +212,31 @@ export async function POST(req: NextRequest) {
           is_active:  true,
           slug: null,    // will be regenerated on next product fetch
         }).select('id, name').single()
-        if (createErr || !created) { errors.push(`Failed to create ${src.name} at destination: ${createErr?.message}`); continue }
+        if (createErr || !created) {
+          // Roll the source stock back — nothing arrived at the destination
+          await adjustProductQuantity(admin, src.id, vendor.id, item.quantity)
+          if (movedUnitCost != null && movedUnitCost > 0) {
+            await admin.rpc('restore_fifo_cost', {
+              p_vendor_id: vendor.id, p_product_id: src.id,
+              p_quantity: item.quantity, p_unit_cost: movedUnitCost,
+              p_received_at: new Date().toISOString().slice(0, 10),
+            })
+          }
+          errors.push(`Failed to create ${src.name} at destination: ${createErr?.message}`)
+          continue
+        }
         destProductId   = created.id
         destProductName = created.name
       }
 
-      // Deduct from source
-      await admin.from('products').update({ quantity: src.quantity - item.quantity }).eq('id', src.id)
+      // Seed the destination's FIFO layer with the moved cost
+      if (movedUnitCost != null && movedUnitCost > 0) {
+        await admin.rpc('restore_fifo_cost', {
+          p_vendor_id: toVendorId, p_product_id: destProductId,
+          p_quantity: item.quantity, p_unit_cost: movedUnitCost,
+          p_received_at: new Date().toISOString().slice(0, 10),
+        })
+      }
 
       transferRecords.push({
         from_vendor_id:   vendor.id,
@@ -178,7 +255,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (transferRecords.length > 0) {
-      await admin.from('stock_transfers').insert(transferRecords)
+      const { error: historyError } = await admin.from('stock_transfers').insert(transferRecords)
+      if (historyError) errors.push('Transfer completed but the history record failed to save: ' + historyError.message)
       revalidatePath('/')
     }
 

@@ -201,6 +201,18 @@ UNION ALL SELECT '   function: adjust_product_quantity', CASE WHEN EXISTS (
   WHERE n.nspname = 'public' AND p.proname = 'adjust_product_quantity'
 ) THEN '✅ EXISTS' ELSE '❌ MISSING' END
 
+UNION ALL SELECT '══ FILE 7: supabase-wheelmart-phase9.sql ══', ''
+
+UNION ALL SELECT '   table: vendor_sequences', CASE WHEN EXISTS (
+  SELECT 1 FROM information_schema.tables
+  WHERE table_schema = 'public' AND table_name = 'vendor_sequences'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
+UNION ALL SELECT '   function: next_vendor_seq', CASE WHEN EXISTS (
+  SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public' AND p.proname = 'next_vendor_seq'
+) THEN '✅ EXISTS' ELSE '❌ MISSING' END
+
 UNION ALL SELECT '══ ONE-OFF DATA FIXES ══', ''
 
 UNION ALL SELECT '   crn-backfill (CRN for 26JUN_PART_00001)', CASE
@@ -246,4 +258,6 @@ FROM (
   UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='grns' AND column_name='supplier_tin')
   UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='grns' AND column_name='supplier_vat_registered')
   UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname='public' AND p.proname='adjust_product_quantity')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='vendor_sequences')
+  UNION ALL SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname='public' AND p.proname='next_vendor_seq')
 ) missing;

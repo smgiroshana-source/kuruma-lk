@@ -20,9 +20,17 @@ async function generateInvoiceNo(vendorId: string, vendorName: string) {
   const admin = createAdminClient()
   const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
 
-  // Fetch only the single highest regular invoice (zero-padded numbers sort correctly
-  // lexicographically). Exclude On Approval drafts (-OP-) so the two sequences
-  // never interfere. One row read instead of a full table scan.
+  // Atomic counter (supabase-wheelmart-phase9.sql) — read-max-then-insert
+  // can mint duplicate numbers under two concurrent sales.
+  const { data: seq, error: seqError } = await admin.rpc('next_vendor_seq', {
+    p_vendor_id: vendorId,
+    p_series: 'regular',
+  })
+  if (!seqError && seq != null) return `${prefix}-${String(seq).padStart(5, '0')}`
+
+  // Fallback until the migration runs: single highest regular invoice
+  // (zero-padded numbers sort correctly lexicographically). Excludes
+  // On Approval drafts (-OP-) so the two sequences never interfere.
   const { data } = await admin
     .from('sales')
     .select('invoice_no')
@@ -45,7 +53,14 @@ async function generateDraftNo(vendorId: string, vendorName: string) {
   const admin = createAdminClient()
   const prefix = vendorName.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X')
 
-  // Fetch only the single highest On Approval number. One row read.
+  // Atomic counter (supabase-wheelmart-phase9.sql)
+  const { data: seq, error: seqError } = await admin.rpc('next_vendor_seq', {
+    p_vendor_id: vendorId,
+    p_series: 'op',
+  })
+  if (!seqError && seq != null) return `${prefix}-OP-${String(seq).padStart(4, '0')}`
+
+  // Fallback until the migration runs: single highest On Approval number.
   const { data } = await admin
     .from('sales')
     .select('invoice_no')
@@ -378,6 +393,14 @@ export async function POST(req: NextRequest) {
       item.unitPrice = Math.round(p)
     }
 
+    // Reject negative payment lines — they'd skew paid_amount vs the payments
+    // ledger (only positive lines become payment rows below).
+    for (const pl of (paymentLines || [])) {
+      const amt = Number(pl.amount)
+      if (pl.amount !== '' && pl.amount != null && (!Number.isFinite(amt) || amt < 0))
+        return NextResponse.json({ error: 'Invalid payment amount' }, { status: 400 })
+    }
+
     // Auto-create customer if name provided but no ID
     let resolvedCustomerId = customerId || null
     if (!resolvedCustomerId && customerName?.trim()) {
@@ -659,14 +682,16 @@ export async function POST(req: NextRequest) {
     const finalAdvance = excessPayment > excessAppliedToOutstanding ? excessPayment - excessAppliedToOutstanding : 0
     if (finalAdvance > 0) msg += ` | Rs.${finalAdvance.toLocaleString()} to advance`
 
-    // Calculate total amount due across ALL invoices for this customer and save to DB
+    // Calculate total amount due across ALL invoices for this customer and save to DB.
+    // Use resolvedCustomerId (covers phone-matched and auto-created customers, not
+    // just ones the client sent an id for).
     let totalAmountDue = 0
-    if (customerId) {
+    if (resolvedCustomerId) {
       const { data: allCustomerSales } = await admin
         .from('sales')
         .select('balance_due')
         .eq('vendor_id', vendor.id)
-        .eq('customer_id', customerId)
+        .eq('customer_id', resolvedCustomerId)
         .neq('payment_status', 'voided')
         .gt('balance_due', 0)
       totalAmountDue = (allCustomerSales || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
@@ -697,6 +722,15 @@ export async function POST(req: NextRequest) {
     const { data: sale } = await admin.from('sales').select('*, items:sale_items(*), payments:payments(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!sale) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (sale.payment_status === 'voided') return NextResponse.json({ error: 'Already voided' }, { status: 400 })
+
+    // Atomically claim the void BEFORE side effects — a double-tap would
+    // otherwise pass the check above twice and restore stock/advance twice.
+    const { data: voidClaim } = await admin.from('sales')
+      .update({ payment_status: 'voided' })
+      .eq('id', saleId).eq('vendor_id', vendor.id)
+      .neq('payment_status', 'voided')
+      .select('id').maybeSingle()
+    if (!voidClaim) return NextResponse.json({ error: 'Already voided' }, { status: 400 })
 
     // 1. Restore stock + FIFO cost layers for each item
     const voidDate = new Date().toISOString().slice(0, 10)
@@ -740,8 +774,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4. Reverse any auto-settlements that were applied FROM this sale to older invoices
-    const autoSettledPayments = payments.filter((p: any) => p.payment_method === 'settlement' && p.sale_id !== sale.id)
+    // 4. Reverse any auto-settlements that were applied FROM this sale to older invoices.
     // These live on the OLD sales, not this one — find them by notes referencing our invoice
     const { data: settlementPayments } = await admin
       .from('payments')
@@ -787,7 +820,7 @@ export async function POST(req: NextRequest) {
 
   // ─── RETURN ITEMS (partial or full) ───
   if (action === 'return_items') {
-    const { saleId, returnItems, refundMethod } = body
+    const { saleId, returnItems, refundMethod, return_reason: returnReason } = body
     // returnItems: [{ saleItemId, quantity }]
     // refundMethod: 'advance' | 'cash'
     if (!saleId || !returnItems || !Array.isArray(returnItems) || returnItems.length === 0)
@@ -805,28 +838,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'This is a tax invoice — process the return as a Credit Note instead' }, { status: 400 })
     }
 
-    let totalRefund = 0
+    // If the invoice had a discount, prorate it across returned lines — refunding
+    // raw unit prices would hand back more money than the customer actually paid.
+    const saleSubtotalForFactor = parseFloat(sale.subtotal || 0)
+    const discountFactor = saleSubtotalForFactor > 0 ? parseFloat(sale.total || 0) / saleSubtotalForFactor : 1
+
+    let totalRefund = 0      // money to refund (discount-prorated)
+    let totalRefundRaw = 0   // raw line value (for the subtotal reduction)
     const returnedDetails: string[] = []
 
     // 1. Process each return item
     for (const ri of returnItems) {
       const saleItem = (sale.items || []).find((si: any) => si.id === ri.saleItemId)
       if (!saleItem) continue
-      const returnQty = Math.min(ri.quantity, saleItem.quantity - (saleItem.returned_quantity || 0))
+      const prevReturned = saleItem.returned_quantity || 0
+      const returnQty = Math.min(ri.quantity, saleItem.quantity - prevReturned)
       if (returnQty <= 0) continue
 
-      const refundAmount = returnQty * parseFloat(saleItem.unit_price)
-      totalRefund += refundAmount
+      // Atomically claim the return BEFORE restoring stock — a concurrent
+      // duplicate request would otherwise restore stock twice. The conditional
+      // update only succeeds if returned_quantity is still what we read.
+      let claim = admin.from('sale_items')
+        .update({ returned_quantity: prevReturned + returnQty })
+        .eq('id', saleItem.id)
+      claim = saleItem.returned_quantity == null
+        ? claim.is('returned_quantity', null)
+        : claim.eq('returned_quantity', saleItem.returned_quantity)
+      const { data: claimedRows } = await claim.select('id')
+      if (!claimedRows || claimedRows.length === 0) continue
+
+      const rawValue = returnQty * parseFloat(saleItem.unit_price)
+      totalRefundRaw += rawValue
+      totalRefund += Math.round(rawValue * discountFactor)
 
       // Restore stock
       if (saleItem.product_id) {
         await adjustProductQuantity(admin, saleItem.product_id, vendor.id, returnQty)
       }
-
-      // Update sale item returned quantity
-      await admin.from('sale_items').update({
-        returned_quantity: (saleItem.returned_quantity || 0) + returnQty
-      }).eq('id', saleItem.id)
 
       // Restore FIFO cost layer for returned quantity
       if (saleItem.product_id && parseInt(saleItem.unit_cost || 0) > 0) {
@@ -847,11 +895,13 @@ export async function POST(req: NextRequest) {
     const currentPaid = parseFloat(sale.paid_amount || 0)
     const currentTotal = parseFloat(sale.total)
     const currentBalance = parseFloat(sale.balance_due || 0)
+    // Never refund more than the customer actually paid + owed (rounding guard)
+    totalRefund = Math.min(totalRefund, currentPaid + currentBalance)
     const newTotal = Math.max(0, currentTotal - totalRefund)
-    const newSubtotal = Math.max(0, parseFloat(sale.subtotal) - totalRefund)
+    const newSubtotal = Math.max(0, parseFloat(sale.subtotal) - totalRefundRaw)
     // Refund reduces balance first (credit), then paid_amount (cash already received)
     const balanceReduction = Math.min(totalRefund, currentBalance)
-    const paidReduction = totalRefund - balanceReduction
+    const paidReduction = Math.min(totalRefund - balanceReduction, currentPaid)
     const newBalanceDue = Math.max(0, currentBalance - balanceReduction)
     const newPaidAmount = Math.max(0, currentPaid - paidReduction)
 
@@ -866,7 +916,7 @@ export async function POST(req: NextRequest) {
       paid_amount: newPaidAmount,
       balance_due: newBalanceDue,
       payment_status: allReturned ? 'voided' : newBalanceDue > 0 ? 'partial' : 'paid',
-      notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund'),
+      notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund') + (returnReason ? ' | Reason: ' + String(returnReason).slice(0, 200) : ''),
       total: newTotal,
       subtotal: newSubtotal,
     }
@@ -920,6 +970,17 @@ export async function POST(req: NextRequest) {
   if (action === 'create_draft') {
     const { customerId, customerName, customerPhone, items, notes, vehicleNo } = body
     if (!items || items.length === 0) return NextResponse.json({ error: 'No items' }, { status: 400 })
+
+    // Same validation as create_sale — a negative quantity here would INCREASE
+    // stock at the deduction step below.
+    for (const item of items) {
+      const q = Number(item.quantity)
+      const p = Number(item.unitPrice ?? 0)
+      if (!Number.isFinite(q) || q < 1) return NextResponse.json({ error: `Invalid quantity for "${item.productName || 'item'}"` }, { status: 400 })
+      if (!Number.isFinite(p) || p < 0) return NextResponse.json({ error: `Invalid price for "${item.productName || 'item'}"` }, { status: 400 })
+      item.quantity = Math.round(q)
+      item.unitPrice = Math.round(p)
+    }
 
     let resolvedCustomerId = customerId || null
     if (!resolvedCustomerId && customerName?.trim()) {
@@ -1096,6 +1157,46 @@ export async function POST(req: NextRequest) {
     const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
     if (draft.payment_status !== 'draft') return NextResponse.json({ error: 'Not a draft' }, { status: 400 })
+
+    // Validate + normalise item inputs (same rules as create_sale)
+    for (const fi of (finalItems || [])) {
+      const q = Number(fi.quantity)
+      const p = Number(fi.unitPrice ?? 0)
+      if (!Number.isFinite(q) || q < 1) return NextResponse.json({ error: 'Invalid quantity on a line item' }, { status: 400 })
+      if (!Number.isFinite(p) || p < 0) return NextResponse.json({ error: 'Invalid price on a line item' }, { status: 400 })
+      fi.quantity = Math.round(q)
+      fi.unitPrice = Math.round(p)
+      if (!fi.id && !fi.productName) return NextResponse.json({ error: 'New line item is missing product details' }, { status: 400 })
+    }
+
+    // Reconcile the editable finalize cart against the stored draft:
+    //  - existing items whose quantity changed → update the row + adjust stock by the delta
+    //  - brand-new items (no sale_items id) → insert a row on the draft + deduct stock
+    // Without this, quantity edits and added items were charged in the total but
+    // never stored or stock-deducted.
+    for (const fi of (finalItems || [])) {
+      if (fi.id) {
+        const orig = (draft.items || []).find((di: any) => di.id === fi.id)
+        if (orig && orig.quantity !== fi.quantity) {
+          if (orig.product_id) {
+            // positive delta = more units leaving the shop
+            await adjustProductQuantity(admin, orig.product_id, vendor.id, -(fi.quantity - orig.quantity))
+          }
+          await admin.from('sale_items').update({ quantity: fi.quantity }).eq('id', fi.id).eq('sale_id', saleId)
+        }
+      } else {
+        const { data: newItem } = await admin.from('sale_items').insert({
+          sale_id: saleId, product_id: fi.productId || null,
+          product_name: fi.productName, product_sku: fi.productSku || null,
+          quantity: fi.quantity, unit_price: fi.unitPrice,
+          total: fi.quantity * fi.unitPrice,
+          sscl_stream: fi.ssclStream || (fi.productId ? 'PART' : 'SVC'),
+        }).select('id').single()
+        if (!newItem) return NextResponse.json({ error: 'Failed to add new line item' }, { status: 500 })
+        fi.id = newItem.id
+        if (fi.productId) await adjustProductQuantity(admin, fi.productId, vendor.id, -fi.quantity)
+      }
+    }
 
     // ── lk_tax: resolve entity + document type (same rules as create_sale) ──
     const finalizeInvoiceMode = await getInvoiceMode(vendor.id)
@@ -1274,6 +1375,18 @@ export async function POST(req: NextRequest) {
           amount: advanceUsed, payment_method: 'advance', notes: 'Used from advance balance',
         })
         await admin.from('customers').update({ advance_balance: Math.max(0, customerAdvance - advanceUsed) }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
+      }
+
+      // Overpayment must not vanish — credit any excess cash to the customer's advance
+      const partialExcess = Math.max(0, cashPaid - partialTotal)
+      if (partialExcess > 0 && resolvedCustomerId) {
+        const { data: custNow } = await admin.from('customers')
+          .select('advance_balance').eq('id', resolvedCustomerId).eq('vendor_id', vendor.id).single()
+        if (custNow) {
+          await admin.from('customers')
+            .update({ advance_balance: parseFloat(custNow.advance_balance || 0) + partialExcess })
+            .eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
+        }
       }
 
       // Update the original draft: remove confirmed items' prices, zero out totals
