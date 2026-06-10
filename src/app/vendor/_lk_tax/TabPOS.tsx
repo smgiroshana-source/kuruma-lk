@@ -623,7 +623,8 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
             saleId: posDraftId,
             customerId: posCustomer.id || null,
             useAdvance,
-            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity })),
+            // productId/Name/Sku let the API insert rows for items added during finalize
+            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity, productId: i.productId || null, productName: i.productName, productSku: i.productSku || null, ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC') })),
             payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
             discount: posDiscountAmt,
             vehicleNo: posVehicleNo || null,
