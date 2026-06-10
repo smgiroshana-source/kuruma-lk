@@ -3,13 +3,15 @@
 // Shows the gazette CRN register (Tax Credit Notes) + Customer Credit sub-tabs.
 import { useState, useEffect, useCallback } from 'react'
 import TabCredit, { CommonTabProps } from '../_shared/TabCredit'
+import { colomboToday } from '@/lib/dates'
+import { escapeHtml } from '@/lib/escapeHtml'
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-function monthStart() { return new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10) }
-function today()      { return new Date().toISOString().slice(0, 10) }
+function monthStart() { return colomboToday().slice(0, 7) + '-01' }
+function today()      { return colomboToday() }
 
 export default function TabCreditNotes({ vendor, products, vendorSettings, showToast, onDataChanged }: CommonTabProps) {
   const [subTab, setSubTab] = useState<'crn' | 'customer'>('crn')
@@ -36,15 +38,15 @@ export default function TabCreditNotes({ vendor, products, vendorSettings, showT
 
   useEffect(() => { if (subTab === 'crn') fetchCrn() }, [subTab, fetchCrn])
 
-  const totalVat   = crnData.reduce((s, cn) => s + (cn.vat_amount  || 0), 0)
-  const totalNet   = crnData.reduce((s, cn) => s + (cn.net_amount  || 0), 0)
-  const totalCredit = crnData.reduce((s, cn) => s + (cn.total      || 0), 0)
+  const totalVat   = crnData.reduce((s, cn) => s + (Number(cn.vat_amount)  || 0), 0)
+  const totalNet   = crnData.reduce((s, cn) => s + (Number(cn.net_amount)  || 0), 0)
+  const totalCredit = crnData.reduce((s, cn) => s + (Number(cn.total)      || 0), 0)
 
   function printCreditNote(cn: any) {
     const entityInfo = entities.find((e: any) => e.id === cn.invoice_entity_id)
     const itemRows = (cn.items || []).map((i: any) =>
       `<tr>
-        <td style="padding:7px 8px;border-bottom:1px solid #f0f0f0">${i.product_name}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f0f0f0">${escapeHtml(i.product_name)}</td>
         <td style="padding:7px 8px;text-align:center;border-bottom:1px solid #f0f0f0">${i.quantity}</td>
         <td style="padding:7px 8px;text-align:right;border-bottom:1px solid #f0f0f0">Rs.${parseInt(i.unit_price).toLocaleString()}</td>
         <td style="padding:7px 8px;text-align:right;font-weight:700;border-bottom:1px solid #f0f0f0">Rs.${parseInt(i.total).toLocaleString()}</td>
@@ -52,8 +54,12 @@ export default function TabCreditNotes({ vendor, products, vendorSettings, showT
     const total    = parseInt(cn.total     || 0)
     const vatAmt   = parseInt(cn.vat_amount || 0)
     const netAmt   = parseInt(cn.net_amount || 0)
+    // Historical rate derived from the stored amounts — never the current config
+    const vatRate  = netAmt > 0 ? Math.round(vatAmt / netAmt * 100) : 18
+    const origDateIso = cn.original_sale?.date_supply || cn.original_sale?.created_at
+    const origDate = origDateIso ? new Date(origDateIso).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : ''
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>Credit Note ${cn.credit_note_no}</title>
+<title>Credit Note ${escapeHtml(cn.credit_note_no)}</title>
 <style>
 @page{size:A4 portrait;margin:0}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -84,23 +90,23 @@ th{padding:7px 8px;text-align:left;font-size:9px;font-weight:700;text-transform:
 <div class="subtitle">This is not a Tax Invoice</div>
 
 <div class="ref-box">
-  <strong>Against Tax Invoice:</strong> ${cn.original_serial}
+  <strong>Against Tax Invoice:</strong> ${escapeHtml(cn.original_serial)}${origDate ? ` &nbsp;dated&nbsp; <strong>${origDate}</strong>` : ''}
   &nbsp;&nbsp;|&nbsp;&nbsp;
-  <strong>Reason:</strong> ${cn.reason === 'goods_returned' ? 'Goods Returned' : cn.reason || 'Goods Returned'}
+  <strong>Reason:</strong> ${cn.reason === 'goods_returned' ? 'Goods Returned' : escapeHtml(cn.reason) || 'Goods Returned'}
 </div>
 
 <div class="parties">
   <div class="party-box">
     <div class="party-label">Supplier</div>
-    <div style="font-weight:700;font-size:12px">${entityInfo?.name || 'MacForce Auto Engineering (Pvt) Ltd'}</div>
-    <div style="font-size:10px;color:#444;margin-top:2px">${entityInfo?.address || ''}</div>
-    <div style="font-size:10px;font-weight:700;margin-top:2px">TIN: ${entityInfo?.tin || ''}</div>
+    <div style="font-weight:700;font-size:12px">${escapeHtml(entityInfo?.name) || 'MacForce Auto Engineering (Pvt) Ltd'}</div>
+    <div style="font-size:10px;color:#444;margin-top:2px">${escapeHtml(entityInfo?.address)}</div>
+    <div style="font-size:10px;font-weight:700;margin-top:2px">TIN: ${escapeHtml(entityInfo?.tin)}</div>
   </div>
   <div class="party-box">
     <div class="party-label">Purchaser</div>
-    <div style="font-weight:700;font-size:12px">${cn.customer_name || '—'}</div>
-    ${cn.customer_address ? `<div style="font-size:10px;color:#444;margin-top:2px">${cn.customer_address}</div>` : ''}
-    ${cn.customer_tin    ? `<div style="font-size:10px;font-weight:700;margin-top:2px">TIN: ${cn.customer_tin}</div>` : ''}
+    <div style="font-weight:700;font-size:12px">${escapeHtml(cn.customer_name) || '—'}</div>
+    ${cn.customer_address ? `<div style="font-size:10px;color:#444;margin-top:2px">${escapeHtml(cn.customer_address)}</div>` : ''}
+    ${cn.customer_tin    ? `<div style="font-size:10px;font-weight:700;margin-top:2px">TIN: ${escapeHtml(cn.customer_tin)}</div>` : ''}
   </div>
 </div>
 
@@ -121,12 +127,12 @@ th{padding:7px 8px;text-align:left;font-size:9px;font-weight:700;text-transform:
 
 <table class="ttbl">
   <tr><td>Net Amount (excl. VAT)</td><td class="tval">Rs.${netAmt.toLocaleString()}</td></tr>
-  <tr><td>VAT @ 18%</td><td class="tval">Rs.${vatAmt.toLocaleString()}</td></tr>
+  <tr><td>VAT @ ${vatRate}%</td><td class="tval">Rs.${vatAmt.toLocaleString()}</td></tr>
   <tr><td>Total Credit (Rs.)</td><td class="tval">Rs.${total.toLocaleString()}</td></tr>
 </table>
 
 <div class="footer">
-  ${entityInfo?.name || 'MacForce Auto Engineering (Pvt) Ltd'} · TIN: ${entityInfo?.tin || ''}<br/>
+  ${escapeHtml(entityInfo?.name) || 'MacForce Auto Engineering (Pvt) Ltd'} · TIN: ${escapeHtml(entityInfo?.tin)}<br/>
   This credit note reduces output VAT and SSCL turnover in the period of issue (not the original invoice period).<br/>
   Generated ${new Date().toLocaleString('en-LK')} · Retain for 5 years
 </div>

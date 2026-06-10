@@ -1,4 +1,5 @@
 'use client'
+import { colomboToday } from '@/lib/dates'
 import { useState, useEffect } from 'react'
 
 type Props = {
@@ -11,7 +12,7 @@ function formatRs(amount: number): string {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  return colomboToday()
 }
 
 function addDays(dateStr: string, days: number): string {
@@ -151,6 +152,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
   async function handleAddInvoice() {
     if (!newInvoice.invoice_no.trim()) { showToast('Invoice number is required'); return }
     if (!newInvoice.amount || Number(newInvoice.amount) <= 0) { showToast('Amount must be > 0'); return }
+    if (!newInvoice.due_date) { showToast('Due date is required'); return }
     setSaving(true)
     try {
       const res = await fetch('/api/vendor/supplier-invoices', {
@@ -169,6 +171,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       setShowAddInvoice(false)
       setNewInvoice({ ...BLANK_INVOICE })
       await fetchInvoices(selectedSupplier.id)
+      await fetchSuppliers()
     } catch (e: any) {
       showToast(e.message)
     } finally {
@@ -201,6 +204,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       setShowRecordPayment(null)
       setNewPayment({ ...BLANK_PAYMENT })
       await fetchInvoices(selectedSupplier.id)
+      await fetchSuppliers()
     } catch (e: any) {
       showToast(e.message)
     } finally {
@@ -219,6 +223,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? 'Failed to delete invoice') }
       showToast('Invoice deleted')
       await fetchInvoices(selectedSupplier.id)
+      await fetchSuppliers()
     } catch (e: any) {
       showToast(e.message)
     }

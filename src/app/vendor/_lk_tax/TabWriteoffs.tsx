@@ -1,4 +1,5 @@
 'use client'
+import { colomboToday } from '@/lib/dates'
 import { useState, useEffect, useRef } from 'react'
 
 type Props = {
@@ -51,7 +52,7 @@ function formatRs(amount: number): string {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  return colomboToday()
 }
 
 function statusBadge(status: 'draft' | 'posted') {
@@ -220,8 +221,14 @@ export default function TabWriteoffs({ vendor, showToast }: Props) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'post', vendor_id: vendor.id, writeoffId: created.writeoff.id }),
         })
-        if (!postRes.ok) { const d = await postRes.json(); throw new Error(d.error ?? 'Created but failed to post') }
-        showToast(`Write-off ${created.writeoff.writeoff_no} posted`)
+        if (!postRes.ok) {
+          // The draft DOES exist on the server — reset the form anyway so a
+          // retry doesn't create a duplicate write-off; user can post from the list.
+          const d = await postRes.json().catch(() => ({}))
+          showToast(`⚠️ ${created.writeoff.writeoff_no} saved as draft but posting failed: ${d.error ?? 'unknown error'} — post it from the list`)
+        } else {
+          showToast(`Write-off ${created.writeoff.writeoff_no} posted`)
+        }
       } else {
         showToast(`Write-off ${created.writeoff.writeoff_no} saved as draft`)
       }

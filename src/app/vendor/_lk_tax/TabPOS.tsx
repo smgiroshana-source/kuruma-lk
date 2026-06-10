@@ -1,5 +1,7 @@
 'use client'
 import { toWhatsAppNumber } from '@/lib/constants'
+import { colomboToday } from '@/lib/dates'
+import { escapeHtml } from '@/lib/escapeHtml'
 import { useState, useEffect, useMemo } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
@@ -52,24 +54,24 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const vatAmount    = parseInt(sale.vat_amount) || Math.round(total * vatRate / (100 + vatRate))
   const netAmount    = parseInt(sale.net_amount) || (total - vatAmount)
   const discount     = parseFloat(sale.discount || 0)
-  const serial       = sale.tax_serial || sale.invoice_no || ''
+  const serial       = escapeHtml(sale.tax_serial || sale.invoice_no || '')
   const invoiceDate  = fmtDate(sale.created_at)
   const supplyDate   = fmtDate(sale.date_supply || sale.created_at)
   const totalWords   = numberToWords(total) + ' Rupees Only'
   const supplierName    = 'MacForce Auto Engineering (Pvt) Ltd'
-  const supplierAddress = s.supplier_address || 'No. 351/T, Pannipitiya Road, Thalawathugoda'
-  const supplierTin     = s.supplier_tin     || '101969738'
-  const purchaserName    = sale.customer_name    || ''
-  const purchaserAddress = sale.customer_address || ''
-  const purchaserTin     = sale.customer_tin     || ''
-  const purchaserPhone   = sale.customer_phone   || ''
+  const supplierAddress = escapeHtml(s.supplier_address) || 'No. 351/T, Pannipitiya Road, Thalawathugoda'
+  const supplierTin     = escapeHtml(s.supplier_tin)     || '101969738'
+  const purchaserName    = escapeHtml(sale.customer_name)
+  const purchaserAddress = escapeHtml(sale.customer_address)
+  const purchaserTin     = escapeHtml(sale.customer_tin)
+  const purchaserPhone   = escapeHtml(sale.customer_phone)
   const logoHtml = (s.logo_url && s.invoice_show_logo !== false)
-    ? `<img src="${s.logo_url}" style="height:52px;max-width:120px;object-fit:contain;display:block;margin-bottom:4px">`
+    ? `<img src="${escapeHtml(s.logo_url)}" style="height:52px;max-width:120px;object-fit:contain;display:block;margin-bottom:4px">`
     : ''
   const lineRows = items.map((i: any, idx: number) => `
     <tr>
       <td class="c-no">${idx + 1}</td>
-      <td class="c-desc">${i.product_name}</td>
+      <td class="c-desc">${escapeHtml(i.product_name)}</td>
       <td class="c-qty">${i.quantity}</td>
       <td class="c-price">${parseFloat(i.unit_price).toLocaleString()}</td>
       <td class="c-amt">${parseFloat(i.total).toLocaleString()}</td>
@@ -78,7 +80,7 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
     const pmts = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
     if (!pmts.length) return ''
     const lines = pmts.map((p: any) =>
-      `<span style="margin-right:16px"><strong>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</strong>: Rs.&nbsp;${parseFloat(p.amount).toLocaleString()}</span>`
+      `<span style="margin-right:16px"><strong>${escapeHtml((p.payment_method || 'cash').toUpperCase())}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</strong>: Rs.&nbsp;${parseFloat(p.amount).toLocaleString()}</span>`
     ).join('')
     return `<div class="pmt"><div class="pmt-lbl">Payment Method</div><div class="pmt-val">${lines}</div></div>`
   })()
@@ -254,7 +256,7 @@ ${paymentHtml}
   <div class="sig"><div class="sig-line">Authorised Signatory</div></div>
 </div>
 
-<div class="footer">${s.invoice_footer || 'Thank you for your business!'}</div>
+<div class="footer">${escapeHtml(s.invoice_footer) || 'Thank you for your business!'}</div>
 
 </body></html>`
   const win = window.open('', '_blank', 'width=960,height=1100')
@@ -272,22 +274,22 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
   const payments = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
   const isThermal = format === 'thermal'
   const s = settings || {}
-  const shopName = s.invoice_title || vendor?.name || 'kuruma.lk'
-  const logoHtml = (s.logo_url && s.invoice_show_logo !== false && !isThermal) ? `<img src="${s.logo_url}" style="height:60px;max-width:120px;object-fit:contain;margin-bottom:4px" />` : ''
-  const thermalLogoHtml = (s.logo_url && s.invoice_show_logo !== false && isThermal) ? `<img src="${s.logo_url}" style="height:30px;max-width:60px;object-fit:contain;margin-bottom:2px" />` : ''
-  const footerText = s.invoice_footer || 'Thank you for your business!'
-  const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${s.invoice_terms.replace(/\n/g, '<br/>')}</div>` : ''
-  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
+  const shopName = escapeHtml(s.invoice_title || vendor?.name) || 'kuruma.lk'
+  const logoHtml = (s.logo_url && s.invoice_show_logo !== false && !isThermal) ? `<img src="${escapeHtml(s.logo_url)}" style="height:60px;max-width:120px;object-fit:contain;margin-bottom:4px" />` : ''
+  const thermalLogoHtml = (s.logo_url && s.invoice_show_logo !== false && isThermal) ? `<img src="${escapeHtml(s.logo_url)}" style="height:30px;max-width:60px;object-fit:contain;margin-bottom:2px" />` : ''
+  const footerText = escapeHtml(s.invoice_footer) || 'Thank you for your business!'
+  const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${escapeHtml(s.invoice_terms).replace(/\n/g, '<br/>')}</div>` : ''
+  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${escapeHtml((p.payment_method || 'cash').toUpperCase())}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
   const a4Style = `@page{size:A4;margin:15mm 18mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:13px;color:#222;font-weight:400;max-width:720px;margin:0 auto;padding:25px 30px}@media print{body{padding:0;max-width:100%}}.header{text-align:center;padding:20px 0 15px;margin-bottom:0}.shop-name{font-size:24px;font-weight:700;color:#000;letter-spacing:-0.5px}.header-sub{font-size:11px;color:#444;margin-top:2px;line-height:1.6}.invoice-title{display:flex;justify-content:space-between;align-items:center;padding:10px 0;margin-top:15px;border-top:2px solid #000;border-bottom:1px solid #aaa}.invoice-title h2{font-size:18px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:2px}.invoice-no{font-size:18px;font-weight:700;color:#000;font-family:'Courier New',monospace}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:12px 0}.info-cell{padding:8px 0;font-size:12px;border-bottom:1px solid #ccc}.info-cell:nth-child(even){text-align:right}.info-label{color:#555;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:2px}.info-value{font-weight:600;color:#000;font-size:13px}table{width:100%;border-collapse:collapse;margin:15px 0}thead{background:#eee}th{text-align:left;font-size:10px;font-weight:700;padding:8px 10px;color:#222;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #aaa}td{padding:10px;font-size:13px;font-weight:500;color:#111;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{margin-top:10px;border-top:1px solid #aaa;padding-top:5px}.total-row{display:flex;justify-content:space-between;padding:4px 10px;font-size:13px;font-weight:600;color:#222}.grand-total{display:flex;justify-content:space-between;font-weight:800;font-size:20px;color:#000;padding:12px 10px;margin-top:5px;background:#eee;border-radius:4px}.balance-due{font-weight:700;font-size:16px;text-align:right;margin-top:15px;padding:12px 15px;border:2px solid #000;color:#000;border-radius:4px}.payments-section{margin-top:10px;padding:8px 10px;background:#f0f0f0;border-radius:4px}.payments-label{font-size:9px;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}.note-section{margin-top:10px;padding:8px 12px;font-size:12px;font-style:italic;color:#333;border-left:3px solid #999}.footer{text-align:center;padding:25px 0 10px;font-size:10px;color:#888;margin-top:30px;border-top:1px solid #ccc}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}thead{background:#eee !important}.grand-total{background:#eee !important}}`
   const thermalStyle = `@page{size:80mm auto;margin:2mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Courier New',monospace;font-size:12px;color:#000;width:300px;max-width:100%;margin:0 auto}.header{text-align:center;padding:5px 0;border-bottom:1px dashed #000}.shop-name{font-size:16px;font-weight:900}table{width:100%;border-collapse:collapse;margin:5px 0}th{text-align:left;font-size:10px;font-weight:900;padding:3px 2px;border-bottom:1px dashed #000}td{padding:3px 2px;font-size:11px;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{border-top:1px dashed #000;padding-top:5px}.total-row{display:flex;justify-content:space-between;padding:2px 0;font-size:12px;font-weight:700}.grand-total{font-weight:900;font-size:16px;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:5px 0;margin-top:5px}.footer{text-align:center;padding:8px 0 5px;font-size:10px;border-top:1px dashed #000;margin-top:5px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${sale.invoice_no}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${escapeHtml(sale.invoice_no)}</title>
 <style>${isThermal ? thermalStyle : a4Style}</style></head><body>
-<div class="header">${isThermal ? thermalLogoHtml : logoHtml}<div class="shop-name">${shopName}</div><div class="header-sub">${[vendor?.location, vendor?.address].filter(Boolean).join(', ')}${vendor?.phone ? `<br/>Tel: ${vendor.phone}${vendor?.whatsapp && vendor.whatsapp !== vendor.phone ? ' | WhatsApp: ' + vendor.whatsapp : ''}` : ''}${s.tax_id ? `<br/>Tax/VAT: ${s.tax_id}` : ''}${s.email ? `<br/>${s.email}` : ''}</div></div>
-${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${sale.invoice_no}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${sale.customer_name}${sale.customer_phone ? ' (' + sale.customer_phone + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${sale.vehicle_no}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${sale.invoice_no}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${sale.vehicle_no || '—'}</span></div><div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${sale.customer_name}${sale.customer_phone ? ' (' + sale.customer_phone + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
-<table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? i.product_sku + ' - ' : ''}${i.product_name}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
+<div class="header">${isThermal ? thermalLogoHtml : logoHtml}<div class="shop-name">${shopName}</div><div class="header-sub">${escapeHtml([vendor?.location, vendor?.address].filter(Boolean).join(', '))}${vendor?.phone ? `<br/>Tel: ${escapeHtml(vendor.phone)}${vendor?.whatsapp && vendor.whatsapp !== vendor.phone ? ' | WhatsApp: ' + escapeHtml(vendor.whatsapp) : ''}` : ''}${s.tax_id ? `<br/>Tax/VAT: ${escapeHtml(s.tax_id)}` : ''}${s.email ? `<br/>${escapeHtml(s.email)}` : ''}</div></div>
+${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${escapeHtml(sale.invoice_no)}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${escapeHtml(sale.vehicle_no)}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${escapeHtml(sale.invoice_no)}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${escapeHtml(sale.vehicle_no) || '—'}</span></div><div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
+<table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? escapeHtml(i.product_sku) + ' - ' : ''}${escapeHtml(i.product_name)}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? (isThermal ? `<div style="margin-top:6px"><div style="font-size:10px;font-weight:600;margin-bottom:3px">Payments</div>${paymentLines}</div>` : `<div class="payments-section"><div class="payments-label">Payments</div>${paymentLines}</div>`) : ''}
-${cleanPrintNotes(sale.notes) ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${cleanPrintNotes(sale.notes)}</div>` : `<div class="note-section">Note: ${cleanPrintNotes(sale.notes)}</div>`) : ''}
+${cleanPrintNotes(sale.notes) ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${escapeHtml(cleanPrintNotes(sale.notes))}</div>` : `<div class="note-section">Note: ${escapeHtml(cleanPrintNotes(sale.notes))}</div>`) : ''}
 ${(() => {
   const totalDue = parseFloat(sale.total_amount_due || sale.totalAmountDue || 0)
   const currentInvoiceDue = parseFloat(sale.balance_due || 0)
@@ -354,7 +356,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const [posDiscount, setPosDiscount] = useState('')
   const [posPayments, setPosPayments] = useState<any[]>([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
   const [posNotes, setPosNotes] = useState('')
-  const [posDate, setPosDate] = useState(new Date().toISOString().split('T')[0])
+  const [posDate, setPosDate] = useState(colomboToday())
   const [posVehicleNo, setPosVehicleNo] = useState('')
   const [posLoading, setPosLoading] = useState(false)
   const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean; vehicle?: boolean; address?: boolean; tin?: boolean }>({})
@@ -400,7 +402,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     setPosDraftInvoiceNo(pendingDraft.draftInvoiceNo)
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
     setPosDiscount(''); setPosNotes(''); setPosPreview(false)
-    setPosDate(new Date().toISOString().split('T')[0])
+    setPosDate(colomboToday())
     onDraftLoaded?.()
   }, [pendingDraft])
 
@@ -432,7 +434,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   }
 
   async function sendEODReport() {
-    const today = new Date().toISOString().slice(0, 10)
+    const today = colomboToday()
     showToast('Fetching today\'s sales...')
     try {
       const r = await fetch(`/api/vendor/sales?from=${today}&to=${today}`)
@@ -512,7 +514,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     })
     setPosSearch('')
   }
-  function updateCartQty(i: number, q: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, quantity: Math.max(1, Math.min(q, item.maxStock)) } : item)) }
+  function updateCartQty(i: number, q: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, quantity: Math.max(1, item.maxStock == null ? q : Math.min(q, item.maxStock)) } : item)) }
   function updateCartPrice(i: number, price: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, unitPrice: price } : item)) }
   function removeFromCart(i: number) { setPosCart(p => p.filter((_, x) => x !== i)) }
 
@@ -537,7 +539,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ── Computed totals ────────────────────────────────────────────────────
   const { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment } = useMemo(() => {
     const posSubtotal = posCart.reduce((s, i) => s + i.quantity * i.unitPrice, 0)
-    const posDiscountAmt = parseFloat(posDiscount) || 0
+    const posDiscountAmt = Math.min(posSubtotal, Math.max(0, Math.round(parseFloat(posDiscount) || 0)))
     const posTotal = Math.max(0, posSubtotal - posDiscountAmt)
     const posPaidAmount = posPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
     const posAdvanceApplied = useAdvance && posCustomer.advance > 0 ? Math.min(posCustomer.advance, Math.max(0, posTotal - posPaidAmount)) : 0
@@ -547,7 +549,8 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     return { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment }
   }, [posCart, posDiscount, posPayments, useAdvance, posCustomer])
 
-  const posVatAmount = posIsVatEntity ? Math.round(posTotal * 18 / 118) : 0
+  const posVatRate = Number(vendorSettings?.vat_rate) || 18
+  const posVatAmount = posIsVatEntity ? Math.round(posTotal * posVatRate / (100 + posVatRate)) : 0
   const posNetAmount = posIsVatEntity ? posTotal - posVatAmount : posTotal
 
   // ── Parse tyre size from a search string ─────────────────────────────
@@ -593,10 +596,14 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     if (posCustomer.require_vehicle_no && !posVehicleNo.trim()) errors.vehicle = true
     // Address is optional for walk-in customers (gazette allows blank for unregistered purchasers)
     // TIN is required only if purchaser is VAT-registered
-    if (isLkTax && posDocType === 'tax_invoice' && posCustomerVatReg && !posCustomerTin.trim()) errors.tin = true
-    if (errors.name || errors.phone || errors.vehicle || errors.tin) {
+    if (isLkTax && posDocType === 'tax_invoice' && posCustomerVatReg) {
+      if (posCustomerTin.trim().length !== 9) errors.tin = true
+      if (!posCustomerAddress.trim()) errors.address = true
+    }
+    if (errors.name || errors.phone || errors.vehicle || errors.tin || errors.address) {
       setPosErrors(errors)
-      if (errors.tin) showToast('⚠️ Customer TIN required (VAT-registered purchaser)')
+      if (errors.tin) showToast('⚠️ 9-digit customer TIN required (VAT-registered purchaser)')
+      if (errors.address) showToast('⚠️ Customer address required (VAT-registered purchaser)')
       if (errors.vehicle) showToast('⚠️ Vehicle number required for this customer')
       setTimeout(() => setPosErrors({}), 4000)
       return
@@ -606,6 +613,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   }
 
   async function confirmCreateSale() {
+    if (posLoading) return
     setPosLoading(true)
     try {
       const action = posDraftId ? 'finalize_draft' : 'create_sale'
@@ -623,6 +631,13 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
             saleDate: posDate,
             customerName: posCustomer.name,
             customerPhone: posCustomer.phone,
+            ...(isLkTax && posEntityId ? {
+              invoiceEntityId: posEntityId,
+              documentType: posDocType,
+              customerAddress: posCustomerAddress.trim() || null,
+              customerVatRegistered: posCustomerVatReg,
+              customerTin: posCustomerVatReg ? posCustomerTin.trim() || null : null,
+            } : {}),
           }
         : {
             action,
@@ -653,7 +668,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
         showToast(j.message)
         setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-        setPosNotes(''); setPosDate(new Date().toISOString().split('T')[0]); setPosVehicleNo(''); setUseAdvance(false)
+        setPosNotes(''); setPosDate(colomboToday()); setPosVehicleNo(''); setUseAdvance(false)
         setPosDraftId(null); setPosDraftInvoiceNo('')
         setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
         setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' })
@@ -666,6 +681,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   }
 
   async function handleCreateDraft() {
+    if (posLoading) return
     if (posCart.length === 0) { showToast('Add items to cart'); return }
     if (!posCustomer.name.trim()) { setPosErrors(prev => ({ ...prev, name: true })); return }
     setPosLoading(true)
@@ -773,7 +789,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               {posReceipt.newAdvance > 0 && <p className="text-sm font-bold text-emerald-600 mt-1">Rs.{posReceipt.newAdvance.toLocaleString()} added to advance</p>}
             </div>
             <div className="flex gap-2 flex-wrap justify-center">
-              <button onClick={() => printInvoice(posReceipt.sale, posReceipt.vendor, 'thermal', vendorSettings)} className="bg-slate-800 text-white text-sm font-bold px-5 py-2.5 rounded-xl">🖨️ Thermal</button>
+              {posReceipt.sale.document_type !== 'tax_invoice' && <button onClick={() => printInvoice(posReceipt.sale, posReceipt.vendor, 'thermal', vendorSettings)} className="bg-slate-800 text-white text-sm font-bold px-5 py-2.5 rounded-xl">🖨️ Thermal</button>}
               <button onClick={() => printInvoice(posReceipt.sale, posReceipt.vendor, 'a4', vendorSettings)} className="bg-blue-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl">📄 A4</button>
               {posReceipt.sale.customer_phone && <button onClick={() => sendWhatsAppBill(posReceipt.sale, posReceipt.vendor, posReceipt.sale.customer_phone)} className="bg-green-500 text-white text-sm font-bold px-5 py-2.5 rounded-xl">💬 WhatsApp</button>}
               {vendor?.whatsapp && <button onClick={sendEODReport} className="bg-purple-600 text-white text-sm font-bold px-5 py-2.5 rounded-xl">📊 End of Day → Manager</button>}
@@ -932,7 +948,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 {posIsVatEntity && posTotal > 0 && (
                   <div className="mb-2 pb-2 border-b border-slate-600 space-y-0.5">
                     <div className="flex justify-between text-sm"><span className="text-slate-300">NET (excl. VAT)</span><span>Rs.{posNetAmount.toLocaleString()}</span></div>
-                    <div className="flex justify-between text-sm"><span className="text-slate-300">VAT 18%</span><span>Rs.{posVatAmount.toLocaleString()}</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-slate-300">VAT {posVatRate}%</span><span>Rs.{posVatAmount.toLocaleString()}</span></div>
                   </div>
                 )}
                 <div className="flex justify-between text-2xl font-black"><span>TOTAL</span><span>Rs.{posTotal.toLocaleString()}</span></div>
@@ -980,7 +996,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 {isLkTax && posDocType === 'tax_invoice' && (
                   <div className="space-y-1.5 pt-1 border-t border-slate-100 mt-1">
                     <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest">Purchaser Details <span className="font-normal text-slate-400 normal-case">(for tax invoice)</span></p>
-                    <input value={posCustomerAddress} onChange={e => setPosCustomerAddress(e.target.value)} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 focus:border-orange-400 text-sm outline-none" placeholder="Address (optional for walk-in)" />
+                    <input value={posCustomerAddress} onChange={e => { setPosCustomerAddress(e.target.value); if (posErrors.address) setPosErrors(prev => ({ ...prev, address: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none ${posErrors.address ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`} placeholder={posCustomerVatReg ? 'Address (required) *' : 'Address (optional for walk-in)'} />
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={posCustomerVatReg} onChange={e => { setPosCustomerVatReg(e.target.checked); if (!e.target.checked) setPosCustomerTin('') }} className="w-4 h-4 accent-orange-500" />
                       <span className="text-xs font-bold text-slate-600">VAT-Registered Purchaser</span>
@@ -1028,7 +1044,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                       <select value={line.method} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], method: e.target.value }; setPosPayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs font-bold outline-none flex-shrink-0">
                         {PAY_METHODS.map(m => <option key={m} value={m}>{PAY_LABELS[m]}</option>)}
                       </select>
-                      <input type="text" inputMode="numeric" pattern="[0-9]*" value={line.amount} onChange={e => { const val = e.target.value.replace(/[^0-9.]/g, ''); const u = [...posPayments]; u[i] = { ...u[i], amount: val }; setPosPayments(u) }} className="flex-1 sm:w-28 sm:flex-none min-w-0 px-2 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Amount" />
+                      <input type="text" inputMode="numeric" pattern="[0-9]*" value={line.amount} onChange={e => { const val = e.target.value.replace(/[^0-9]/g, ''); const u = [...posPayments]; u[i] = { ...u[i], amount: val }; setPosPayments(u) }} className="flex-1 sm:w-28 sm:flex-none min-w-0 px-2 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Amount" />
                       {line.method === 'cheque' && (<>
                         <input type="text" value={line.chequeNumber} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeNumber: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Cheque #" />
                         <input type="date" value={line.chequeDate} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeDate: e.target.value }; setPosPayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
@@ -1042,7 +1058,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                     {posTotal - posPaidAmount > 0 && <button onClick={() => { const u = [...posPayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(posTotal - posPaidAmount) }; setPosPayments(u) }} className="text-xs font-bold text-orange-600">Fill remaining (Rs.{(posTotal - posPaidAmount).toLocaleString()})</button>}
                   </div>
                 </div>
-                <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9.]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
+                <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
               </div>
             </div>
           </div>

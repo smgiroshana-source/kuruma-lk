@@ -44,16 +44,14 @@ const NAV_SECTIONS: NavSection[] = [
       { id: 'products',   icon: '📦', label: 'Products' },
       { id: 'add',        icon: '➕', label: 'Add Product' },
       { id: 'bulk',       icon: '📤', label: 'Bulk Upload' },
-      { id: 'stocktake',  icon: '📥', label: 'Receive Stock (GRN)' },
-      { id: 'stocktake',  icon: '🔀', label: 'Transfer Stock' },
+      { id: 'stocktake',  icon: '📥', label: 'Stock / GRN / Transfer' },
       { id: 'writeoffs',  icon: '✏️', label: 'Write-offs' },
     ],
   },
   {
     label: 'SUPPLIERS',
     items: [
-      { id: 'suppliers', icon: '🏭', label: 'Suppliers' },
-      { id: 'suppliers', icon: '💰', label: 'Payables & Payments' },
+      { id: 'suppliers', icon: '🏭', label: 'Suppliers & Payables' },
       { id: 'supplier-returns', icon: '↩️', label: 'Supplier Returns' },
     ],
   },
@@ -61,15 +59,13 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'CUSTOMERS',
     items: [
       { id: '_coming', icon: '👥', label: 'Customers',       comingSoon: true },
-      { id: 'fleet',   icon: '🚗', label: 'Vehicle History' },
-      { id: 'fleet',   icon: '🏢', label: 'Fleet Accounts' },
+      { id: 'fleet',   icon: '🚗', label: 'Fleet & Vehicles' },
     ],
   },
   {
     label: 'FINANCE',
     items: [
-      { id: 'cash',    icon: '💵', label: 'Cash Reconciliation' },
-      { id: 'cash',    icon: '🧾', label: 'Expenses' },
+      { id: 'cash',    icon: '💵', label: 'Cash & Expenses' },
       { id: 'reports',  icon: '📊', label: 'Reports' },
     ],
   },

@@ -1,4 +1,5 @@
 'use client'
+import { colomboToday } from '@/lib/dates'
 import { useState, useEffect } from 'react'
 
 type Props = {
@@ -57,7 +58,7 @@ function formatRs(n: number): string {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  return colomboToday()
 }
 
 function formatDate(dateStr: string): string {
@@ -404,7 +405,12 @@ export default function TabCash({ vendor, showToast }: Props) {
           amount: Math.round(Number(expForm.amount)),
           payment_method: expForm.payment_method,
           reference: expForm.reference.trim() || null,
-          cash_session_id: null,
+          // A cash expense dated today belongs in the open till session so the
+          // expected-cash count reconciles; non-cash / back-dated stay unlinked.
+          cash_session_id:
+            expForm.payment_method === 'cash' && expForm.expense_date === todayStr() && todaySession?.status === 'open'
+              ? todaySession.id
+              : null,
         }),
       })
       if (!res.ok) {
@@ -415,6 +421,8 @@ export default function TabCash({ vendor, showToast }: Props) {
       setShowAddExpModal(false)
       setExpForm(blankExpenseForm())
       await fetchExpenses()
+      await fetchTodayExpenses()
+      await fetchTodaySession()
     } catch (e: any) {
       showToast(e.message)
     } finally {

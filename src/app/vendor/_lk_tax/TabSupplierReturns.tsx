@@ -1,4 +1,5 @@
 'use client'
+import { colomboToday } from '@/lib/dates'
 import { useState, useEffect, useRef } from 'react'
 
 type Props = {
@@ -50,7 +51,7 @@ function formatRs(amount: number): string {
 }
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  return colomboToday()
 }
 
 function statusBadge(status: 'draft' | 'confirmed') {
@@ -228,8 +229,14 @@ export default function TabSupplierReturns({ vendor, showToast }: Props) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'confirm', vendor_id: vendor.id, returnId: created.return.id }),
         })
-        if (!confRes.ok) { const d = await confRes.json(); throw new Error(d.error ?? 'Created but failed to confirm') }
-        showToast(`Return ${created.return.return_no} confirmed`)
+        if (!confRes.ok) {
+          // The draft DOES exist on the server — reset the form anyway so a
+          // retry doesn't create a duplicate return; user can confirm from the list.
+          const d = await confRes.json().catch(() => ({}))
+          showToast(`⚠️ ${created.return.return_no} saved as draft but confirm failed: ${d.error ?? 'unknown error'} — confirm it from the list`)
+        } else {
+          showToast(`Return ${created.return.return_no} confirmed`)
+        }
       } else {
         showToast(`Return ${created.return.return_no} saved as draft`)
       }

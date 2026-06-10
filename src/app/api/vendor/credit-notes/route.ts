@@ -239,7 +239,7 @@ export async function GET(req: NextRequest) {
 
   let query = admin
     .from('credit_notes')
-    .select('*, items:credit_note_items(*)')
+    .select('*, items:credit_note_items(*), original_sale:sales!original_sale_id(date_supply, created_at)')
     .eq('vendor_id', vendor.id)
     .order('issued_at', { ascending: true })
 

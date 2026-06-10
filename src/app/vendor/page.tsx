@@ -1,5 +1,6 @@
 'use client'
 import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constants'
+import { escapeHtml } from '@/lib/escapeHtml'
 
 import { useState, useEffect, useRef, startTransition, useMemo } from 'react'
 import TabStockLkTax from './_lk_tax/TabStock'
@@ -174,28 +175,28 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const vatAmount    = parseInt(sale.vat_amount) || Math.round(total * vatRate / (100 + vatRate))
   const netAmount    = parseInt(sale.net_amount) || (total - vatAmount)
   const discount     = parseFloat(sale.discount || 0)
-  const serial       = sale.tax_serial || sale.invoice_no || ''
+  const serial       = escapeHtml(sale.tax_serial || sale.invoice_no || '')
   const invoiceDate  = fmtDate(sale.created_at)
   const supplyDate   = fmtDate(sale.date_supply || sale.created_at)
   const totalWords   = numberToWords(total) + ' Rupees Only'
 
   const supplierName    = 'MacForce Auto Engineering (Pvt) Ltd'
-  const supplierAddress = s.supplier_address || 'No. 351/T, Pannipitiya Road, Thalawathugoda'
-  const supplierTin     = s.supplier_tin     || '101969738'
+  const supplierAddress = escapeHtml(s.supplier_address) || 'No. 351/T, Pannipitiya Road, Thalawathugoda'
+  const supplierTin     = escapeHtml(s.supplier_tin)     || '101969738'
 
-  const purchaserName    = sale.customer_name    || ''
-  const purchaserAddress = sale.customer_address || ''
-  const purchaserTin     = sale.customer_tin     || ''
-  const purchaserPhone   = sale.customer_phone   || ''
+  const purchaserName    = escapeHtml(sale.customer_name)
+  const purchaserAddress = escapeHtml(sale.customer_address)
+  const purchaserTin     = escapeHtml(sale.customer_tin)
+  const purchaserPhone   = escapeHtml(sale.customer_phone)
 
   const logoHtml = (s.logo_url && s.invoice_show_logo !== false)
-    ? `<img src="${s.logo_url}" style="height:52px;max-width:120px;object-fit:contain;display:block;margin-bottom:4px">`
+    ? `<img src="${escapeHtml(s.logo_url)}" style="height:52px;max-width:120px;object-fit:contain;display:block;margin-bottom:4px">`
     : ''
 
   const lineRows = items.map((i: any, idx: number) => `
     <tr>
       <td class="c-no">${idx + 1}</td>
-      <td class="c-desc">${i.product_name}</td>
+      <td class="c-desc">${escapeHtml(i.product_name)}</td>
       <td class="c-qty">${i.quantity}</td>
       <td class="c-price">${parseFloat(i.unit_price).toLocaleString()}</td>
       <td class="c-amt">${parseFloat(i.total).toLocaleString()}</td>
@@ -205,7 +206,7 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
     const pmts = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
     if (!pmts.length) return ''
     const lines = pmts.map((p: any) =>
-      `<span style="margin-right:16px"><strong>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</strong>: Rs.&nbsp;${parseFloat(p.amount).toLocaleString()}</span>`
+      `<span style="margin-right:16px"><strong>${escapeHtml((p.payment_method || 'cash').toUpperCase())}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</strong>: Rs.&nbsp;${parseFloat(p.amount).toLocaleString()}</span>`
     ).join('')
     return `<div class="pmt"><div class="pmt-lbl">Payment Method</div><div class="pmt-val">${lines}</div></div>`
   })()
@@ -382,7 +383,7 @@ ${paymentHtml}
   <div class="sig"><div class="sig-line">Authorised Signatory</div></div>
 </div>
 
-<div class="footer">${s.invoice_footer || 'Thank you for your business!'}</div>
+<div class="footer">${escapeHtml(s.invoice_footer) || 'Thank you for your business!'}</div>
 
 </body></html>`
 
@@ -409,14 +410,14 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
   const payments = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
   const isThermal = format === 'thermal'; const w = isThermal ? 300 : 800
   const s = settings || {}
-  const shopName = s.invoice_title || vendor?.name || 'kuruma.lk'
-  const logoHtml = (s.logo_url && s.invoice_show_logo !== false && !isThermal) ? `<img src="${s.logo_url}" style="height:${isThermal ? '30px' : '60px'};max-width:${isThermal ? '60px' : '120px'};object-fit:contain;margin-bottom:4px" />` : ''
-  const thermalLogoHtml = (s.logo_url && s.invoice_show_logo !== false && isThermal) ? `<img src="${s.logo_url}" style="height:30px;max-width:60px;object-fit:contain;margin-bottom:2px" />` : ''
-  const taxLine = s.tax_id ? `<div style="font-size:${isThermal ? '9px' : '12px'};color:#000;font-weight:700">Tax/VAT: ${s.tax_id}</div>` : ''
-  const emailLine = s.email ? `<div style="font-size:${isThermal ? '9px' : '12px'};color:#000;font-weight:700">${s.email}</div>` : ''
-  const footerText = s.invoice_footer || 'Thank you for your business!'
-  const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${s.invoice_terms.replace(/\n/g, '<br/>')}</div>` : ''
-  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${(p.payment_method || 'cash').toUpperCase()}${p.cheque_number ? ' #' + p.cheque_number : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
+  const shopName = escapeHtml(s.invoice_title || vendor?.name) || 'kuruma.lk'
+  const logoHtml = (s.logo_url && s.invoice_show_logo !== false && !isThermal) ? `<img src="${escapeHtml(s.logo_url)}" style="height:${isThermal ? '30px' : '60px'};max-width:${isThermal ? '60px' : '120px'};object-fit:contain;margin-bottom:4px" />` : ''
+  const thermalLogoHtml = (s.logo_url && s.invoice_show_logo !== false && isThermal) ? `<img src="${escapeHtml(s.logo_url)}" style="height:30px;max-width:60px;object-fit:contain;margin-bottom:2px" />` : ''
+  const taxLine = s.tax_id ? `<div style="font-size:${isThermal ? '9px' : '12px'};color:#000;font-weight:700">Tax/VAT: ${escapeHtml(s.tax_id)}</div>` : ''
+  const emailLine = s.email ? `<div style="font-size:${isThermal ? '9px' : '12px'};color:#000;font-weight:700">${escapeHtml(s.email)}</div>` : ''
+  const footerText = escapeHtml(s.invoice_footer) || 'Thank you for your business!'
+  const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${escapeHtml(s.invoice_terms).replace(/\n/g, '<br/>')}</div>` : ''
+  const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${escapeHtml((p.payment_method || 'cash').toUpperCase())}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
   const a4Style = `@page{size:A4;margin:15mm 18mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:13px;color:#222;font-weight:400;max-width:720px;margin:0 auto;padding:25px 30px}@media print{body{padding:0;max-width:100%}}
 .header{text-align:center;padding:20px 0 15px;margin-bottom:0}
 .shop-name{font-size:24px;font-weight:700;color:#000;letter-spacing:-0.5px}
@@ -444,14 +445,14 @@ td{padding:10px;font-size:13px;font-weight:500;color:#111;border-bottom:1px soli
 .footer{text-align:center;padding:25px 0 10px;font-size:10px;color:#888;margin-top:30px;border-top:1px solid #ccc}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}thead{background:#eee !important}.grand-total{background:#eee !important}}`
   const thermalStyle = `@page{size:80mm auto;margin:2mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Courier New',monospace;font-size:12px;color:#000;width:300px;max-width:100%;margin:0 auto}.header{text-align:center;padding:5px 0;border-bottom:1px dashed #000}.shop-name{font-size:16px;font-weight:900}table{width:100%;border-collapse:collapse;margin:5px 0}th{text-align:left;font-size:10px;font-weight:900;padding:3px 2px;border-bottom:1px dashed #000}td{padding:3px 2px;font-size:11px;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{border-top:1px dashed #000;padding-top:5px}.total-row{display:flex;justify-content:space-between;padding:2px 0;font-size:12px;font-weight:700}.grand-total{font-weight:900;font-size:16px;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:5px 0;margin-top:5px}.footer{text-align:center;padding:8px 0 5px;font-size:10px;border-top:1px dashed #000;margin-top:5px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${sale.invoice_no}</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${escapeHtml(sale.invoice_no)}</title>
 <style>${isThermal ? thermalStyle : a4Style}</style></head><body>
-<div class="header">${isThermal ? thermalLogoHtml : logoHtml}<div class="shop-name">${shopName}</div><div class="header-sub">${[vendor?.location, vendor?.address].filter(Boolean).join(', ')}${vendor?.phone ? `<br/>Tel: ${vendor.phone}${vendor?.whatsapp && vendor.whatsapp !== vendor.phone ? ' | WhatsApp: ' + vendor.whatsapp : ''}` : ''}${s.tax_id ? `<br/>Tax/VAT: ${s.tax_id}` : ''}${s.email ? `<br/>${s.email}` : ''}</div></div>
-${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${sale.invoice_no}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${sale.customer_name}${sale.customer_phone ? ' (' + sale.customer_phone + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${sale.vehicle_no}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${sale.invoice_no}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${sale.vehicle_no || '—'}</span></div><div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${sale.customer_name}${sale.customer_phone ? ' (' + sale.customer_phone + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
-<table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? i.product_sku + ' - ' : ''}${i.product_name}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
+<div class="header">${isThermal ? thermalLogoHtml : logoHtml}<div class="shop-name">${shopName}</div><div class="header-sub">${escapeHtml([vendor?.location, vendor?.address].filter(Boolean).join(', '))}${vendor?.phone ? `<br/>Tel: ${escapeHtml(vendor.phone)}${vendor?.whatsapp && vendor.whatsapp !== vendor.phone ? ' | WhatsApp: ' + escapeHtml(vendor.whatsapp) : ''}` : ''}${s.tax_id ? `<br/>Tax/VAT: ${escapeHtml(s.tax_id)}` : ''}${s.email ? `<br/>${escapeHtml(s.email)}` : ''}</div></div>
+${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${escapeHtml(sale.invoice_no)}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${escapeHtml(sale.vehicle_no)}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${escapeHtml(sale.invoice_no)}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${escapeHtml(sale.vehicle_no) || '—'}</span></div><div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
+<table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? escapeHtml(i.product_sku) + ' - ' : ''}${escapeHtml(i.product_name)}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? (isThermal ? `<div style="margin-top:6px"><div style="font-size:10px;font-weight:600;margin-bottom:3px">Payments</div>${paymentLines}</div>` : `<div class="payments-section"><div class="payments-label">Payments</div>${paymentLines}</div>`) : ''}
-${cleanPrintNotes(sale.notes) ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${cleanPrintNotes(sale.notes)}</div>` : `<div class="note-section">Note: ${cleanPrintNotes(sale.notes)}</div>`) : ''}
+${cleanPrintNotes(sale.notes) ? (isThermal ? `<div style="margin-top:5px;padding:4px;font-size:10px;font-style:italic">Note: ${escapeHtml(cleanPrintNotes(sale.notes))}</div>` : `<div class="note-section">Note: ${escapeHtml(cleanPrintNotes(sale.notes))}</div>`) : ''}
 ${(() => {
   const totalDue = parseFloat(sale.total_amount_due || sale.totalAmountDue || 0)
   const currentInvoiceDue = parseFloat(sale.balance_due || 0)

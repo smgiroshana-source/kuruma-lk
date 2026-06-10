@@ -350,8 +350,8 @@ export default function TabReports({ vendor, showToast }: Props) {
                 />
                 <KpiCard
                   label="GP %"
-                  value={`${gpData.gp_percent.toFixed(1)}%`}
-                  valueClass={gpPercentColor(gpData.gp_percent)}
+                  value={`${(gpData.gp_percent ?? 0).toFixed(1)}%`}
+                  valueClass={gpPercentColor(gpData.gp_percent ?? 0)}
                 />
               </div>
 
@@ -467,7 +467,7 @@ export default function TabReports({ vendor, showToast }: Props) {
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2">Potential Gross Profit</p>
                 <p className="text-3xl font-black text-orange-500 mb-1">{formatRs(stockValue.potential_gp)}</p>
                 <p className="text-sm font-bold text-orange-400 mb-2">
-                  {stockValue.potential_gp_percent.toFixed(1)}% potential margin
+                  {(stockValue.potential_gp_percent ?? 0).toFixed(1)}% potential margin
                 </p>
                 <p className="text-xs text-slate-400">
                   Difference between retail value and cost value of current stock

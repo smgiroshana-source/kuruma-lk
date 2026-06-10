@@ -1,4 +1,5 @@
 'use client'
+import { colomboToday } from '@/lib/dates'
 import { useState, useEffect } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
 
@@ -42,7 +43,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
   // GRN state
   const [suppliers, setSuppliers] = useState<any[]>([])
-  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', receivedAt: new Date().toISOString().slice(0, 10), notes: '' })
+  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', receivedAt: colomboToday(), notes: '' })
   const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any }>>([])
   const [grnCsvPreview, setGrnCsvPreview] = useState<Array<{ matched: boolean; grnItem: any }> | null>(null)
   const [grnCsvFileName, setGrnCsvFileName] = useState('')
@@ -108,6 +109,16 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           } catch {}
           return item
         }))
+        // Abort if any product failed to create — a GRN line without a productId
+        // would post stock against nothing and silently lose the goods received.
+        const failed = resolvedItems.filter(i => i.needsCreate)
+        if (failed.length > 0) {
+          showToast(`⚠️ Failed to create ${failed.length} product${failed.length > 1 ? 's' : ''} (${failed.map(i => i.productName).slice(0, 3).join(', ')}) — GRN not saved`)
+          setGrnItems(resolvedItems)
+          setGrnLoading(false)
+          return
+        }
+        setGrnItems(resolvedItems)
       }
       const r = await fetch('/api/vendor/grns', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -116,7 +127,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       const j = await r.json()
       if (r.ok) {
         showToast(`✅ ${j.grnNumber} saved as draft`)
-        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', receivedAt: new Date().toISOString().slice(0, 10), notes: '' })
+        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', receivedAt: colomboToday(), notes: '' })
         setGrnProductSearch(''); setGrnCsvPreview(null); setGrnCsvFileName('')
         fetchGrnList(); onDataChanged(); setStockMainView('history')
       } else showToast('⚠️ ' + j.error)
@@ -357,7 +368,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
     setStocktakeSaving(true)
     try {
-      await Promise.all([
+      const responses = await Promise.all([
         ...qtyEntries.map(([id, qty]) =>
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'update', productId: id, data: { quantity: qty, last_stock_confirmed_at: now } }) })),
@@ -365,11 +376,18 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'update', productId: id, data: { last_stock_confirmed_at: now } }) }))
       ])
-      const total = qtyEntries.length + confirmOnly.length
-      showToast(`${total} product${total !== 1 ? 's' : ''} saved & confirmed`)
-      setStockQtyEdits({})
-      setStockConfirmSet(new Set())
-      await onDataChanged()
+      const failedCount = responses.filter(r => !r.ok).length
+      if (failedCount > 0) {
+        // Keep the pending edits so the user can retry — clearing them would silently drop changes
+        showToast(`⚠️ ${failedCount} update${failedCount !== 1 ? 's' : ''} failed — please retry`)
+        await onDataChanged()
+      } else {
+        const total = qtyEntries.length + confirmOnly.length
+        showToast(`${total} product${total !== 1 ? 's' : ''} saved & confirmed`)
+        setStockQtyEdits({})
+        setStockConfirmSet(new Set())
+        await onDataChanged()
+      }
     } catch { showToast('Error saving') }
     setStocktakeSaving(false)
   }
@@ -377,7 +395,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   async function saveStocktakeWithCost() {
     if (!stocktakeCostPrompt) return
     setStocktakeCostSaving(true)
-    const today = new Date().toISOString().slice(0, 10)
+    const today = colomboToday()
     try {
       // Seed cost layers for items where cost was provided
       await Promise.all(stocktakeCostPrompt.map(async item => {
@@ -937,12 +955,17 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                           <td className="py-2">
                             <input type="number" min="0" value={item.unitCost || ''}
                               placeholder="LKR excl. VAT"
-                              onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, unitCost: parseInt(e.target.value) || 0 } : x))}
+                              onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, unitCost: Math.max(0, parseInt(e.target.value) || 0) } : x))}
                               className="w-28 px-1.5 py-1 border border-slate-200 rounded text-right text-sm" />
                           </td>
                           <td className="py-2 text-center">
                             <select value={item.vatRate}
-                              onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, vatRate: parseFloat(e.target.value) } : x))}
+                              onChange={e => {
+                                const rate = parseFloat(e.target.value)
+                                const sup = suppliers.find((s: any) => s.id === grnForm.supplierId)
+                                if (rate > 0 && sup && !sup.vat_registered) showToast('⚠️ ' + sup.name + ' is not VAT-registered — this VAT cannot be claimed as input VAT')
+                                setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, vatRate: rate } : x))
+                              }}
                               className="px-1.5 py-1 border border-slate-200 rounded text-xs bg-white">
                               <option value={0}>0%</option>
                               <option value={18}>18%</option>
@@ -1088,7 +1111,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                               </td>
                               <td className="py-1.5">
                                 <input type="number" min="0" value={item.unitCost || ''}
-                                  onChange={e => setEditingGrnItems(prev => prev.map((x, j) => j === i ? { ...x, unitCost: parseInt(e.target.value) || 0 } : x))}
+                                  onChange={e => setEditingGrnItems(prev => prev.map((x, j) => j === i ? { ...x, unitCost: Math.max(0, parseInt(e.target.value) || 0) } : x))}
                                   className="w-24 px-1 py-1 border border-slate-200 rounded text-right text-xs" />
                               </td>
                               <td className="py-1.5 text-center">
@@ -1244,7 +1267,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
                       <input type="number" min="0" value={curQty}
-                        onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: parseInt(e.target.value) || 0}))}
+                        onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, parseInt(e.target.value) || 0)}))}
                         className="w-20 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
