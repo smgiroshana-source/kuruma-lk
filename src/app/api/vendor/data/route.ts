@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
   while (true) {
     const { data } = await admin
       .from('products')
-      .select('id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, cost, price, quantity, show_price, is_active, vendor_id, created_at, loc_store, loc_floor, loc_sub1, loc_sub2, last_stock_confirmed_at, images:product_images(id, url, sort_order)')
+      .select('id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, cost, price, quantity, show_price, is_active, vendor_id, created_at, loc_store, loc_floor, loc_sub1, loc_sub2, last_stock_confirmed_at, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, images:product_images(id, url, sort_order)')
       .eq('vendor_id', vendor.id)
       .order('created_at', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)

@@ -66,6 +66,7 @@ export async function POST(req: NextRequest) {
       tyre_width:   pd.tyre_width   ? parseInt(pd.tyre_width)   : null,
       tyre_profile: pd.tyre_profile ? parseInt(pd.tyre_profile) : null,
       tyre_rim:     pd.tyre_rim     ? parseInt(pd.tyre_rim)     : null,
+      origin_country: pd.origin_country?.trim() || null,
     }).select().single()
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
     revalidatePath('/')
@@ -145,6 +146,7 @@ export async function POST(req: NextRequest) {
         tyre_width:   item.tyre_width   ? parseInt(item.tyre_width)   : null,
         tyre_profile: item.tyre_profile ? parseInt(item.tyre_profile) : null,
         tyre_rim:     item.tyre_rim     ? parseInt(item.tyre_rim)     : null,
+        origin_country: item.origin_country?.trim() || null,
       }
       if (existingMap.has(sku)) {
         if (importMode === 'update') toUpdate.push({ ...row, id: existingMap.get(sku) })

@@ -905,6 +905,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                           </div>
                           <div className="flex items-center gap-2 mt-0.5">
                             {p.make && <span className="text-[10px] text-slate-400">{p.make}</span>}
+                            {p.origin_country && <span className="text-[10px] font-semibold text-slate-500">🌐 {p.origin_country}</span>}
                             <span className="text-[10px] text-slate-400">Qty: {p.quantity}</span>
                             <span className="text-[10px] font-semibold capitalize text-slate-400">{p.condition}</span>
                           </div>
