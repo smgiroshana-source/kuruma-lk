@@ -141,6 +141,10 @@ export async function POST(req: NextRequest) {
         added_date: item.added_date || null, is_active: true,
         loc_store: item.loc_store || null, loc_floor: item.loc_floor || null,
         loc_sub1: item.loc_sub1 || null, loc_sub2: item.loc_sub2 || null,
+        product_type: item.product_type || (item.tyre_width ? 'tyre' : 'part'),
+        tyre_width:   item.tyre_width   ? parseInt(item.tyre_width)   : null,
+        tyre_profile: item.tyre_profile ? parseInt(item.tyre_profile) : null,
+        tyre_rim:     item.tyre_rim     ? parseInt(item.tyre_rim)     : null,
       }
       if (existingMap.has(sku)) {
         if (importMode === 'update') toUpdate.push({ ...row, id: existingMap.get(sku) })

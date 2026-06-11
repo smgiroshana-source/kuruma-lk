@@ -94,6 +94,10 @@ function mapCSVRow(row: Record<string, string>) {
     loc_floor: row.floor || row.loc_floor || '',
     loc_sub1: row.sub_location_1 || row.sub1 || row.loc_sub1 || row.shelf || row.rack || '',
     loc_sub2: row.sub_location_2 || row.sub2 || row.loc_sub2 || row.bin || row.box || '',
+    product_type: (row.product_type || row.type || '').trim().toLowerCase() || null,
+    tyre_width:   cleanNum(row.tyre_width   || row.width   || ''),
+    tyre_profile: cleanNum(row.tyre_profile || row.profile || row.aspect || ''),
+    tyre_rim:     cleanNum(row.tyre_rim     || row.rim     || ''),
     hasImage: false, imageCount: 0, imageFiles: [] as File[], autoId: false
   }
 }
@@ -1078,7 +1082,7 @@ export default function VendorDashboard() {
 
       const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         action: 'bulk_create', mode,
-        products: importData.map(row => ({ sku: row.partId, added_date: row.addedDate || '', name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, model_code: row.modelCode || null, year: row.year, condition: row.condition, side: row.side || null, color: row.color || null, oem_code: row.oemCode || null, cost: row.cost ? parseInt(row.cost) : null, price: row.price, quantity: row.quantity, show_price: row.show_price, loc_store: row.loc_store || null, loc_floor: row.loc_floor || null, loc_sub1: row.loc_sub1 || null, loc_sub2: row.loc_sub2 || null }))
+        products: importData.map(row => ({ sku: row.partId, added_date: row.addedDate || '', name: row.name, description: row.description, category: row.category, make: row.make, model: row.model, model_code: row.modelCode || null, year: row.year, condition: row.condition, side: row.side || null, color: row.color || null, oem_code: row.oemCode || null, cost: row.cost ? parseInt(row.cost) : null, price: row.price, quantity: row.quantity, show_price: row.show_price, loc_store: row.loc_store || null, loc_floor: row.loc_floor || null, loc_sub1: row.loc_sub1 || null, loc_sub2: row.loc_sub2 || null, product_type: row.product_type || null, tyre_width: row.tyre_width || null, tyre_profile: row.tyre_profile || null, tyre_rim: row.tyre_rim || null }))
       }) })
       const j = await r.json()
 
@@ -2509,7 +2513,7 @@ ${customerRows.map(c => `<tr>
               <div className="flex items-center gap-2 mb-3"><span className="bg-orange-100 text-orange-600 text-[10px] font-black px-2.5 py-1 rounded-full">STEP 1</span><h3 className="font-bold text-sm">Download CSV Template</h3></div>
               <p className="text-xs text-slate-500 mb-3">Download the template, fill in your product details in Excel or Google Sheets, then save as CSV.</p>
               <button onClick={() => {
-                const csv = 'Added Date,stock no,Part name,Part Description,Category,Make,Model,Model Code,Condition,Side,Color,OEM Code,Quantity,Cost,Price,show price,Store,Floor,Sub Location 1,Sub Location 2\n12-Mar-2026,BRK-001,Front Brake Pads Set,OEM quality brake pads,Brake System,Toyota,Corolla,ZRE172,Reconditioned,Front,Black,,10,,4500,YES,Main Store,Ground,Rack A,Bin 3\n12-Mar-2026,ENG-002,Timing Belt Kit,Complete kit with tensioner,Engine Parts,Honda,Civic,FK7,New,,,A4567,5,8000,12500,YES,Main Store,Ground,Rack B,\n12-Mar-2026,SUS-003,Front Shock Absorber LH,Gas-filled absorber,Suspension & Steering,Nissan,X-Trail,NT32,Reconditioned,Left,,12340,8,,8900,NO,Main Store,1st Floor,Shelf 2,'
+                const csv = 'Added Date,stock no,Part name,Part Description,Category,Make,Model,Model Code,Condition,Side,Color,OEM Code,Quantity,Cost,Price,show price,Store,Floor,Sub Location 1,Sub Location 2,Product Type,Tyre Width,Tyre Profile,Tyre Rim\n12-Mar-2026,BRK-001,Front Brake Pads Set,OEM quality brake pads,Brake System,Toyota,Corolla,ZRE172,Reconditioned,Front,Black,,10,,4500,YES,Main Store,Ground,Rack A,Bin 3,part,,,\n12-Mar-2026,TYR-001,185/65R15 Bridgestone Ecopia EP150,,Tyres,Bridgestone,,,New,,,,20,5500,6800,YES,Main Store,Ground,Tyre Rack,,tyre,185,65,15\n12-Mar-2026,TYR-002,205/55R16 Michelin Primacy 4,,Tyres,Michelin,,,New,,,,8,9200,11500,YES,Main Store,Ground,Tyre Rack,,tyre,205,55,16\n12-Mar-2026,ENG-002,Timing Belt Kit,Complete kit with tensioner,Engine Parts,Honda,Civic,FK7,New,,,A4567,5,8000,12500,YES,Main Store,Ground,Rack B,,part,,,'
                 const blob = new Blob([csv], { type: 'text/csv' })
                 const url = URL.createObjectURL(blob)
                 const a = document.createElement('a'); a.href = url; a.download = 'kuruma-bulk-template.csv'; a.click()
@@ -2523,8 +2527,9 @@ ${customerRows.map(c => `<tr>
                 </table>
               </div>
               <div className="mt-2 text-[10px] text-slate-400">
-                <p><strong>Columns:</strong> Added Date, stock no, Part name, Part Description, Category, Make, Model, Model Code, Condition, Side, Color, OEM Code, Quantity, Cost, Price, show price, Store, Floor, Sub Location 1, Sub Location 2</p>
+                <p><strong>Columns:</strong> Added Date, stock no, Part name, Part Description, Category, Make, Model, Model Code, Condition, Side, Color, OEM Code, Quantity, Cost, Price, show price, Store, Floor, Sub Location 1, Sub Location 2, Product Type, Tyre Width, Tyre Profile, Tyre Rim</p>
                 <p className="mt-1"><strong>show price:</strong> YES or NO</p>
+                <p><strong>Product Type:</strong> <code>part</code> (default), <code>tyre</code>, or <code>service</code>. For tyres, also fill Tyre Width / Profile / Rim (e.g. 185, 65, 15 for 185/65R15).</p>
                 <p><strong>Location columns</strong> are optional — leave blank if not needed</p>
                 <p><strong>Categories:</strong> {CATEGORIES.join(', ')}</p>
                 <p><strong>Conditions:</strong> New-Genuine, New-Other, Reconditioned, Damaged</p>
