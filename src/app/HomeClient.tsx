@@ -130,7 +130,12 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
   // Reset visible count when filters change
   useEffect(() => { setVisibleCount(50) }, [search, selectedCategory, conditionFilter, makeFilter, selectedVendor, sortBy])
 
-  // Infinite scroll - show more products as user scrolls
+  // Infinite scroll - show more products as user scrolls.
+  // Re-create the observer whenever visibleCount changes: IntersectionObserver
+  // only fires on a state CHANGE, so if 50 new items don't push the sentinel out
+  // of view it would otherwise never fire again (stuck on "Loading more…").
+  // Re-observing delivers a fresh initial callback for the still-intersecting
+  // sentinel, so it keeps filling until the sentinel leaves view or we hit 300.
   useEffect(() => {
     if (!loadMoreRef.current) return
     const observer = new IntersectionObserver(entries => {
@@ -138,7 +143,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
     }, { rootMargin: '400px' })
     observer.observe(loadMoreRef.current)
     return () => observer.disconnect()
-  }, [])
+  }, [visibleCount])
 
   function updateWishlist(n: Set<string>) { setWishlist(n); try { localStorage.setItem('kuruma_wishlist', JSON.stringify([...n])) } catch {} }
   function toggleWishlist(id: string) { const n = new Set(wishlist); n.has(id) ? n.delete(id) : n.add(id); updateWishlist(n) }

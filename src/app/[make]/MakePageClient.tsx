@@ -49,7 +49,9 @@ export default function MakePageClient({ makeSlug, displayName, products }: Prop
   // Reset pagination when filters change
   useEffect(() => { setVisibleCount(50) }, [selectedCategory, conditionFilter, sortBy, search])
 
-  // Infinite scroll
+  // Infinite scroll. Re-observe on each visibleCount change: IntersectionObserver
+  // only fires on a state CHANGE, so a still-intersecting sentinel after a load
+  // would otherwise never fire again (stuck on "Loading more…").
   useEffect(() => {
     const el = loadMoreRef.current
     if (!el) return
@@ -59,7 +61,7 @@ export default function MakePageClient({ makeSlug, displayName, products }: Prop
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [visibleCount])
 
   // Categories that have stock (respecting current condition filter)
   const availableCategories = useMemo(() => {
