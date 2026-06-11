@@ -4,20 +4,12 @@ import { escapeHtml } from '@/lib/escapeHtml'
 import { colomboToday } from '@/lib/dates'
 import { saleStatusChip } from '@/lib/saleStatus'
 
-// "Business day" of a sale in Asia/Colombo: sales after the 19:30 cutoff belong
-// to the NEXT day's report. Both the date and the hour must be computed in
-// Colombo time — toISOString() is UTC (yesterday before 05:30 local).
+// "Business day" of a sale/return/collection = the Asia/Colombo calendar date it
+// actually occurred on. No evening cutoff: an 8 PM sale belongs to that day's
+// report, not the next day's. Must be computed in Colombo time because
+// toISOString() is UTC (which reads as yesterday before 05:30 local).
 function colomboBusinessDay(isoTimestamp: string): string {
-  const d = new Date(isoTimestamp)
-  const datePart = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
-  const hour = parseInt(d.toLocaleString('en-GB', { timeZone: 'Asia/Colombo', hour: '2-digit', hour12: false }))
-  const minute = parseInt(d.toLocaleString('en-GB', { timeZone: 'Asia/Colombo', minute: '2-digit' }))
-  if (hour > 19 || (hour === 19 && minute >= 30)) {
-    const next = new Date(datePart + 'T00:00:00Z')
-    next.setUTCDate(next.getUTCDate() + 1)
-    return next.toISOString().slice(0, 10)
-  }
-  return datePart
+  return new Date(isoTimestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
 }
 
 import { useState, useEffect, useRef, startTransition, useMemo, Fragment } from 'react'
@@ -1360,7 +1352,9 @@ export default function VendorDashboard() {
 
   // ─── REPORT GENERATORS ───
   function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[]) {
-    // 7:30 PM Colombo cutoff: sales after 19:30 go to next day's report
+    // Everything is pinned to the Colombo calendar day it happened on. The fetch
+    // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
+    // must each be filtered to reportDate or yesterday's leak into today.
     const filtered = salesList.filter((s: any) => {
       if (s.payment_status === 'voided') return false
       if (s.payment_status === 'draft') return false // on-approval drafts aren't revenue yet
@@ -1368,12 +1362,12 @@ export default function VendorDashboard() {
       if ((s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')) return false
       return colomboBusinessDay(s.created_at) === reportDate
     })
-    const dayCollections = collections || []
+    const dayCollections = (collections || []).filter((c: any) => colomboBusinessDay(c.created_at) === reportDate)
     const totalCollections = dayCollections.reduce((s: number, c: any) => s + c.amount, 0)
 
     // For same-day returns: credit_return is already baked into sale.total, so exclude to avoid double-counting.
     // For OLD invoice returns (not in today's filtered list): credit_return must be shown — it's not in today's totals at all.
-    const allReturns = returns || []
+    const allReturns = (returns || []).filter((r: any) => colomboBusinessDay(r.created_at) === reportDate)
     const filteredSaleIds = new Set(filtered.map((s: any) => s.id))
     const cashReturns = allReturns.filter((r: any) => {
       if (r.payment_method === 'credit_return') return !filteredSaleIds.has(r.sale_id)
@@ -1421,7 +1415,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 .method-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:15px 0}.method-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}.method-box .val{font-size:18px;font-weight:900}.method-box .lbl{font-size:10px;color:#94a3b8;text-transform:uppercase;margin-top:2px}
 .footer{text-align:center;padding:20px 0;color:#94a3b8;font-size:10px;border-top:1px solid #e2e8f0;margin-top:20px}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
-<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + escapeHtml(vendorInfo.location) + (vendorInfo?.phone ? ' | Tel: ' + escapeHtml(vendorInfo.phone) : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">Business day: 7:30 PM previous day to 7:30 PM</div></div>
+<div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + escapeHtml(vendorInfo.location) + (vendorInfo?.phone ? ' | Tel: ' + escapeHtml(vendorInfo.phone) : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">All sales for the calendar day (Asia/Colombo)</div></div>
 
 <div class="summary">
 <div class="summary-box">${totalCashReturnAmount > 0
@@ -1671,8 +1665,9 @@ ${customerRows.map(c => `<tr>
     const today = colomboToday()
     showToast('Fetching today\'s sales...')
     try {
-      // Fetch from yesterday too: the 19:30 business-day cutoff means sales made
-      // after 19:30 YESTERDAY belong to today's report.
+      // Fetch from yesterday (UTC) too: with the +5:30 offset, today's early-morning
+      // Colombo sales are stored under yesterday's UTC date. generateDailyReport then
+      // pins each row to its Colombo calendar day, so nothing extra leaks in.
       const yesterday = new Date(today + 'T00:00:00Z'); yesterday.setUTCDate(yesterday.getUTCDate() - 1)
       const r = await fetch(`/api/vendor/sales?from=${yesterday.toISOString().slice(0, 10)}&to=${today}`)
       if (!r.ok) { showToast(`Failed to fetch sales (${r.status})`); return }
@@ -3232,14 +3227,15 @@ ${customerRows.map(c => `<tr>
                   <div className="space-y-4">
                     <div className="bg-white rounded-xl border border-slate-200 p-5">
                       <h3 className="font-bold text-sm text-slate-800 mb-3">📅 Daily Report</h3>
-                      <p className="text-xs text-slate-400 mb-3">Business day: 7:30 PM previous day to 7:30 PM selected day</p>
+                      <p className="text-xs text-slate-400 mb-3">Covers the full selected day (Asia/Colombo)</p>
                       <div className="flex items-end gap-3 flex-wrap">
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label><input type="date" value={reportDate} onChange={e => setReportDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                         <button disabled={dailyReportLoading} onClick={async () => {
                           setDailyReportLoading(true)
                           showToast('Fetching sales...')
-                          // Fetch from the previous day too — sales after the 19:30 cutoff
-                          // the evening before belong to this report date.
+                          // Fetch the previous UTC day too — early-morning Colombo sales
+                          // (+5:30) are stored under yesterday's UTC date; the report then
+                          // pins each row to its Colombo calendar day.
                           try {
                             const prev = new Date(reportDate + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
                             const r = await fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${reportDate}`)
