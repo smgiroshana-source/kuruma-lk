@@ -47,7 +47,7 @@ export const TYRE_BRANDS: TyreBrand[] = [
   { slug: 'goodride',   name: 'Goodride',   color: '#e30613', origin: 'China', keywords: ['GOODRIDE', 'GOOD RIDE'] },
   { slug: 'comforser',  name: 'Comforser',  color: '#1a7a3d', origin: 'China', keywords: ['COMFORSER'] },
   { slug: 'three-a',    name: 'Three-A',    color: '#c8102e', origin: 'China', keywords: ['THREE-A', 'THREE A', '(THREE A)'] },
-  { slug: 'kapsen',     name: 'Kapsen',     color: '#e2001a', origin: 'China', keywords: ['KAPSEN', 'RASSURER'] },
+  { slug: 'kapsen',     name: 'Kapsen',     color: '#e2001a', origin: 'China', keywords: ['KAPSEN', 'KAPSE', 'RASSURER'] },
   { slug: 'ilink',      name: 'I-Link',     color: '#0066b3', origin: 'China', keywords: ['I LINK', 'I-LINK', 'ILINK'] },
   { slug: 'grenlander', name: 'Grenlander', color: '#1f8a4c', origin: 'China', keywords: ['GRENLANDER'] },
   { slug: 'tracmax',    name: 'Tracmax',    color: '#005bac', origin: 'China', keywords: ['TRACMAX'] },
@@ -66,6 +66,13 @@ export const TYRE_BRANDS: TyreBrand[] = [
   { slug: 'dovroad',    name: 'Dovroad',    color: '#0066b3', origin: 'China', keywords: ['DOVROAD'] },
   { slug: 'arpidag',    name: 'Arpidag',    color: '#0a6e3a', origin: 'China', keywords: ['ARPIDAG', 'APIDAG', 'DAG '] },
   { slug: 'brawo',      name: 'Brawo',      color: '#b8860b', text: '#1a1a1a', origin: 'China', keywords: ['BRAWO', 'ORION'] },
+  { slug: 'hifly',      name: 'Hifly',      color: '#e2001a', origin: 'China', keywords: ['HIFLY'] },
+  { slug: 'sailun',     name: 'Sailun',     color: '#003a8c', origin: 'China', keywords: ['SAILUN', 'SILUN'] },
+  { slug: 'presa',      name: 'Presa',      color: '#c8102e', origin: 'China', keywords: ['PRESA'] },
+  { slug: 'bearway',    name: 'Bearway',    color: '#005bac', origin: 'China', keywords: ['BEARWAY'] },
+  { slug: 'xcelink',    name: 'Xcelink',    color: '#e2001a', origin: 'China', keywords: ['XCELINK'] },
+  { slug: 'gripmax',    name: 'Grip Max',   color: '#0a6e3a', origin: 'China', keywords: ['GRIP MAX', 'GRIPMAX'] },
+  { slug: 'titan',      name: 'Titan',      color: '#c0392b', origin: 'China', keywords: ['TITAN'] },
 
   // ── Indian ────────────────────────────────────────────────────────────────
   { slug: 'ceat',   name: 'CEAT',   color: '#0057a8', origin: 'India', keywords: ['CEAT'] },
@@ -89,14 +96,16 @@ export const TYRE_BRANDS: TyreBrand[] = [
   { slug: 'timsun',   name: 'Timsun',   color: '#1a1a1a', origin: 'Sri Lanka', keywords: ['TIMSUN'] },
 
   // ── Thai ──────────────────────────────────────────────────────────────────
-  { slug: 'deestone', name: 'Deestone', color: '#e2001a', origin: 'Thailand', keywords: ['DEESTONE'] },
-  { slug: 'lenso',    name: 'Lenso',    color: '#1a1a1a', origin: 'Thailand', keywords: ['LENSO'] },
+  { slug: 'deestone',  name: 'Deestone',   color: '#e2001a', origin: 'Thailand', keywords: ['DEESTONE'] },
+  { slug: 'lenso',     name: 'Lenso',      color: '#1a1a1a', origin: 'Thailand', keywords: ['LENSO'] },
+  { slug: 'veerubber', name: 'Vee Rubber', color: '#1a1a1a', origin: 'Thailand', keywords: ['VEE RUBBER'] },
 
   // ── Taiwan ────────────────────────────────────────────────────────────────
   { slug: 'maxxis', name: 'Maxxis', color: '#003da5', origin: 'Taiwan', keywords: ['MAXXIS'] },
   { slug: 'kenda',  name: 'Kenda',  color: '#e2001a', origin: 'Taiwan', keywords: ['KENDA'] },
 
   // ── Other ─────────────────────────────────────────────────────────────────
+  { slug: 'goodyear',   name: 'Goodyear',   color: '#0b3d91', origin: 'USA',   keywords: ['GOODYEAR', 'GOOD YEAR'] },
   { slug: 'blackhawk',  name: 'Blackhawk',  color: '#1a1a1a', origin: 'USA',   keywords: ['BLACKHAWK', 'BLACK HAWK'] },
   { slug: 'ultramile',  name: 'Ultramile',  color: '#005bac', origin: 'Other', keywords: ['ULTRAMILE'] },
   { slug: 'comforser2', name: 'Goodtrip',   color: '#0066b3', origin: 'China', keywords: ['GOOD TRIP'] },

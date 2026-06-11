@@ -17,7 +17,9 @@ type Props = {
 
 export default function ProductThumb({ product, variant = 'card', className = '' }: Props) {
   const p = product || {}
-  const brand = detectTyreBrand(p.name)
+  // Prefer the explicit brand (Make field — set by the tyre Brand picker / CSV)
+  // and only fall back to sniffing the product name when Make is empty.
+  const brand = detectTyreBrand(p.make) || detectTyreBrand(p.name)
   const isTyre = p.product_type === 'tyre' || (p.tyre_width && p.tyre_profile && p.tyre_rim)
   const size = (p.tyre_width && p.tyre_profile && p.tyre_rim)
     ? `${p.tyre_width}/${p.tyre_profile}R${p.tyre_rim}`
