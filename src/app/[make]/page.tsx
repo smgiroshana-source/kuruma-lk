@@ -110,6 +110,7 @@ export default async function MakePage({ params }: Props) {
   const { data: products } = await (admin.from('products') as any)
     .select(
       'id, name, sku, category, make, model, year, condition, price, show_price, quantity, slug, created_at, ' +
+      'product_type, tyre_width, tyre_profile, tyre_rim, origin_country, ' +
       'vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order)',
     )
     .ilike('make', makeQuery)

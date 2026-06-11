@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const admin = createAdminClient()
     const { data: product } = await findProduct(
       admin, id,
-      'name, description, price, show_price, category, condition, make, model, year, sku, slug, vendor:vendors(name, location), images:product_images(url, sort_order)'
+      'name, description, price, show_price, category, condition, make, model, year, sku, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order)'
     )
 
     if (!product) {
@@ -106,7 +106,7 @@ async function getProductJsonLd(idOrSlug: string) {
     const admin = createAdminClient()
     const { data: product } = await findProduct(
       admin, idOrSlug,
-      'name, description, price, show_price, category, condition, make, model, year, sku, slug, quantity, vendor:vendors(name, location), images:product_images(url, sort_order)'
+      'name, description, price, show_price, category, condition, make, model, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order)'
     )
 
     if (!product) return null

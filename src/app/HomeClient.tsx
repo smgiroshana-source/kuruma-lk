@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import type { Product, Vendor } from '@/types'
 import { thumbnail, thumb64, imgFallback } from '@/lib/image'
 import { useAuth } from '@/components/AuthProvider'
+import ProductThumb from '@/components/ProductThumb'
 
 // Isolated search input — typing here does NOT re-render the parent (5500 products)
 const SearchInput = memo(function SearchInput({ onSearch, onClear, value }: { onSearch: (q: string) => void; onClear: () => void; value: string }) {
@@ -663,7 +664,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
                 <button onClick={e=>{e.preventDefault();e.stopPropagation();toggleWishlist(product.id)}} className={`absolute top-2.5 right-2.5 z-10 w-[30px] h-[30px] rounded-lg flex items-center justify-center text-sm transition-all duration-200 ${isWished?'bg-red-500 shadow-[0_2px_12px_rgba(239,68,68,0.4)] scale-105':'bg-white/95 backdrop-blur-sm border-[1.5px] border-black/10 shadow-[0_1px_4px_rgba(0,0,0,0.08)]'}`}>{isWished?'❤️':'🤍'}</button>
                 <a href={`/product/${(product as any).slug || product.id}`} className="block">
                   <div className="aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
-                    {imageUrl?<img src={thumbnail(imageUrl)} alt={product.name} loading={idx<6?'eager':'lazy'} fetchPriority={idx<6?'high':undefined} onError={imgFallback} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
+                    {imageUrl?<img src={thumbnail(imageUrl)} alt={product.name} loading={idx<6?'eager':'lazy'} fetchPriority={idx<6?'high':undefined} onError={imgFallback} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:((product as any).product_type==='tyre'||((product as any).tyre_width&&(product as any).tyre_profile&&(product as any).tyre_rim))?<ProductThumb product={product} variant="card" className="w-full h-full"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
                     {imageCount>1&&<span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-md">📷 {imageCount}</span>}
                   </div>
                   <div className="p-3">

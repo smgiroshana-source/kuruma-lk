@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { thumbnail, medium, thumb64, imgFallback } from '@/lib/image'
+import ProductThumb from '@/components/ProductThumb'
 
 const CONDITION_COLORS: Record<string, string> = {
   'Excellent': 'bg-emerald-100 text-emerald-700',
@@ -213,9 +214,13 @@ export default function ProductDetailPage() {
                 </div>
               </div>
             ) : (
-              <div className="bg-white aspect-square flex items-center justify-center md:rounded-2xl md:border md:border-slate-200">
-                <div className="text-center"><span className="text-6xl opacity-20">🔧</span><p className="text-slate-400 text-sm mt-2">No photos</p></div>
-              </div>
+              (product.product_type === 'tyre' || (product.tyre_width && product.tyre_profile && product.tyre_rim)) ? (
+                <ProductThumb product={product} variant="card" className="bg-white aspect-square md:rounded-2xl md:border md:border-slate-200" />
+              ) : (
+                <div className="bg-white aspect-square flex items-center justify-center md:rounded-2xl md:border md:border-slate-200">
+                  <div className="text-center"><span className="text-6xl opacity-20">🔧</span><p className="text-slate-400 text-sm mt-2">No photos</p></div>
+                </div>
+              )
             )}
           </div>
 
