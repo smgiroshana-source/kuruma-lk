@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllByIds } from '@/lib/fetchAll'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -61,17 +62,23 @@ export async function GET(req: NextRequest) {
     .order('session_date', { ascending: false })
     .limit(60)
 
-  // Merge expense counts — one query, merge in JS
-  const { data: expenseCountRows } = await admin
-    .from('expenses')
-    .select('cash_session_id')
-    .eq('vendor_id', vendor.id)
-    .not('cash_session_id', 'is', null)
-
+  // Merge expense counts — fetch only the expenses for the sessions we're about
+  // to render (scoped + paginated). The previous all-time fetch hit the 1000-row
+  // cap, undercounting expense_count on older sessions as history grew.
+  const sessionIds = (sessions || []).map((s: any) => s.id)
   const countMap: Record<string, number> = {}
-  for (const row of (expenseCountRows || [])) {
-    const sid = row.cash_session_id as string
-    countMap[sid] = (countMap[sid] || 0) + 1
+  if (sessionIds.length > 0) {
+    const expenseCountRows = await fetchAllByIds(sessionIds, (ids, from, to) => admin
+      .from('expenses')
+      .select('cash_session_id')
+      .eq('vendor_id', vendor.id)
+      .in('cash_session_id', ids)
+      .order('id')
+      .range(from, to))
+    for (const row of expenseCountRows) {
+      const sid = row.cash_session_id as string
+      countMap[sid] = (countMap[sid] || 0) + 1
+    }
   }
 
   const sessionsWithCounts = (sessions || []).map((s: any) => ({

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows } from '@/lib/fetchAll'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -32,14 +33,20 @@ export async function GET() {
 
   if (suppliersError) return NextResponse.json({ error: suppliersError.message }, { status: 500 })
 
-  // Fetch all unpaid/partial/overdue invoices for this vendor in one query
-  const { data: invoices, error: invError } = await admin
-    .from('supplier_invoices')
-    .select('supplier_id, amount, amount_paid, status, due_date')
-    .eq('vendor_id', vendor.id)
-    .neq('status', 'paid')
-
-  if (invError) return NextResponse.json({ error: invError.message }, { status: 500 })
+  // Fetch all unpaid/partial/overdue invoices (paginated — a vendor with >1000
+  // open invoices would otherwise have payables/overdue totals understated)
+  let invoices: any[]
+  try {
+    invoices = await fetchAllRows((from, to) => admin
+      .from('supplier_invoices')
+      .select('supplier_id, amount, amount_paid, status, due_date')
+      .eq('vendor_id', vendor.id)
+      .neq('status', 'paid')
+      .order('id')
+      .range(from, to))
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Failed to load invoices' }, { status: 500 })
+  }
 
   // Aggregate per supplier in JS
   const today = new Date()

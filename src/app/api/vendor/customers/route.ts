@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -24,28 +25,39 @@ export async function GET(req: NextRequest) {
   const search = url.searchParams.get('search')
   const withCredit = url.searchParams.get('credit') === 'true'
 
-  let query = admin.from('customers').select('*').eq('vendor_id', vendor.id).order('name')
-
-  if (search && search.length >= 2) {
-    // Strip characters that have meaning in the PostgREST .or() filter syntax
-    const safeSearch = search.replace(/[,()\\]/g, ' ').trim()
-    if (safeSearch.length >= 2) {
-      query = query.or(`name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%`)
-    }
+  // Strip characters that have meaning in the PostgREST .or() filter syntax
+  const safeSearch = (search && search.length >= 2) ? search.replace(/[,()\\]/g, ' ').trim() : ''
+  const baseQuery = () => {
+    let q = admin.from('customers').select('*').eq('vendor_id', vendor.id)
+    if (safeSearch.length >= 2) q = q.or(`name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%`)
+    return q
   }
 
-  const { data: customers } = await query.limit(withCredit ? 1000 : 50)
+  // Credit view needs EVERY customer (balances are totalled) — paginate it.
+  // The plain list is a bounded search feed, so its 50-row cap is intentional.
+  // name is non-unique, so id is the stable pagination tiebreaker.
+  let customers: any[]
+  if (withCredit) {
+    customers = await fetchAllRows((from, to) => baseQuery().order('name').order('id').range(from, to))
+  } else {
+    const { data } = await baseQuery().order('name').limit(50)
+    customers = data || []
+  }
 
   // If credit info requested, get outstanding balances
   if (withCredit && customers) {
     const customerIds = customers.map((c: any) => c.id)
     if (customerIds.length > 0) {
-      const { data: sales } = await admin
+      // chunked over the id list AND paginated — the combined sales rows across
+      // all customers exceed 1000, which would undercount balances owed.
+      const sales = await fetchAllByIds(customerIds, (ids, from, to) => admin
         .from('sales')
         .select('customer_id, total, paid_amount, balance_due, payment_status, created_at')
         .eq('vendor_id', vendor.id)
-        .in('customer_id', customerIds)
+        .in('customer_id', ids)
         .neq('payment_status', 'voided')
+        .order('id')
+        .range(from, to))
 
       const creditMap: Record<string, { totalBought: number; totalPaid: number; balance: number; salesCount: number; oldestDueDate: string | null }> = {}
       for (const sale of (sales || [])) {

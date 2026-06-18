@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
+import { fetchAllRows } from '@/lib/fetchAll'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -208,18 +209,20 @@ export async function GET(req: NextRequest) {
     else if (period === 'month') { const d = new Date(now); d.setMonth(d.getMonth() - 1); dateFilter = d.toISOString() }
   }
 
-  let query = admin
-    .from('sales')
-    .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
-    .eq('vendor_id', vendor.id)
-    .order('created_at', { ascending: false })
-
-  if (fromDate) query = query.gte('created_at', new Date(fromDate).toISOString())
-  if (toDate) { const end = new Date(toDate); end.setDate(end.getDate() + 1); query = query.lt('created_at', end.toISOString()) }
-  if (!fromDate && dateFilter) query = query.gte('created_at', dateFilter)
-  const { data: sales } = await query.limit(5000)
-
-  const allSales = sales || []
+  // Paginate the full result set. The dashboard sums these into all-time
+  // revenue / paid / credit / top-products / top-customers; a flat .limit() (or
+  // the PostgREST 1000 cap) silently understated those totals for high-volume
+  // vendors. created_at is non-unique, so id is the stable tiebreaker.
+  const allSales = await fetchAllRows((from, to) => {
+    let query = admin
+      .from('sales')
+      .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
+      .eq('vendor_id', vendor.id)
+    if (fromDate) query = query.gte('created_at', new Date(fromDate).toISOString())
+    if (toDate) { const end = new Date(toDate); end.setDate(end.getDate() + 1); query = query.lt('created_at', end.toISOString()) }
+    if (!fromDate && dateFilter) query = query.gte('created_at', dateFilter)
+    return query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to)
+  })
   const activeSales = allSales.filter((s: any) => s.payment_status !== 'voided' && s.payment_status !== 'draft')
   // Exclude opening balance entries from sales stats (they're past transaction records, not actual sales)
   const isOpeningBalance = (s: any) => (s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')

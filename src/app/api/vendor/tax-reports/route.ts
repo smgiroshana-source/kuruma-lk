@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -44,21 +45,27 @@ export async function GET(req: NextRequest) {
 
   // ── VAT Output Register ─────────────────────────────────────────────────────
   if (type === 'vat_register') {
-    // ── Tax invoices ──
-    const { data: rows, error } = await admin
-      .from('sales')
-      .select('id, tax_serial, created_at, date_supply, customer_name, customer_tin, net_amount, vat_amount, total, payment_status, voided_at')
-      .eq('vendor_id', vendor.id)
-      .eq('document_type', 'tax_invoice')
-      .in('invoice_entity_id', entityIds)
-      .gte('created_at', fromTs)
-      .lte('created_at', toTs)
-      .order('tax_serial', { ascending: true })
+    // ── Tax invoices ── (paginated — a wide period can exceed 1000 invoices,
+    // which would silently understate output VAT and drop register rows)
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => admin
+        .from('sales')
+        .select('id, tax_serial, created_at, date_supply, customer_name, customer_tin, net_amount, vat_amount, total, payment_status, voided_at')
+        .eq('vendor_id', vendor.id)
+        .eq('document_type', 'tax_invoice')
+        .in('invoice_entity_id', entityIds)
+        .gte('created_at', fromTs)
+        .lte('created_at', toTs)
+        .order('tax_serial', { ascending: true })
+        .order('id')
+        .range(from, to))
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || 'Failed to load invoices' }, { status: 500 })
+    }
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-    // ── Credit notes issued in the same period ──
-    const { data: creditNotes } = await admin
+    // ── Credit notes issued in the same period ── (paginated)
+    const creditNotes = await fetchAllRows((from, to) => admin
       .from('credit_notes')
       .select('credit_note_no, issued_at, customer_name, customer_tin, net_amount, vat_amount, total, original_serial')
       .eq('vendor_id', vendor.id)
@@ -66,6 +73,8 @@ export async function GET(req: NextRequest) {
       .gte('issued_at', fromTs)
       .lte('issued_at', toTs)
       .order('issued_at', { ascending: true })
+      .order('credit_note_no')
+      .range(from, to))
 
     // Include voided invoices (marked VOID) — they stay in the ledger
     const invoiceRows = (rows || []).map((s: any) => ({
@@ -130,8 +139,9 @@ export async function GET(req: NextRequest) {
     const liableBasePart = (config['liable_base_part'] ?? 50)   / 100
     const liableBaseSvc  = (config['liable_base_svc']  ?? 100)  / 100
 
-    // Get non-voided sales in range for lk_tax entities
-    const { data: sales } = await admin
+    // Get non-voided sales in range for lk_tax entities (paginated — turnover
+    // would be understated if the period exceeds 1000 sales / line items)
+    const sales = await fetchAllRows((from, to) => admin
       .from('sales')
       .select('id, created_at')
       .eq('vendor_id', vendor.id)
@@ -139,21 +149,23 @@ export async function GET(req: NextRequest) {
       .neq('payment_status', 'voided')
       .gte('created_at', fromTs)
       .lte('created_at', toTs)
+      .order('id')
+      .range(from, to))
 
-    const saleIds = (sales || []).map((s: any) => s.id)
+    const saleIds = sales.map((s: any) => s.id)
     const saleDateMap: Record<string, string> = {}
-    for (const s of (sales || [])) saleDateMap[s.id] = s.created_at
+    for (const s of sales) saleDateMap[s.id] = s.created_at
 
     // Aggregate by month × stream
     const monthMap: Record<string, { PART: number; SVC: number }> = {}
 
     if (saleIds.length > 0) {
-      const { data: items, error: itemsError } = await admin
+      const items = await fetchAllByIds(saleIds, (ids, from, to) => admin
         .from('sale_items')
         .select('sale_id, sscl_stream, total')
-        .in('sale_id', saleIds)
-
-      if (itemsError) return NextResponse.json({ error: itemsError.message }, { status: 500 })
+        .in('sale_id', ids)
+        .order('id')
+        .range(from, to))
 
       for (const item of (items || [])) {
         const monthKey = saleDateMap[item.sale_id]?.slice(0, 7) ?? 'unknown'
@@ -164,14 +176,16 @@ export async function GET(req: NextRequest) {
     }
 
     // Credit notes reduce SSCL-liable turnover in the period they are ISSUED
-    // (CLAUDE.md), per line-item stream.
-    const { data: ssclCns } = await admin
+    // (CLAUDE.md), per line-item stream. (paginated)
+    const ssclCns = await fetchAllRows((from, to) => admin
       .from('credit_notes')
       .select('issued_at, items:credit_note_items(sscl_stream, total)')
       .eq('vendor_id', vendor.id)
       .in('invoice_entity_id', entityIds)
       .gte('issued_at', fromTs)
       .lte('issued_at', toTs)
+      .order('id')
+      .range(from, to))
 
     for (const cn of (ssclCns || [])) {
       const monthKey = (cn.issued_at || '').slice(0, 7) || 'unknown'
@@ -285,23 +299,28 @@ export async function GET(req: NextRequest) {
 
   // ── VAT Summary (Output − Input = Net Payable) ─────────────────────────────
   if (type === 'vat_summary') {
-    // ── Output VAT: valid invoices minus credit notes ──
-    const [{ data: invoices }, { data: creditNotes }] = await Promise.all([
-      admin
+    // ── Output VAT: valid invoices minus credit notes ── (both paginated so a
+    // wide period with >1000 invoices/credit notes doesn't understate output VAT)
+    const [invoices, creditNotes] = await Promise.all([
+      fetchAllRows((from, to) => admin
         .from('sales')
-        .select('net_amount, vat_amount, total, voided_at')
+        .select('id, net_amount, vat_amount, total, voided_at')
         .eq('vendor_id', vendor.id)
         .eq('document_type', 'tax_invoice')
         .in('invoice_entity_id', entityIds)
         .gte('created_at', fromTs)
-        .lte('created_at', toTs),
-      admin
+        .lte('created_at', toTs)
+        .order('id')
+        .range(from, to)),
+      fetchAllRows((from, to) => admin
         .from('credit_notes')
-        .select('net_amount, vat_amount, total')
+        .select('id, net_amount, vat_amount, total')
         .eq('vendor_id', vendor.id)
         .in('invoice_entity_id', entityIds)
         .gte('issued_at', fromTs)
-        .lte('issued_at', toTs),
+        .lte('issued_at', toTs)
+        .order('id')
+        .range(from, to)),
     ])
 
     const validInvoices = (invoices || []).filter((s: any) => !s.voided_at)

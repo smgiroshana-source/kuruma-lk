@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows } from '@/lib/fetchAll'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -20,17 +21,25 @@ export async function GET() {
 
   const admin = createAdminClient()
 
-  // Get all sale_items with their sale info, ordered newest first.
-  // We then keep only the LAST sale per product_id client-side.
+  // Get all sale_items with their sale info, ordered newest first, then keep the
+  // LAST sale per product_id. Paginated: capped at 1000 rows it lost "last sold"
+  // info for every product whose most recent sale fell outside the newest 1000
+  // line items. Ordered desc across all pages so first-seen = most recent; id is
+  // the unique tiebreaker for stable pagination.
   const vendorId = (vendor as any).id
-  const { data: items, error } = await admin
-    .from('sale_items')
-    .select('product_id, unit_price, sales!inner(id, created_at, customer_name, payment_status, vendor_id)')
-    .eq('sales.vendor_id', vendorId)
-    .not('sales.payment_status', 'in', '("voided","draft")')
-    .order('sales.created_at', { ascending: false })
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  let items: any[]
+  try {
+    items = await fetchAllRows((from, to) => admin
+      .from('sale_items')
+      .select('product_id, unit_price, sales!inner(id, created_at, customer_name, payment_status, vendor_id)')
+      .eq('sales.vendor_id', vendorId)
+      .not('sales.payment_status', 'in', '("voided","draft")')
+      .order('sales.created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to))
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || 'Failed to load sold info' }, { status: 500 })
+  }
 
   // Build map: product_id → most recent sale info (first occurrence = most recent due to ordering)
   const map: Record<string, { sold_price: number; sold_date: string; customer_name: string }> = {}

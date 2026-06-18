@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -175,18 +176,22 @@ export async function GET(req: NextRequest) {
     const rangeStart = lkStartOfDay(rangeFromStr)
     const rangeEnd = lkEndOfDay(rangeToStr)
 
-    // Step 1: Fetch non-voided sales in range
-    const { data: sales, error: salesError } = await admin
-      .from('sales')
-      .select('id, total, payment_method, created_at')
-      .eq('vendor_id', vendor.id)
-      .is('voided_at', null)
-      .gte('created_at', rangeStart)
-      .lte('created_at', rangeEnd)
-
-    if (salesError) return NextResponse.json({ error: salesError.message }, { status: 500 })
-
-    const saleList = sales || []
+    // Step 1: Fetch non-voided sales in range (paginated — a busy period can
+    // exceed the 1000-row cap, which would silently understate the totals)
+    let saleList: any[]
+    try {
+      saleList = await fetchAllRows((from, to) => admin
+        .from('sales')
+        .select('id, total, payment_method, created_at')
+        .eq('vendor_id', vendor.id)
+        .is('voided_at', null)
+        .gte('created_at', rangeStart)
+        .lte('created_at', rangeEnd)
+        .order('id')
+        .range(from, to))
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || 'Failed to load sales' }, { status: 500 })
+    }
 
     let revenue = 0
     let cogs = 0
@@ -194,11 +199,15 @@ export async function GET(req: NextRequest) {
     if (saleList.length > 0) {
       const saleIds = saleList.map((s: any) => s.id)
 
-      // Step 2: Fetch sale_items with product cost for those sales
-      const { data: saleItems } = await admin
+      // Step 2: Fetch sale_items for those sales (chunked over the id list and
+      // paginated — the combined line items easily exceed 1000, which would
+      // undercount COGS and overstate gross profit)
+      const saleItems = await fetchAllByIds(saleIds, (ids, from, to) => admin
         .from('sale_items')
         .select('sale_id, product_id, quantity, unit_price, unit_cost')
-        .in('sale_id', saleIds)
+        .in('sale_id', ids)
+        .order('id')
+        .range(from, to))
 
       for (const si of (saleItems || [])) {
         const qty = parseInt(si.quantity ?? 0)
@@ -251,16 +260,20 @@ export async function GET(req: NextRequest) {
 
   // ── Stock value ────────────────────────────────────────────────────────────
   if (type === 'stock_value') {
-    // Summary
-    const { data: summary, error: summaryError } = await admin
-      .from('products')
-      .select('quantity, cost, price')
-      .eq('vendor_id', vendor.id)
-      .eq('is_active', true)
-
-    if (summaryError) return NextResponse.json({ error: summaryError.message }, { status: 500 })
-
-    const rows = summary || []
+    // Summary — paginated: a vendor with >1000 products would otherwise have its
+    // stock valuation computed over only the first 1000 (badly undercounted).
+    let rows: any[]
+    try {
+      rows = await fetchAllRows((from, to) => admin
+        .from('products')
+        .select('quantity, cost, price')
+        .eq('vendor_id', vendor.id)
+        .eq('is_active', true)
+        .order('id')
+        .range(from, to))
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || 'Failed to load products' }, { status: 500 })
+    }
     let total_products = rows.length
     let total_units = 0
     let total_cost_value = 0
@@ -280,15 +293,20 @@ export async function GET(req: NextRequest) {
       ? Math.round((potential_gp / total_retail_value) * 100 * 10) / 10
       : 0
 
-    // Top 5 categories by cost value (only products with stock > 0)
-    const { data: catRows, error: catError } = await admin
-      .from('products')
-      .select('category, quantity, cost')
-      .eq('vendor_id', vendor.id)
-      .eq('is_active', true)
-      .gt('quantity', 0)
-
-    if (catError) return NextResponse.json({ error: catError.message }, { status: 500 })
+    // Top 5 categories by cost value (only products with stock > 0) — paginated
+    let catRows: any[]
+    try {
+      catRows = await fetchAllRows((from, to) => admin
+        .from('products')
+        .select('category, quantity, cost')
+        .eq('vendor_id', vendor.id)
+        .eq('is_active', true)
+        .gt('quantity', 0)
+        .order('id')
+        .range(from, to))
+    } catch (e: any) {
+      return NextResponse.json({ error: e?.message || 'Failed to load categories' }, { status: 500 })
+    }
 
     // Aggregate by category in JS
     const catMap: Record<string, { category: string; cost_value: number; units: number }> = {}
