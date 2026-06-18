@@ -68,7 +68,12 @@ export async function GET(req: NextRequest) {
       .from('products')
       .select('id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, cost, price, quantity, show_price, is_active, vendor_id, created_at, loc_store, loc_floor, loc_sub1, loc_sub2, last_stock_confirmed_at, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, images:product_images(id, url, sort_order)')
       .eq('vendor_id', vendor.id)
+      // created_at is NOT unique (bulk imports share a timestamp). Without a
+      // unique tiebreaker, ties have no defined order across .range() batches,
+      // so offset pagination silently duplicates some rows and DROPS others —
+      // dropped products then never appear in POS/stock. id makes it a total order.
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
     if (!data || data.length === 0) break
     products = products.concat(data)

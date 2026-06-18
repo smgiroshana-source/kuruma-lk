@@ -37,7 +37,10 @@ export async function GET() {
     const { data } = await admin
       .from('products')
       .select('*, vendor:vendors(id, name, location, slug)')
+      // Unique tiebreaker required: created_at ties have no defined order across
+      // .range() batches, so pagination would duplicate/drop rows otherwise.
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
     if (!data || data.length === 0) break
     products = products.concat(data)
