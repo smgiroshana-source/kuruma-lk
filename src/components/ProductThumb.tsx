@@ -15,6 +15,17 @@ type Props = {
   className?: string
 }
 
+// Whether a photo-less product should show the generated brand/size badge on the
+// public storefront. Covers anything in the tyre category — not just rows where
+// product_type got set to 'tyre' (tubes/bias tyres are often stored as 'part').
+export function showsThumb(p: any): boolean {
+  return !!p && (
+    p.product_type === 'tyre' ||
+    p.category === 'Wheels & Tires' ||
+    (p.tyre_width && p.tyre_profile && p.tyre_rim)
+  )
+}
+
 export default function ProductThumb({ product, variant = 'card', className = '' }: Props) {
   const p = product || {}
   // Prefer the explicit brand (Make field — set by the tyre Brand picker / CSV)

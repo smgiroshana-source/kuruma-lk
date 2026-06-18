@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { thumbnail, imgFallback } from '@/lib/image'
-import ProductThumb from '@/components/ProductThumb'
+import ProductThumb, { showsThumb } from '@/components/ProductThumb'
 
 const ALL_CATEGORIES = [
   'Engine Parts', 'Transmission & Drivetrain', 'Suspension & Steering', 'Brake System',
@@ -279,7 +279,7 @@ export default function MakePageClient({ makeSlug, displayName, products }: Prop
                           onError={imgFallback}
                           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
                         />
-                      : ((product as any).product_type === 'tyre' || ((product as any).tyre_width && (product as any).tyre_profile && (product as any).tyre_rim))
+                      : showsThumb(product)
                       ? <ProductThumb product={product} variant="card" className="w-full h-full" />
                       : <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]">
                           <span className="text-[40px] opacity-[0.08]">🔧</span>
