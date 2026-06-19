@@ -58,19 +58,19 @@ export default function ProductThumb({ product, variant = 'card', className = ''
   if (isTyre) {
     return (
       <div className={`relative overflow-hidden flex flex-col items-center justify-center ${className}`}
-        style={{ background: 'radial-gradient(circle at 50% 38%, #3a3a3d 0%, #1c1c1e 62%, #000 100%)' }}>
+        style={{ background: 'radial-gradient(circle at 50% 38%, #3a3a3d 0%, #1c1c1e 62%, #000 100%)', containerType: 'inline-size' }}>
         {/* concentric sidewall rings */}
         <div className="absolute inset-[12%] rounded-full border border-white/10" />
         <div className="absolute inset-[26%] rounded-full border border-white/5" />
         {!compact && (
-          <span className="z-10 px-1.5 py-0.5 rounded-full font-black uppercase tracking-wide leading-none truncate max-w-[90%]"
-            style={{ background: bg, color: fg, fontSize: '0.6rem' }}>
+          <span className="z-10 rounded-full font-black uppercase tracking-wide leading-none truncate max-w-[92%]"
+            style={{ background: bg, color: fg, fontSize: 'clamp(10px, 8cqi, 30px)', padding: 'clamp(2px,1cqi,6px) clamp(7px,3cqi,16px)' }}>
             {brand?.name || (p.make || 'Tyre')}
           </span>
         )}
         {size && (
-          <span className={`z-10 font-black text-white leading-none ${compact ? 'mt-0' : 'mt-1'}`}
-            style={{ fontSize: compact ? '0.62rem' : '1rem', textShadow: '0 1px 2px rgba(0,0,0,.6)' }}>
+          <span className={`z-10 font-black text-white leading-none ${compact ? 'mt-0' : 'mt-2'}`}
+            style={{ fontSize: compact ? '0.62rem' : 'clamp(13px, 15cqi, 64px)', textShadow: '0 1px 3px rgba(0,0,0,.6)' }}>
             {compact ? `${p.tyre_width}/${p.tyre_profile}` : size}
           </span>
         )}
@@ -78,7 +78,7 @@ export default function ProductThumb({ product, variant = 'card', className = ''
           <span className="z-10 text-white/70 font-bold leading-none mt-0.5" style={{ fontSize: '0.55rem' }}>R{p.tyre_rim}</span>
         )}
         {!compact && p.origin_country && (
-          <span className="z-10 text-white/60 font-semibold mt-1 leading-none" style={{ fontSize: '0.5rem' }}>🌐 {p.origin_country}</span>
+          <span className="z-10 text-white/60 font-semibold leading-none" style={{ fontSize: 'clamp(9px,5cqi,18px)', marginTop: 'clamp(3px,1.5cqi,8px)' }}>🌐 {p.origin_country}</span>
         )}
       </div>
     )
@@ -88,13 +88,13 @@ export default function ProductThumb({ product, variant = 'card', className = ''
   const label = brand?.name || p.make || (p.name || '?').trim().split(/\s+/).slice(0, 2).join(' ')
   return (
     <div className={`relative overflow-hidden flex flex-col items-center justify-center text-center px-1 ${className}`}
-      style={{ background: bg, color: fg }}>
+      style={{ background: bg, color: fg, containerType: 'inline-size' }}>
       <span className={`font-black uppercase leading-tight ${compact ? 'line-clamp-2' : 'line-clamp-3'}`}
-        style={{ fontSize: compact ? '0.55rem' : '0.72rem', letterSpacing: '.02em' }}>
+        style={{ fontSize: compact ? '0.55rem' : 'clamp(11px,10cqi,32px)', letterSpacing: '.02em' }}>
         {label}
       </span>
       {!compact && p.origin_country && (
-        <span className="font-semibold mt-1 leading-none opacity-70" style={{ fontSize: '0.5rem' }}>🌐 {p.origin_country}</span>
+        <span className="font-semibold mt-1 leading-none opacity-70" style={{ fontSize: 'clamp(8px,5cqi,16px)' }}>🌐 {p.origin_country}</span>
       )}
     </div>
   )
