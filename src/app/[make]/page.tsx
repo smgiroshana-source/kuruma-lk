@@ -130,13 +130,44 @@ export default async function MakePage({ params }: Props) {
       : [],
   }))
 
+  const count = products.length
+
+  // Top categories actually in stock for this make (drives the on-page content)
+  const catCounts: Record<string, number> = {}
+  for (const p of products) { const c = (p.category || '').trim(); if (c && c !== 'Other') catCounts[c] = (catCounts[c] || 0) + 1 }
+  const topCategories = Object.entries(catCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([name, n]) => ({ name, count: n }))
+
+  // FAQ shown on the page AND mirrored into FAQPage schema (Google requires the
+  // schema's text to be visible on the page).
+  const faqs = [
+    {
+      q: `Where can I buy ${displayName} spare parts in Sri Lanka?`,
+      a: `kuruma.lk lists ${count} ${displayName} part${count === 1 ? '' : 's'} and accessories from verified Sri Lankan dealers. Browse the parts on this page, then contact the seller directly by WhatsApp or phone to buy.`,
+    },
+    {
+      q: `Are these ${displayName} parts genuine or reconditioned?`,
+      a: `You'll find new-genuine, brand-new aftermarket, and quality reconditioned ${displayName} parts. Every listing clearly shows its condition so you can choose what suits your budget.`,
+    },
+    {
+      q: `How much do ${displayName} spare parts cost in Sri Lanka?`,
+      a: `Prices vary by part and condition. Many listings show the price directly; others are marked "Ask Price", so message the dealer for a quick quote.`,
+    },
+    {
+      q: `Is island-wide delivery available for ${displayName} parts?`,
+      a: `Most dealers on kuruma.lk arrange delivery across Sri Lanka. Confirm delivery and payment options with the seller when you contact them.`,
+    },
+  ]
+
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
     name: `${displayName} Parts Sri Lanka`,
     description: `${displayName} spare parts available in Sri Lanka on kuruma.lk`,
     url: `${SITE_URL}/${makeSlug}`,
-    numberOfItems: products.length,
+    numberOfItems: count,
     breadcrumb: {
       '@type': 'BreadcrumbList',
       itemListElement: [
@@ -146,16 +177,32 @@ export default async function MakePage({ params }: Props) {
     },
   }
 
+  const faqJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqs.map(f => ({
+      '@type': 'Question',
+      name: f.q,
+      acceptedAnswer: { '@type': 'Answer', text: f.a },
+    })),
+  }
+
   return (
     <>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+      />
       <MakePageClient
         makeSlug={makeSlug}
         displayName={displayName}
         products={normalizedProducts}
+        topCategories={topCategories}
+        faqs={faqs}
       />
     </>
   )

@@ -36,9 +36,11 @@ type Props = {
   makeSlug: string
   displayName: string
   products: any[]
+  topCategories?: { name: string; count: number }[]
+  faqs?: { q: string; a: string }[]
 }
 
-export default function MakePageClient({ makeSlug, displayName, products }: Props) {
+export default function MakePageClient({ makeSlug, displayName, products, topCategories = [], faqs = [] }: Props) {
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [conditionFilter, setConditionFilter] = useState('All')
   const [sortBy, setSortBy] = useState('newest')
@@ -337,6 +339,47 @@ export default function MakePageClient({ makeSlug, displayName, products }: Prop
           </p>
         )}
       </main>
+
+      {/* ── SEO content: intro + popular categories + FAQ (server-rendered) ── */}
+      <section className="max-w-[1200px] mx-auto px-4 sm:px-6 mt-4 mb-2">
+        <div className="bg-white border border-[#eee] rounded-2xl p-5 sm:p-7">
+          <h2 className="text-lg sm:text-xl font-black text-[#222] mb-2">{displayName} Spare Parts in Sri Lanka</h2>
+          <p className="text-sm text-[#666] leading-relaxed max-w-3xl">
+            Looking for {displayName} spare parts in Sri Lanka? kuruma.lk lists {products.length.toLocaleString()} {displayName} part{products.length === 1 ? '' : 's'} and accessories from trusted dealers — new-genuine, brand-new aftermarket and quality reconditioned. Compare options, check the condition and price on each listing, and contact the seller directly by WhatsApp or phone.
+          </p>
+
+          {topCategories.length > 0 && (
+            <div className="mt-5">
+              <h3 className="text-sm font-bold text-[#333] mb-2">Popular {displayName} part categories</h3>
+              <div className="flex flex-wrap gap-2">
+                {topCategories.map(c => (
+                  <button
+                    key={c.name}
+                    onClick={() => { setSelectedCategory(c.name); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+                    className="text-xs font-semibold text-[#444] bg-[#f5f5f5] hover:bg-[#ffe9df] hover:text-[#ff6b35] border border-[#eee] rounded-full px-3 py-1.5 transition"
+                  >
+                    {c.name} <span className="text-[#aaa] font-normal">({c.count})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {faqs.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-bold text-[#333] mb-3">Frequently asked questions</h3>
+              <div className="space-y-3 max-w-3xl">
+                {faqs.map((f, i) => (
+                  <div key={i}>
+                    <p className="text-sm font-semibold text-[#222]">{f.q}</p>
+                    <p className="text-sm text-[#666] leading-relaxed mt-0.5">{f.a}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
 
       <footer className="bg-[#fafafa] border-t border-[#eee] py-7 text-center mt-6">
         <div className="flex items-baseline justify-center gap-0.5 mb-1">
