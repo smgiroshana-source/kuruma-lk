@@ -566,7 +566,6 @@ export default function VendorDashboard() {
   const zipFileRef = useRef<HTMLInputElement>(null)
 
   // POS
-  const [posCart, setPosCart] = useState<any[]>([])
 
   // Sales
   const [salesData, setSalesData] = useState<any>(null)
@@ -1183,8 +1182,24 @@ export default function VendorDashboard() {
     setTimeout(() => setBulkProgress({ current: 0, total: 0, phase: '', detail: '' }), 3000)
   }
 
-  function addToCart(product: any) {
-    setPosCart(prev => { const ex = prev.find(i => i.productId === product.id); if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: Math.min(i.quantity + 1, product.quantity) } : i); return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: product.quantity }] })
+  // Hand the selected products to the POS screen as a fresh cart. The POS tab
+  // (TabPOSLkTax/Standard) loads its cart from pendingPosDraft — it does NOT read
+  // page.tsx state — so this is the only channel that actually populates it.
+  // Starts a new sale (draftId '') with those items; add more via POS search.
+  function sendProductsToPos(prods: any[]) {
+    const sel = (prods || []).filter((p: any) => p && p.quantity > 0)
+    if (!sel.length) { showToast('No in-stock products selected'); return }
+    setPendingPosDraft({
+      cart: sel.map((p: any) => ({
+        productId: p.id, productName: p.name, productSku: p.sku || '',
+        quantity: 1, unitPrice: p.price || 0, unitCost: p.cost || 0, cost: p.cost || 0,
+        maxStock: p.quantity,
+      })),
+      customer: { id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false },
+      vehicleNo: '', draftId: '', draftInvoiceNo: '',
+    })
+    setTab('pos')
+    showToast(`${sel.length} item${sel.length > 1 ? 's' : ''} added to POS`)
   }
 
   // lk_tax computed values (used in Settings, tab conditionals)
@@ -2045,12 +2060,8 @@ ${customerRows.map(c => `<tr>
               </>)}
               {selectedProducts.size > 0 && (<>
                 <button onClick={() => {
-                  const products = (data?.products || []).filter((p: any) => selectedProducts.has(p.id) && p.quantity > 0)
-                  if (!products.length) { showToast('No in-stock products selected'); return }
-                  products.forEach((p: any) => addToCart(p))
+                  sendProductsToPos((data?.products || []).filter((p: any) => selectedProducts.has(p.id)))
                   setSelectedProducts(new Set())
-                  setTab('pos')
-                  showToast(`${products.length} item${products.length > 1 ? 's' : ''} added to POS`)
                 }} className="bg-green-500 hover:bg-green-600 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5">🛒 Send to POS ({selectedProducts.size})</button>
                 <button onClick={deleteSelectedProducts} className="bg-red-500 hover:bg-red-600 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5">🗑️ Delete {selectedProducts.size}</button>
               </>)}
@@ -2108,7 +2119,7 @@ ${customerRows.map(c => `<tr>
                         <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1.5 p-1.5" onClick={e => e.stopPropagation()}>
                           <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-blue-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-blue-600">✏️ Edit</button>
                           <button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []); setMobileActiveProduct(null) }} className="w-full bg-orange-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-orange-600">🖼️ Primary</button>
-                          {p.quantity > 0 && <button onClick={() => { addToCart(p); setTab('pos'); setMobileActiveProduct(null); showToast('Added to POS') }} className="w-full bg-green-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-green-600">🛒 POS</button>}
+                          {p.quantity > 0 && <button onClick={() => { sendProductsToPos([p]); setMobileActiveProduct(null) }} className="w-full bg-green-500 text-white text-[11px] font-bold py-2 rounded-lg active:bg-green-600">🛒 POS</button>}
                           <button onClick={() => setMobileActiveProduct(null)} className="w-full text-white/70 text-[10px] font-semibold py-1">Cancel</button>
                         </div>
                       )}
