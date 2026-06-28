@@ -2,6 +2,7 @@
 import { toWhatsAppNumber } from '@/lib/constants'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { gpPercent, isBelowCost } from '@/lib/margin'
 import { useState, useEffect, useMemo } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
@@ -510,7 +511,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     setPosCart(prev => {
       const ex = prev.find(i => i.productId === product.id)
       if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: Math.min(i.quantity + 1, product.quantity) } : i)
-      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: product.quantity }]
+      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: product.quantity, cost: product.cost ?? null }]
     })
     setPosSearch('')
   }
@@ -946,7 +947,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className="w-20 sm:w-24 px-1 sm:px-2 py-1 border border-slate-200 rounded text-sm" />
+                            <input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(item.unitPrice, item.cost) ? 'border-red-400 bg-red-50' : 'border-slate-200')} />
+                            {Number(item.cost) > 0 && (isBelowCost(item.unitPrice, item.cost)
+                              ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost Rs.{Number(item.cost).toLocaleString()}</p>
+                              : Number(item.unitPrice) > 0 && <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(item.unitPrice, item.cost)}%</p>)}
                           </td>
                           <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td>
                           <td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td>
