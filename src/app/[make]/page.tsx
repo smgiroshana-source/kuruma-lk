@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows } from '@/lib/fetchAll'
 import MakePageClient from './MakePageClient'
 
 // Regenerate every hour — same cadence as homepage
@@ -107,7 +108,10 @@ export default async function MakePage({ params }: Props) {
   const displayName = slugToDisplayName(makeSlug)
 
   const admin = createAdminClient()
-  const { data: products } = await (admin.from('products') as any)
+  // Load ALL in-stock parts for this make (paginated, id tiebreaker for stable
+  // order). The old .limit(500) both truncated browsing AND made the header
+  // read a flat "500" for any make with 500+ parts (Toyota 1819, Suzuki 2739…).
+  const products = await fetchAllRows((from, to) => (admin.from('products') as any)
     .select(
       'id, name, sku, category, make, model, year, condition, price, show_price, quantity, slug, created_at, ' +
       'product_type, tyre_width, tyre_profile, tyre_rim, origin_country, ' +
@@ -117,7 +121,8 @@ export default async function MakePage({ params }: Props) {
     .eq('is_active', true)
     .gt('quantity', 0)
     .order('created_at', { ascending: false })
-    .limit(500)
+    .order('id', { ascending: false })
+    .range(from, to))
 
   // No products → proper 404 (also blocks random slugs like /blahblah)
   if (!products || products.length === 0) notFound()
