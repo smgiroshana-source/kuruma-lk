@@ -344,9 +344,11 @@ export interface TabPOSLkTaxProps {
   /** When set, TabPOS will pre-populate its state from this draft and clear it once loaded. */
   pendingDraft?: PendingDraft | null
   onDraftLoaded?: () => void
+  pendingAddItems?: any[] | null
+  onItemsAdded?: () => void
 }
 
-export default function TabPOSLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, pendingDraft, onDraftLoaded }: TabPOSLkTaxProps) {
+export default function TabPOSLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, pendingDraft, onDraftLoaded, pendingAddItems, onItemsAdded }: TabPOSLkTaxProps) {
   const isLkTax = vendorSettings?.invoice_mode === 'lk_tax'
 
   // ── POS state ──────────────────────────────────────────────────────────
@@ -406,6 +408,27 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     setPosDate(colomboToday())
     onDraftLoaded?.()
   }, [pendingDraft])
+
+  // ── Append items handed from the Products tab (Send to POS) — merge into the
+  // current cart instead of replacing, so an in-progress sale isn't clobbered.
+  useEffect(() => {
+    if (!pendingAddItems || pendingAddItems.length === 0) return
+    setPosCart(prev => {
+      const next = [...prev]
+      for (const it of pendingAddItems) {
+        const idx = it.productId ? next.findIndex(c => c.productId === it.productId) : -1
+        if (idx >= 0) {
+          const cur = next[idx]
+          const max = it.maxStock ?? cur.maxStock
+          next[idx] = { ...cur, quantity: max ? Math.min(cur.quantity + it.quantity, max) : cur.quantity + it.quantity }
+        } else {
+          next.push({ ...it })
+        }
+      }
+      return next
+    })
+    onItemsAdded?.()
+  }, [pendingAddItems])
 
   async function fetchInvoiceEntities() {
     try {
@@ -518,6 +541,15 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   function updateCartQty(i: number, q: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, quantity: Math.max(1, item.maxStock == null ? q : Math.min(q, item.maxStock)) } : item)) }
   function updateCartPrice(i: number, price: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, unitPrice: price } : item)) }
   function removeFromCart(i: number) { setPosCart(p => p.filter((_, x) => x !== i)) }
+  // Empty the whole sale and start fresh (cart, customer, vehicle, payments, draft)
+  function clearPos() {
+    if (posCart.length > 0 && !confirm('Clear the current sale and start a new one?')) return
+    setPosCart([]); setPosDraftId(null); setPosDraftInvoiceNo('')
+    setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
+    setPosVehicleNo(''); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
+    setPosDiscount(''); setPosNotes(''); setPosErrors({}); setUseAdvance(false)
+    setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
+  }
 
   function addManualLine() {
     const name = manualLine.name.trim()
@@ -923,6 +955,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 <div className="bg-white rounded-xl border border-slate-200 p-8 text-center"><p className="text-3xl opacity-30">🛒</p><p className="text-slate-400 font-semibold">Add products above</p></div>
               ) : (
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="flex items-center justify-between px-3 sm:px-4 py-2 border-b border-slate-100">
+                    <span className="text-xs font-bold text-slate-500">{posCart.length} item{posCart.length !== 1 ? 's' : ''} in cart</span>
+                    <button onClick={clearPos} className="text-xs font-bold text-red-500 hover:text-red-700 active:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50">🗑 Clear / New Sale</button>
+                  </div>
                   <table className="w-full text-sm">
                     <thead><tr className="bg-slate-50">
                       <th className="px-2 sm:px-4 py-2 text-left text-xs font-bold text-slate-500">Item</th>

@@ -613,6 +613,9 @@ export default function VendorDashboard() {
 
   // Draft / On Approval (page-level: used by Sales "Finalise →" to hand off to TabPOS)
   const [pendingPosDraft, setPendingPosDraft] = useState<PendingDraft | null>(null)
+  // WHEEL MART only: items to APPEND to the POS cart (Send to POS from products),
+  // distinct from pendingPosDraft which REPLACES the cart for draft finalising.
+  const [pendingAddItems, setPendingAddItems] = useState<any[] | null>(null)
   const [draftReturning, setDraftReturning] = useState<string | null>(null)
   const [returningItem, setReturningItem] = useState<string | null>(null)
   const [allDrafts, setAllDrafts] = useState<any[]>([])
@@ -1189,15 +1192,22 @@ export default function VendorDashboard() {
   function sendProductsToPos(prods: any[]) {
     const sel = (prods || []).filter((p: any) => p && p.quantity > 0)
     if (!sel.length) { showToast('No in-stock products selected'); return }
-    setPendingPosDraft({
-      cart: sel.map((p: any) => ({
-        productId: p.id, productName: p.name, productSku: p.sku || '',
-        quantity: 1, unitPrice: p.price || 0, unitCost: p.cost || 0, cost: p.cost || 0,
-        maxStock: p.quantity,
-      })),
-      customer: { id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false },
-      vehicleNo: '', draftId: '', draftInvoiceNo: '',
-    })
+    const items = sel.map((p: any) => ({
+      productId: p.id, productName: p.name, productSku: p.sku || '',
+      quantity: 1, unitPrice: p.price || 0, unitCost: p.cost || 0, cost: p.cost || 0,
+      maxStock: p.quantity,
+    }))
+    if (vendorSettings?.invoice_mode === 'lk_tax') {
+      // WHEEL MART: APPEND to whatever is already in the POS cart (don't clobber)
+      setPendingAddItems(items)
+    } else {
+      // Sakura: replace (the only channel its POS reads)
+      setPendingPosDraft({
+        cart: items,
+        customer: { id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false },
+        vehicleNo: '', draftId: '', draftInvoiceNo: '',
+      })
+    }
     setTab('pos')
     showToast(`${sel.length} item${sel.length > 1 ? 's' : ''} added to POS`)
   }
@@ -2705,6 +2715,8 @@ ${customerRows.map(c => `<tr>
               onDataChanged={() => fetchData(undefined, true)}
               pendingDraft={pendingPosDraft}
               onDraftLoaded={() => setPendingPosDraft(null)}
+              pendingAddItems={pendingAddItems}
+              onItemsAdded={() => setPendingAddItems(null)}
             />
           ) : (
             <TabPOSStandard
