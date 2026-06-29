@@ -520,6 +520,12 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   function selectCustomer(customer: any) {
     const advance = parseFloat(customer.advance_balance || 0)
     setPosCustomer({ id: customer.id, name: customer.name, phone: customer.phone || '', advance, outstanding: 0, require_vehicle_no: customer.require_vehicle_no || false })
+    // Auto-fill the saved tax details so a VAT-registered customer doesn't have
+    // to be re-entered each visit (the sale already persists these back).
+    setPosCustomerAddress(customer.address || '')
+    setPosCustomerVatReg(!!customer.vat_registered)
+    setPosCustomerTin(customer.vat_registered ? (customer.tin || '') : '')
+    setPosErrors(prev => ({ ...prev, name: false, phone: false, address: false, tin: false }))
     setCustomerSuggestions([])
     if (advance > 0) setUseAdvance(true)
     fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_outstanding', customerId: customer.id }) })
