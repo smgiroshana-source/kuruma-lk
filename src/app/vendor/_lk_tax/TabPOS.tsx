@@ -783,6 +783,15 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               <p className="font-black text-xl">{vendor?.name}</p>
               <p className="text-sm text-slate-300 mt-1">{new Date(posDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
             </div>
+            {/* Entity + document-type banner — colour-coded so VAT (Pvt Ltd) and
+                no-VAT (Proprietorship) can't be confused at the confirm step */}
+            <div className={`px-5 py-3 flex items-center gap-3 text-white ${posIsVatEntity ? 'bg-indigo-600' : 'bg-amber-500'}`}>
+              <span className="text-2xl shrink-0">🧾</span>
+              <div className="min-w-0">
+                <p className="font-black text-sm tracking-wide leading-tight">{posIsVatEntity ? `TAX INVOICE · VAT ${posVatRate}%` : 'SALES RECEIPT · NO VAT'}</p>
+                <p className="text-xs opacity-90 truncate">{posCurrentEntity?.name || vendor?.name}</p>
+              </div>
+            </div>
             <div className="p-5 space-y-4">
               <div className="bg-slate-50 rounded-xl p-3 space-y-0.5">
                 <p className="font-black text-slate-800">{posCustomer.name || 'Walk-in Customer'}</p>
@@ -807,7 +816,14 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               <div className="border-t border-slate-100 pt-3 space-y-1.5">
                 <div className="flex justify-between text-sm text-slate-500"><span>Subtotal</span><span>Rs.{posSubtotal.toLocaleString()}</span></div>
                 {posDiscountAmt > 0 && <div className="flex justify-between text-sm text-emerald-600"><span>Discount</span><span>−Rs.{posDiscountAmt.toLocaleString()}</span></div>}
-                <div className="flex justify-between font-black text-base text-slate-800 pt-1 border-t border-slate-200"><span>Total</span><span>Rs.{posTotal.toLocaleString()}</span></div>
+                {posIsVatEntity ? (<>
+                  <div className="flex justify-between text-sm text-slate-500"><span>NET (excl. VAT)</span><span>Rs.{posNetAmount.toLocaleString()}</span></div>
+                  <div className="flex justify-between items-center bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 my-1"><span className="text-sm font-bold text-indigo-700">VAT @ {posVatRate}%</span><span className="text-lg font-black text-indigo-700">Rs.{posVatAmount.toLocaleString()}</span></div>
+                  <div className="flex justify-between font-black text-base text-slate-800 pt-1 border-t border-slate-200"><span>TOTAL (incl. VAT)</span><span>Rs.{posTotal.toLocaleString()}</span></div>
+                </>) : (<>
+                  <div className="flex justify-between font-black text-base text-slate-800 pt-1 border-t border-slate-200"><span>Total</span><span>Rs.{posTotal.toLocaleString()}</span></div>
+                  <p className="text-[11px] font-bold text-amber-600">No VAT charged (Proprietorship)</p>
+                </>)}
               </div>
               {posPayments.filter(p => parseFloat(p.amount) > 0).length > 0 && (
                 <div className="bg-emerald-50 rounded-xl p-3 space-y-1">
