@@ -235,8 +235,10 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
     ${discount > 0
       ? `<tr><td class="tlbl">Discount</td><td class="tval">&#8722;&nbsp;${discount.toLocaleString()}</td></tr>`
       : ''}
-    <tr><td class="tlbl">Net Amount (excl. VAT)</td><td class="tval">${netAmount.toLocaleString()}</td></tr>
-    <tr><td class="tlbl">VAT @ ${vatRate}%</td><td class="tval">${vatAmount.toLocaleString()}</td></tr>
+    <!-- VAT breakdown hidden on the printed bill at owner's request (2026-06).
+         To restore the gazette-compliant tax-invoice breakdown, re-add:
+         <tr><td class="tlbl">Net Amount (excl. VAT)</td><td class="tval">${netAmount.toLocaleString()}</td></tr>
+         <tr><td class="tlbl">VAT @ ${vatRate}%</td><td class="tval">${vatAmount.toLocaleString()}</td></tr> -->
     <tr class="grand"><td class="tlbl">TOTAL (Rs.)</td><td class="tval">${total.toLocaleString()}</td></tr>
   </table>
 </div>
