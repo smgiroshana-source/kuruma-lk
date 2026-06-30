@@ -704,6 +704,13 @@ export default function VendorDashboard() {
 
   const [staffRole, setStaffRole] = useState<string>('owner')
 
+  // Safety net behind the sidebar role-gating: a cashier can only ever be on POS,
+  // and a manager can't sit on the owner-only Settings tab (even via stale state).
+  useEffect(() => {
+    if (staffRole === 'cashier' && tab !== 'pos') setTab('pos')
+    else if (staffRole === 'manager' && tab === 'settings') setTab('pos')
+  }, [staffRole, tab])
+
   async function fetchSettings() {
     try {
       const res = await fetch('/api/vendor/settings')

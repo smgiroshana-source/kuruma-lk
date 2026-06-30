@@ -98,6 +98,14 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
 
   const roleLabel = staffRole === 'owner' ? 'Owner' : staffRole === 'manager' ? 'Manager' : staffRole === 'cashier' ? 'Cashier' : staffRole
 
+  // Role gating: cashier → POS only; manager → everything except Settings; owner → all.
+  const canSee = (item: NavItem) => {
+    if (item.id === '_signout') return true
+    if (staffRole === 'cashier') return item.id === 'pos'
+    if (staffRole === 'manager') return item.id !== 'settings'
+    return true
+  }
+
   return (
     <aside
       className="fixed top-0 left-0 h-screen flex flex-col z-40 overflow-y-auto overflow-x-hidden transition-all duration-200"
@@ -147,7 +155,10 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
 
       {/* Nav sections */}
       <nav className="flex-1 py-1.5 overflow-y-auto overflow-x-hidden">
-        {NAV_SECTIONS.map((section, si) => (
+        {NAV_SECTIONS.map((section, si) => {
+          const visibleItems = section.items.filter(canSee)
+          if (visibleItems.length === 0) return null
+          return (
           <div key={si} className="mb-0.5">
             {section.label && !collapsed && (
               <div className="px-3 pt-3 pb-1 text-[10px] font-semibold tracking-widest text-slate-500 uppercase select-none">
@@ -158,7 +169,7 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
               <div className="mx-3 my-1.5 h-px bg-slate-700/50" />
             )}
 
-            {section.items.map((item, ii) => {
+            {visibleItems.map((item, ii) => {
               const isActive = !item.comingSoon && item.id !== '_coming' && item.id !== '_signout' && tab === item.id
 
               if (item.isPOS) {
@@ -218,12 +229,13 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
               )
             })}
           </div>
-        ))}
+          )
+        })}
       </nav>
 
       {/* Bottom items */}
       <div className="border-t border-slate-700/60 py-1 shrink-0">
-        {BOTTOM_ITEMS.map((item) => {
+        {BOTTOM_ITEMS.filter(canSee).map((item) => {
           const isActive = item.id !== '_signout' && tab === item.id
           return (
             <button
