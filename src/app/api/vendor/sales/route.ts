@@ -543,7 +543,24 @@ export async function POST(req: NextRequest) {
 
     const { data: sale, error: saleError } = await admin.from('sales').insert(saleRecord).select().single()
 
-    if (saleError) return NextResponse.json({ error: saleError.message }, { status: 400 })
+    if (saleError) {
+      // The gazette serial was already minted (committed) by reserveSerial above.
+      // If the real sale row failed to insert, write a minimal VOID row carrying
+      // that serial so the number stays in the ledger and the sequence is gapless
+      // (a retry mints the NEXT serial). Best-effort — don't mask the real error.
+      if (isLkTax && taxSerial) {
+        await admin.from('sales').insert({
+          vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: customerName || 'VOID',
+          subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
+          paid_amount: 0, balance_due: 0, total_amount_due: 0,
+          payment_method: 'cash', payment_status: 'voided', voided_at: new Date().toISOString(),
+          invoice_entity_id: resolvedEntityId, document_type: resolvedDocType,
+          tax_serial: taxSerial, receipt_no: receiptNo,
+          notes: 'VOID — sale failed to save, serial preserved: ' + saleError.message,
+        }).then(() => {}, () => {})
+      }
+      return NextResponse.json({ error: saleError.message }, { status: 400 })
+    }
 
     // Create sale items
     const saleItems = items.map((item: any) => ({
@@ -1337,7 +1354,21 @@ export async function POST(req: NextRequest) {
         created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
         ...lkTaxFields,
       }).select().single()
-      if (newSaleErr || !newSale) return NextResponse.json({ error: newSaleErr?.message || 'Failed to create invoice' }, { status: 400 })
+      if (newSaleErr || !newSale) {
+        // Serial already minted — preserve it as a VOID row (gapless sequence).
+        if (finalizeIsLkTax && lkTaxFields.tax_serial) {
+          await admin.from('sales').insert({
+            vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: finalCustomerName || 'VOID',
+            subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
+            paid_amount: 0, balance_due: 0, total_amount_due: 0,
+            payment_method: 'cash', payment_status: 'voided', voided_at: new Date().toISOString(),
+            invoice_entity_id: lkTaxFields.invoice_entity_id, document_type: lkTaxFields.document_type,
+            tax_serial: lkTaxFields.tax_serial, receipt_no: lkTaxFields.receipt_no || null,
+            notes: 'VOID — draft finalize failed, serial preserved: ' + (newSaleErr?.message || ''),
+          }).then(() => {}, () => {})
+        }
+        return NextResponse.json({ error: newSaleErr?.message || 'Failed to create invoice' }, { status: 400 })
+      }
 
       // Move confirmed sale_items to new invoice and update their prices
       for (const fi of confirmedItems) {
@@ -1452,7 +1483,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Stamp the finalization date (not draft creation date) so it lands in today's reports
-    await admin.from('sales').update({
+    const { error: finalizeUpdateErr } = await admin.from('sales').update({
       invoice_no: invoiceNo,
       customer_id: resolvedCustomerId,
       subtotal, discount: discountAmt, total,
@@ -1466,6 +1497,23 @@ export async function POST(req: NextRequest) {
       customer_phone: finalCustomerPhone,
       ...fullLkTaxFields,
     }).eq('id', saleId)
+    if (finalizeUpdateErr) {
+      // The draft row stayed a draft and the serial was already minted — don't
+      // continue (stock/FIFO) on an unfinalised row, and preserve the serial as a
+      // VOID placeholder so the gazette sequence stays gapless. Draft can be retried.
+      if (finalizeIsLkTax && fullLkTaxFields.tax_serial) {
+        await admin.from('sales').insert({
+          vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: finalCustomerName || 'VOID',
+          subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
+          paid_amount: 0, balance_due: 0, total_amount_due: 0,
+          payment_method: 'cash', payment_status: 'voided', voided_at: new Date().toISOString(),
+          invoice_entity_id: fullLkTaxFields.invoice_entity_id, document_type: fullLkTaxFields.document_type,
+          tax_serial: fullLkTaxFields.tax_serial, receipt_no: fullLkTaxFields.receipt_no || null,
+          notes: 'VOID — draft finalize failed, serial preserved: ' + finalizeUpdateErr.message,
+        }).then(() => {}, () => {})
+      }
+      return NextResponse.json({ error: finalizeUpdateErr.message }, { status: 400 })
+    }
 
     // FIFO cost consumption — consume cost layers for product items now that sale is finalized
     const draftProductItems = (draft.items || []).filter((i: any) => i.product_id)
