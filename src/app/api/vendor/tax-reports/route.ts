@@ -87,7 +87,10 @@ export async function GET(req: NextRequest) {
       netAmount:    parseInt(s.net_amount || 0),
       vatAmount:    parseInt(s.vat_amount || 0),
       total:        parseInt(s.total || 0),
-      status:       s.voided_at ? 'VOID' : 'VALID',
+      // Treat EITHER void signal as void — a row may carry payment_status='voided'
+      // without voided_at (legacy), and the SSCL report keys on payment_status, so
+      // both reports must agree or output VAT and SSCL turnover diverge.
+      status:       (s.voided_at || s.payment_status === 'voided') ? 'VOID' : 'VALID',
     }))
 
     // Credit note rows — negative amounts, status = 'CRN'
@@ -246,8 +249,8 @@ export async function GET(req: NextRequest) {
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
-      .gte('received_at', from)
-      .lte('received_at', to)
+      .gte('received_at', fromTs)
+      .lte('received_at', toTs)
       .order('received_at', { ascending: true })
       .order('created_at', { ascending: true })
 
@@ -304,7 +307,7 @@ export async function GET(req: NextRequest) {
     const [invoices, creditNotes] = await Promise.all([
       fetchAllRows((from, to) => admin
         .from('sales')
-        .select('id, net_amount, vat_amount, total, voided_at')
+        .select('id, net_amount, vat_amount, total, voided_at, payment_status')
         .eq('vendor_id', vendor.id)
         .eq('document_type', 'tax_invoice')
         .in('invoice_entity_id', entityIds)
@@ -323,7 +326,7 @@ export async function GET(req: NextRequest) {
         .range(from, to)),
     ])
 
-    const validInvoices = (invoices || []).filter((s: any) => !s.voided_at)
+    const validInvoices = (invoices || []).filter((s: any) => !s.voided_at && s.payment_status !== 'voided')
     const outputVatNet  = validInvoices.reduce((s: number, r: any) => s + parseInt(r.vat_amount || 0), 0)
     const outputVatCrn  = (creditNotes || []).reduce((s: number, r: any) => s + parseInt(r.vat_amount || 0), 0)
     const outputVat     = outputVatNet - outputVatCrn
@@ -344,8 +347,8 @@ export async function GET(req: NextRequest) {
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
-      .gte('received_at', from)
-      .lte('received_at', to)
+      .gte('received_at', fromTs)
+      .lte('received_at', toTs)
 
     const claimableGrns = (grns || []).filter((g: any) => g.supplier_vat_registered !== false)   // exclude known non-VAT suppliers
     const inputVat = claimableGrns.reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
