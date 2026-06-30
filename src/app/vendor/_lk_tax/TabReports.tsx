@@ -44,8 +44,11 @@ interface StockValue {
   top_categories: Array<{ category: string; cost_value: number; units: number }>
 }
 
-type SubTab = 'reorder' | 'gp' | 'stock_value'
+type SubTab = 'reorder' | 'gp' | 'stock_value' | 'cashflow'
 type GPPeriod = 'today' | 'week' | 'month'
+
+function lkToday(): string { return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }) }
+function lkMonthStart(): string { return lkToday().slice(0, 8) + '01' }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +77,13 @@ export default function TabReports({ vendor, showToast }: Props) {
   const [loadingStock, setLoadingStock] = useState(false)
   const [stockLoaded, setStockLoaded] = useState(false)
 
+  // ── Cash Flow state ───────────────────────────────────────────────────────
+  const [cfFrom, setCfFrom] = useState(lkMonthStart())
+  const [cfTo, setCfTo] = useState(lkToday())
+  const [cfData, setCfData] = useState<any | null>(null)
+  const [loadingCF, setLoadingCF] = useState(false)
+  const [cfLoaded, setCfLoaded] = useState(false)
+
   // ── Lazy fetch on sub-tab open ─────────────────────────────────────────────
 
   useEffect(() => {
@@ -86,8 +96,34 @@ export default function TabReports({ vendor, showToast }: Props) {
     if (activeTab === 'stock_value' && !stockLoaded) {
       fetchStockValue()
     }
+    if (activeTab === 'cashflow' && !cfLoaded) {
+      fetchCashflow()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
+
+  async function fetchCashflow() {
+    setLoadingCF(true)
+    try {
+      const res = await fetch(`/api/vendor/reports?type=cashflow&from=${cfFrom}&to=${cfTo}`)
+      if (!res.ok) throw new Error('Failed to load cash flow')
+      setCfData(await res.json())
+      setCfLoaded(true)
+    } catch (e: any) {
+      showToast(e.message ?? 'Error loading cash flow')
+    } finally {
+      setLoadingCF(false)
+    }
+  }
+
+  function exportCashflowCsv() {
+    if (!cfData?.ledger) return
+    const rows = [['Date', 'Type', 'Reference', 'Method', 'In (Rs.)', 'Out (Rs.)', 'Balance (Rs.)']]
+    for (const e of cfData.ledger) rows.push([e.date, e.type, e.ref, e.method, e.in, e.out, e.balance])
+    const csv = rows.map(r => r.map((c: any) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+    const a = document.createElement('a'); a.href = url; a.download = `cashflow-${cfFrom}-to-${cfTo}.csv`; a.click(); URL.revokeObjectURL(url)
+  }
 
   useEffect(() => {
     if (activeTab === 'gp') {
@@ -167,6 +203,7 @@ export default function TabReports({ vendor, showToast }: Props) {
         {(
           [
             { key: 'reorder', label: 'Reorder Alerts' },
+            { key: 'cashflow', label: 'Cash Flow' },
             { key: 'gp', label: 'GP Report' },
             { key: 'stock_value', label: 'Stock Value' },
           ] as { key: SubTab; label: string }[]
@@ -184,6 +221,48 @@ export default function TabReports({ vendor, showToast }: Props) {
           </button>
         ))}
       </div>
+
+      {/* ── Cash Flow ───────────────────────────────────────────────────────── */}
+      {activeTab === 'cashflow' && (
+        <div>
+          <div className="flex items-end gap-3 flex-wrap mb-4">
+            <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label><input type="date" value={cfFrom} onChange={e => setCfFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+            <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label><input type="date" value={cfTo} onChange={e => setCfTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+            <button onClick={fetchCashflow} disabled={loadingCF} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-bold px-4 py-2 rounded-lg">{loadingCF ? 'Loading…' : 'View'}</button>
+            {cfData?.ledger?.length > 0 && <button onClick={exportCashflowCsv} className="text-sm font-bold text-slate-600 border border-slate-300 px-4 py-2 rounded-lg hover:bg-slate-50">⬇ CSV</button>}
+          </div>
+          <p className="text-xs text-slate-400 mb-4">Cash basis — actual money received & paid (not invoice totals). Credit sales count only when collected.</p>
+
+          {loadingCF ? <div className="text-center py-12 text-slate-400">Loading…</div> : cfData && (<>
+            <div className={'rounded-xl p-5 mb-4 ' + (cfData.net >= 0 ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200')}>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Net Cash Movement</p>
+              <p className={'text-3xl font-black ' + (cfData.net >= 0 ? 'text-green-700' : 'text-red-600')}>{formatRs(cfData.net)}</p>
+              <p className="text-xs text-slate-500 mt-1">Cash drawer only: <span className="font-bold">{formatRs(cfData.cashDrawer.net)}</span> &nbsp;(in {formatRs(cfData.cashDrawer.in)} − out {formatRs(cfData.cashDrawer.out)})</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-green-600 mb-2">Money In — {formatRs(cfData.totalIn)}</p>
+                {Object.entries(cfData.inflowByMethod).map(([m, v]: any) => (v as number) > 0 && <div key={m} className="flex justify-between text-sm py-0.5"><span className="capitalize text-slate-500">{m}</span><span className="font-semibold">{formatRs(v)}</span></div>)}
+                {cfData.totalIn === 0 && <p className="text-sm text-slate-400">No collections in this period.</p>}
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <p className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">Money Out — {formatRs(cfData.totalOut)}</p>
+                <div className="flex justify-between text-sm py-0.5"><span className="text-slate-500">Expenses</span><span className="font-semibold">{formatRs(cfData.expensesOut)}</span></div>
+                <div className="flex justify-between text-sm py-0.5"><span className="text-slate-500">Supplier payments</span><span className="font-semibold">{formatRs(cfData.supplierOut)}</span></div>
+                <div className="flex justify-between text-sm py-0.5"><span className="text-slate-500">Refunds</span><span className="font-semibold">{formatRs(cfData.refundsOut)}</span></div>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-2 border-b border-slate-100 text-xs font-bold text-slate-500">Transaction Ledger ({cfData.ledger.length})</div>
+              <div className="overflow-x-auto"><table className="w-full text-sm">
+                <thead><tr className="bg-slate-50 text-left text-xs text-slate-500"><th className="px-3 py-2">Date</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Reference</th><th className="px-3 py-2 text-right">In</th><th className="px-3 py-2 text-right">Out</th><th className="px-3 py-2 text-right">Balance</th></tr></thead>
+                <tbody>{cfData.ledger.map((e: any, i: number) => (<tr key={i} className="border-t border-slate-100"><td className="px-3 py-1.5 whitespace-nowrap text-slate-500">{new Date(e.date).toLocaleDateString('en-LK', { day: '2-digit', month: 'short' })}</td><td className="px-3 py-1.5"><span className={'text-[10px] font-bold px-1.5 py-0.5 rounded ' + (e.in > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600')}>{e.type}</span></td><td className="px-3 py-1.5 truncate max-w-[220px]">{e.ref}</td><td className="px-3 py-1.5 text-right text-green-700">{e.in > 0 ? formatRs(e.in) : ''}</td><td className="px-3 py-1.5 text-right text-red-600">{e.out > 0 ? formatRs(e.out) : ''}</td><td className="px-3 py-1.5 text-right font-semibold">{formatRs(e.balance)}</td></tr>))}</tbody>
+              </table></div>
+              {cfData.ledger.length === 0 && <p className="text-center text-sm text-slate-400 py-8">No cash transactions in this period.</p>}
+            </div>
+          </>)}
+        </div>
+      )}
 
       {/* ── Reorder Alerts ──────────────────────────────────────────────────── */}
       {activeTab === 'reorder' && (

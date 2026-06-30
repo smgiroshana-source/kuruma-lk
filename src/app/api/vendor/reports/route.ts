@@ -334,5 +334,76 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  return NextResponse.json({ error: 'Missing or unknown ?type= parameter. Use: reorder | gp | stock_value' }, { status: 400 })
+  // ── Cash Flow (cash basis — actual money in/out, NOT sales totals) ───────────
+  if (type === 'cashflow') {
+    const fromStr = url.searchParams.get('from') || lkFirstOfMonthStr()
+    const toStr   = url.searchParams.get('to')   || lkTodayStr()
+    const rangeStart = lkStartOfDay(fromStr)
+    const rangeEnd   = lkEndOfDay(toStr)
+    // Only real external money methods count. Advance-applied and credit-return
+    // rows are internal (no cash moved) and are excluded from both in and out.
+    const MONEY = ['cash', 'card', 'cheque', 'bank']
+
+    const [payments, expenses, supplierPays] = await Promise.all([
+      fetchAllRows((f, t) => admin.from('payments')
+        .select('amount, payment_method, created_at, sales:sale_id(invoice_no)')
+        .eq('vendor_id', vendor.id).gte('created_at', rangeStart).lte('created_at', rangeEnd)
+        .order('id').range(f, t)),
+      fetchAllRows((f, t) => admin.from('expenses')
+        .select('amount, category, description, payment_method, expense_date')
+        .eq('vendor_id', vendor.id).gte('expense_date', fromStr).lte('expense_date', toStr)
+        .order('id').range(f, t)),
+      fetchAllRows((f, t) => admin.from('supplier_payments')
+        .select('amount, method, payment_date, supplier:supplier_id(name)')
+        .eq('vendor_id', vendor.id).gte('payment_date', fromStr).lte('payment_date', toStr)
+        .order('id').range(f, t)),
+    ])
+
+    const inflowByMethod: Record<string, number> = { cash: 0, card: 0, cheque: 0, bank: 0 }
+    const expensesByCategory: Record<string, number> = {}
+    const ledger: any[] = []
+    let refundsOut = 0, cashRefundsOut = 0
+
+    for (const p of payments) {
+      const amt = Math.round(Number(p.amount) || 0)
+      const m = p.payment_method || 'cash'
+      const inv = (p as any).sales?.invoice_no || ''
+      if (!MONEY.includes(m)) continue            // advance-applied / credit_return → internal, skip
+      if (amt > 0) { inflowByMethod[m] += amt; ledger.push({ date: p.created_at, type: 'Collection', ref: inv, method: m, in: amt, out: 0 }) }
+      else if (amt < 0) { const out = -amt; refundsOut += out; if (m === 'cash') cashRefundsOut += out; ledger.push({ date: p.created_at, type: 'Refund', ref: inv, method: m, in: 0, out }) }
+    }
+    let expensesOut = 0, cashExpensesOut = 0
+    for (const e of expenses) {
+      const amt = Math.round(Number(e.amount) || 0)
+      expensesOut += amt; expensesByCategory[e.category] = (expensesByCategory[e.category] || 0) + amt
+      if ((e.payment_method || 'cash') === 'cash') cashExpensesOut += amt
+      ledger.push({ date: e.expense_date, type: 'Expense', ref: e.category + (e.description ? ': ' + e.description : ''), method: e.payment_method || 'cash', in: 0, out: amt })
+    }
+    let supplierOut = 0, cashSupplierOut = 0
+    for (const s of supplierPays) {
+      const amt = Math.round(Number(s.amount) || 0)
+      supplierOut += amt; if ((s.method || 'cash') === 'cash') cashSupplierOut += amt
+      ledger.push({ date: s.payment_date, type: 'Supplier Payment', ref: (s as any).supplier?.name || '', method: s.method || 'cash', in: 0, out: amt })
+    }
+
+    const totalIn = inflowByMethod.cash + inflowByMethod.card + inflowByMethod.cheque + inflowByMethod.bank
+    const totalOut = refundsOut + expensesOut + supplierOut
+    const cashIn = inflowByMethod.cash
+    const cashOut = cashRefundsOut + cashExpensesOut + cashSupplierOut
+
+    ledger.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    let run = 0
+    for (const e of ledger) { run += e.in - e.out; e.balance = run }
+
+    return NextResponse.json({
+      from: fromStr, to: toStr,
+      inflowByMethod, totalIn,
+      expensesByCategory, expensesOut, supplierOut, refundsOut, totalOut,
+      net: totalIn - totalOut,
+      cashDrawer: { in: cashIn, out: cashOut, net: cashIn - cashOut },
+      ledger,
+    })
+  }
+
+  return NextResponse.json({ error: 'Missing or unknown ?type= parameter. Use: reorder | gp | stock_value | cashflow' }, { status: 400 })
 }
