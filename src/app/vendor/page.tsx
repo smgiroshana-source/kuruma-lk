@@ -707,7 +707,7 @@ export default function VendorDashboard() {
   // Safety net behind the sidebar role-gating: a cashier can only ever be on POS,
   // and a manager can't sit on the owner-only Settings tab (even via stale state).
   useEffect(() => {
-    if (staffRole === 'cashier' && tab !== 'pos') setTab('pos')
+    if (staffRole === 'cashier' && tab !== 'pos' && tab !== 'receivables') setTab('pos')
     else if (staffRole === 'manager' && tab === 'settings') setTab('pos')
   }, [staffRole, tab])
 

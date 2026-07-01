@@ -102,7 +102,7 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
   // Role gating: cashier → POS only; manager → everything except Settings; owner → all.
   const canSee = (item: NavItem) => {
     if (item.id === '_signout') return true
-    if (staffRole === 'cashier') return item.id === 'pos'
+    if (staffRole === 'cashier') return item.id === 'pos' || item.id === 'receivables'
     if (staffRole === 'manager') return item.id !== 'settings'
     return true
   }
