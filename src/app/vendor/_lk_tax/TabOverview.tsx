@@ -1,4 +1,16 @@
 'use client'
+// ── WHEEL MART ONLY — operator-first dashboard. Never import from _standard/ ──
+
+type Dashboard = {
+  todaySales: number
+  todayCount: number
+  cashSession: { status: string; expected: number } | null
+  creditOwed: number
+  creditCustomers: number
+  payables: { due: number; overdueCount: number; oldestDays: number }
+  grnDrafts: number
+  recentActivity: { time: string; customer: string; amount: number; method: string }[]
+}
 
 type Props = {
   vendor: any
@@ -9,6 +21,8 @@ type Props = {
     stockValue: number
     totalSales: number
   }
+  dashboard?: Dashboard
+  staffRole?: string
   products: any[]
   vendorSettings: any
   onNavigate: (tab: string) => void
@@ -16,7 +30,7 @@ type Props = {
 }
 
 function formatRs(amount: number): string {
-  return 'Rs.' + amount.toLocaleString('en-LK', { maximumFractionDigits: 0 })
+  return 'Rs.' + Math.round(amount || 0).toLocaleString('en-LK', { maximumFractionDigits: 0 })
 }
 
 function getGreeting(): string {
@@ -37,209 +51,226 @@ function getTodayLabel(): string {
   })
 }
 
-export default function TabOverview({ vendor, stats, products, vendorSettings, onNavigate }: Props) {
-  // Low stock: products where min_stock_level > 0 AND quantity <= min_stock_level
-  const lowStockItems = products.filter(
-    (p: any) =>
-      typeof p.min_stock_level === 'number' &&
-      p.min_stock_level > 0 &&
-      p.quantity <= p.min_stock_level
-  )
+function fmtTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('en-LK', { timeZone: 'Asia/Colombo', hour: 'numeric', minute: '2-digit', hour12: true })
+  } catch { return '' }
+}
 
-  const displayedLowStock = lowStockItems.slice(0, 5)
-  const extraLowStock = lowStockItems.length - displayedLowStock.length
+const METHOD_LABEL: Record<string, string> = {
+  cash: 'Cash', card: 'Card', cheque: 'Cheque', bank: 'Bank', credit: 'Credit', advance: 'Advance',
+}
 
-  function lowStockBadge(p: any) {
-    if (p.quantity === 0) {
-      return (
-        <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
-          OUT
-        </span>
-      )
-    }
-    if (p.quantity <= Math.floor(p.min_stock_level / 2)) {
-      return (
-        <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">
-          Critical
-        </span>
-      )
-    }
-    return (
-      <span className="inline-block text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-        Low
-      </span>
-    )
+export default function TabOverview({ vendor, stats, dashboard, products, onNavigate }: Props) {
+  const d: Dashboard = dashboard || {
+    todaySales: 0, todayCount: 0, cashSession: null, creditOwed: 0, creditCustomers: 0,
+    payables: { due: 0, overdueCount: 0, oldestDays: 0 }, grnDrafts: 0, recentActivity: [],
   }
+
+  // ── Needs-attention items (only show what genuinely needs action) ──
+  const attention: { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string }[] = []
+  if (d.payables.overdueCount > 0) {
+    attention.push({
+      icon: '🏭', tone: 'red',
+      text: `${d.payables.overdueCount} supplier payment${d.payables.overdueCount !== 1 ? 's' : ''} overdue` +
+            (d.payables.oldestDays > 0 ? ` — oldest ${d.payables.oldestDays} days` : ''),
+      cta: 'Pay suppliers', tab: 'suppliers',
+    })
+  }
+  if (d.grnDrafts > 0) {
+    attention.push({
+      icon: '📥', tone: 'amber',
+      text: `${d.grnDrafts} stock receipt${d.grnDrafts !== 1 ? 's' : ''} (GRN) not yet posted`,
+      cta: 'Post GRN', tab: 'stocktake',
+    })
+  }
+  if (d.creditOwed > 0) {
+    attention.push({
+      icon: '📝', tone: 'amber',
+      text: `${formatRs(d.creditOwed)} owed by ${d.creditCustomers} customer${d.creditCustomers !== 1 ? 's' : ''} on credit`,
+      cta: 'Collect', tab: 'sales',
+    })
+  }
+
+  const cashState =
+    !d.cashSession ? { label: 'No session', sub: 'Open the drawer', tone: 'amber' as const }
+    : d.cashSession.status === 'open' ? { label: 'Open', sub: `Expected ${formatRs(d.cashSession.expected)}`, tone: 'green' as const }
+    : { label: 'Closed', sub: 'Reconciled', tone: 'slate' as const }
+
+  // ── 6 quick actions ──
+  const actions: { icon: string; label: string; tab: string; cls: string }[] = [
+    { icon: '🛒', label: 'New Sale (POS)', tab: 'pos', cls: 'bg-green-500 hover:bg-green-600 active:bg-green-700 text-white' },
+    { icon: '💰', label: 'Receive Payment', tab: 'sales', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+    { icon: '📥', label: 'Receive Stock', tab: 'stocktake', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+    { icon: '🏭', label: 'Pay Supplier', tab: 'suppliers', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+    { icon: '➕', label: 'Add Product', tab: 'add', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+    { icon: '📊', label: "Today's Report", tab: 'reports', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+    { icon: '💵', label: 'Cash Reconcile', tab: 'cash', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+  ]
 
   return (
     <div>
-      {/* ── Greeting + date bar ───────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-6">
+      {/* ── Greeting + New Sale ─────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-black text-slate-900">
-            {getGreeting()},{' '}
-            <span className="text-orange-500">{vendor.name}</span>
+            {getGreeting()}, <span className="text-orange-500">{vendor.name}</span>
           </h1>
           <p className="text-sm text-slate-400 mt-0.5">{getTodayLabel()}</p>
         </div>
-        <span className="self-start sm:self-auto inline-block bg-orange-50 border border-orange-200 text-orange-600 text-xs font-black px-3 py-1 rounded-full tracking-wide">
-          WHEEL MART
-        </span>
+        <button
+          onClick={() => onNavigate('pos')}
+          className="self-start sm:self-auto flex items-center gap-2.5 px-6 py-3.5 rounded-xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-black text-base transition-colors shadow-lg shadow-green-900/20"
+        >
+          <span className="text-xl leading-none">🛒</span>
+          <span>New Sale</span>
+        </button>
       </div>
 
-      {/* ── 5 KPI cards ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
-        {/* Total Products */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-1">
-          <p className="text-2xl font-black text-orange-500">{stats.totalProducts.toLocaleString()}</p>
-          <p className="text-xs font-semibold text-slate-400">Total Products</p>
-          <div className="mt-auto pt-2">
-            <span className="inline-block w-6 h-1 rounded-full bg-orange-400" />
-          </div>
+      {/* ── Pulse strip: today's money at a glance ──────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        {/* Today's sales */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Today's Sales</p>
+          <p className="text-2xl font-black text-slate-900 mt-1 leading-tight">{formatRs(d.todaySales)}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{d.todayCount} sale{d.todayCount !== 1 ? 's' : ''} today</p>
         </div>
 
-        {/* Active Products */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-1">
-          <p className="text-2xl font-black text-emerald-500">{stats.activeProducts.toLocaleString()}</p>
-          <p className="text-xs font-semibold text-slate-400">Active Products</p>
-          <div className="mt-auto pt-2">
-            <span className="inline-block w-6 h-1 rounded-full bg-emerald-400" />
-          </div>
-        </div>
+        {/* Cash drawer */}
+        <button
+          onClick={() => onNavigate('cash')}
+          className="text-left bg-white rounded-xl border border-slate-200 p-4 hover:border-orange-300 transition-colors"
+        >
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Cash Drawer</p>
+          <p className={`text-2xl font-black mt-1 leading-tight ${
+            cashState.tone === 'green' ? 'text-emerald-600' : cashState.tone === 'amber' ? 'text-amber-600' : 'text-slate-500'
+          }`}>{cashState.label}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{cashState.sub}</p>
+        </button>
 
-        {/* Total Stock Units */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-1">
-          <p className="text-2xl font-black text-blue-500">{stats.totalStock.toLocaleString()}</p>
-          <p className="text-xs font-semibold text-slate-400">Stock Units</p>
-          <div className="mt-auto pt-2">
-            <span className="inline-block w-6 h-1 rounded-full bg-blue-400" />
-          </div>
-        </div>
+        {/* Credit owed to us */}
+        <button
+          onClick={() => onNavigate('sales')}
+          className="text-left bg-white rounded-xl border border-slate-200 p-4 hover:border-orange-300 transition-colors"
+        >
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Credit Owed</p>
+          <p className={`text-2xl font-black mt-1 leading-tight ${d.creditOwed > 0 ? 'text-red-600' : 'text-slate-900'}`}>
+            {formatRs(d.creditOwed)}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">{d.creditCustomers} customer{d.creditCustomers !== 1 ? 's' : ''}</p>
+        </button>
 
-        {/* Stock Value */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-1">
-          <p className="text-xl font-black text-violet-500 leading-tight">{formatRs(stats.stockValue)}</p>
-          <p className="text-xs font-semibold text-slate-400">Stock Value</p>
-          <div className="mt-auto pt-2">
-            <span className="inline-block w-6 h-1 rounded-full bg-violet-400" />
-          </div>
-        </div>
-
-        {/* Total Sales */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col gap-1 col-span-2 sm:col-span-1">
-          <p className="text-xl font-black text-green-600 leading-tight">{formatRs(stats.totalSales)}</p>
-          <p className="text-xs font-semibold text-slate-400">Total Sales</p>
-          <div className="mt-auto pt-2">
-            <span className="inline-block w-6 h-1 rounded-full bg-green-500" />
-          </div>
-        </div>
+        {/* Payables due */}
+        <button
+          onClick={() => onNavigate('suppliers')}
+          className="text-left bg-white rounded-xl border border-slate-200 p-4 hover:border-orange-300 transition-colors"
+        >
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Payables Due</p>
+          <p className={`text-2xl font-black mt-1 leading-tight ${d.payables.overdueCount > 0 ? 'text-red-600' : 'text-slate-900'}`}>
+            {formatRs(d.payables.due)}
+          </p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {d.payables.overdueCount > 0 ? `${d.payables.overdueCount} overdue` : 'on track'}
+          </p>
+        </button>
       </div>
 
-      {/* ── Low Stock Alerts (conditional) ──────────────────────────────────── */}
-      {lowStockItems.length > 0 && (
+      {/* ── Needs Attention ─────────────────────────────────────────────────── */}
+      {attention.length > 0 ? (
         <div className="bg-white rounded-xl border-2 border-amber-300 p-5 mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-              <span>⚠️</span>
-              <span>Low Stock Alert</span>
-              <span className="bg-red-100 text-red-700 text-[10px] font-black px-2 py-0.5 rounded-full">
-                {lowStockItems.length}
-              </span>
-            </h3>
-            <button
-              onClick={() => onNavigate('products')}
-              className="text-xs font-semibold text-orange-500 hover:text-orange-600 transition-colors"
-            >
-              View all →
-            </button>
+          <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2 mb-3">
+            <span>⚠️</span><span>Needs Attention</span>
+            <span className="bg-red-100 text-red-700 text-[10px] font-black px-2 py-0.5 rounded-full">{attention.length}</span>
+          </h3>
+          <div className="flex flex-col gap-2">
+            {attention.map((a, i) => (
+              <button
+                key={i}
+                onClick={() => onNavigate(a.tab)}
+                className={`flex items-center gap-3 text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                  a.tone === 'red'
+                    ? 'bg-red-50 border-red-200 hover:bg-red-100'
+                    : 'bg-amber-50 border-amber-200 hover:bg-amber-100'
+                }`}
+              >
+                <span className="text-base leading-none shrink-0">{a.icon}</span>
+                <span className="flex-1 text-sm font-semibold text-slate-800">{a.text}</span>
+                <span className={`text-xs font-bold shrink-0 ${a.tone === 'red' ? 'text-red-600' : 'text-amber-700'}`}>
+                  {a.cta} →
+                </span>
+              </button>
+            ))}
           </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b border-slate-100">
-                  <th className="pb-2 pr-4 text-xs font-bold text-slate-400">Product</th>
-                  <th className="pb-2 pr-4 text-xs font-bold text-slate-400">SKU</th>
-                  <th className="pb-2 pr-4 text-xs font-bold text-slate-400 text-right">Stock</th>
-                  <th className="pb-2 pr-4 text-xs font-bold text-slate-400 text-right">Min</th>
-                  <th className="pb-2 text-xs font-bold text-slate-400">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayedLowStock.map((p: any) => (
-                  <tr key={p.id} className="border-t border-slate-50">
-                    <td className="py-2 pr-4 font-semibold text-slate-800 text-xs max-w-[160px] truncate">
-                      {p.name}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <span className="font-mono text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
-                        {p.sku}
-                      </span>
-                    </td>
-                    <td className="py-2 pr-4 text-right font-bold text-xs text-red-600">
-                      {p.quantity}
-                    </td>
-                    <td className="py-2 pr-4 text-right text-xs text-slate-400">
-                      {p.min_stock_level}
-                    </td>
-                    <td className="py-2">{lowStockBadge(p)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {extraLowStock > 0 && (
-            <button
-              onClick={() => onNavigate('products')}
-              className="mt-3 text-xs font-semibold text-slate-400 hover:text-orange-500 transition-colors"
-            >
-              + {extraLowStock} more item{extraLowStock !== 1 ? 's' : ''}
-            </button>
-          )}
+        </div>
+      ) : (
+        <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4 mb-6 flex items-center gap-3">
+          <span className="text-lg">✅</span>
+          <span className="text-sm font-semibold text-emerald-800">All clear — no overdue payments, drafts, or outstanding credit.</span>
         </div>
       )}
 
-      {/* ── Quick Actions 2×2 grid ───────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5">
+      {/* ── Quick Actions ───────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
         <h3 className="font-bold text-slate-900 mb-4 text-sm">Quick Actions</h3>
-        <div className="grid grid-cols-2 gap-3">
-          {/* Open POS */}
-          <button
-            onClick={() => onNavigate('pos')}
-            className="flex items-center gap-3 px-4 py-4 rounded-xl bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-bold text-sm transition-colors shadow-sm"
-          >
-            <span className="text-xl leading-none">🛒</span>
-            <span>Open POS</span>
-          </button>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {actions.map((a) => (
+            <button
+              key={a.tab + a.label}
+              onClick={() => onNavigate(a.tab)}
+              className={`flex items-center gap-2.5 px-4 py-4 rounded-xl font-bold text-sm transition-colors shadow-sm ${a.cls}`}
+            >
+              <span className="text-xl leading-none">{a.icon}</span>
+              <span className="text-left leading-tight">{a.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
-          {/* Receive Stock */}
-          <button
-            onClick={() => onNavigate('stocktake')}
-            className="flex items-center gap-3 px-4 py-4 rounded-xl bg-slate-800 hover:bg-slate-900 active:bg-slate-950 text-white font-bold text-sm transition-colors shadow-sm"
-          >
-            <span className="text-xl leading-none">📥</span>
-            <span>Receive Stock</span>
-          </button>
-
-          {/* Record Payment */}
-          <button
-            onClick={() => onNavigate('sales')}
-            className="flex items-center gap-3 px-4 py-4 rounded-xl bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white font-bold text-sm transition-colors shadow-sm"
-          >
-            <span className="text-xl leading-none">💰</span>
-            <span>Record Payment</span>
-          </button>
-
-          {/* Add Product */}
-          <button
-            onClick={() => onNavigate('add')}
-            className="flex items-center gap-3 px-4 py-4 rounded-xl bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold text-sm transition-colors shadow-sm"
-          >
-            <span className="text-xl leading-none">➕</span>
-            <span>Add Product</span>
+      {/* ── Today's Activity ────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-bold text-slate-900 text-sm">Today's Activity</h3>
+          <button onClick={() => onNavigate('sales')} className="text-xs font-semibold text-orange-500 hover:text-orange-600">
+            View all →
           </button>
         </div>
+        {d.recentActivity.length === 0 ? (
+          <div className="py-8 text-center">
+            <p className="text-sm text-slate-400">No sales yet today.</p>
+            <button onClick={() => onNavigate('pos')} className="mt-2 text-sm font-bold text-green-600 hover:text-green-700">
+              Start a sale →
+            </button>
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-50">
+            {d.recentActivity.map((s, i) => (
+              <div key={i} className="flex items-center gap-3 py-2.5">
+                <span className="text-xs text-slate-400 w-16 shrink-0 tabular-nums">{fmtTime(s.time)}</span>
+                <span className="flex-1 text-sm font-semibold text-slate-800 truncate">{s.customer}</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 shrink-0">
+                  {METHOD_LABEL[s.method] || s.method}
+                </span>
+                <span className="text-sm font-black text-slate-900 w-24 text-right shrink-0 tabular-nums">{formatRs(s.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Catalog snapshot (muted, reference) ─────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {[
+          { v: stats.totalProducts.toLocaleString(), l: 'Products' },
+          { v: stats.activeProducts.toLocaleString(), l: 'Active' },
+          { v: stats.totalStock.toLocaleString(), l: 'Stock Units' },
+          { v: formatRs(stats.stockValue), l: 'Stock Value' },
+          { v: formatRs(stats.totalSales), l: 'All-time Sales' },
+        ].map((c) => (
+          <div key={c.l} className="bg-slate-50 rounded-lg border border-slate-100 px-3 py-2.5">
+            <p className="text-base font-black text-slate-600 leading-tight truncate">{c.v}</p>
+            <p className="text-[11px] font-semibold text-slate-400">{c.l}</p>
+          </div>
+        ))}
       </div>
     </div>
   )

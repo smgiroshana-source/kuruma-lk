@@ -1932,7 +1932,7 @@ ${customerRows.map(c => `<tr>
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" /></div>
   if (!data) return null
-  const { vendor, products, stats } = data
+  const { vendor, products, stats, dashboard } = data
 
   // Payment lines are rendered inline to avoid focus loss
 
@@ -1987,6 +1987,8 @@ ${customerRows.map(c => `<tr>
           <TabOverview
             vendor={vendor}
             stats={stats}
+            dashboard={dashboard}
+            staffRole={staffRole}
             products={products}
             vendorSettings={vendorSettings}
             onNavigate={t => startTransition(() => setTab(t as VendorTab))}

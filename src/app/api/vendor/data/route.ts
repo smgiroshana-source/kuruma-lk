@@ -98,10 +98,57 @@ export async function GET(req: NextRequest) {
   const totalSales = (salesTotals || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
   const totalSalesCount = (salesTotals || []).length
 
+  // ── Dashboard aggregates (folded into this existing call — no new endpoint) ──
+  const colToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+  const todayStart = new Date(colToday + 'T00:00:00+05:30').toISOString()
+
+  const { data: todaySalesRows } = await admin.from('sales')
+    .select('total, customer_name, payment_method, created_at')
+    .eq('vendor_id', vendor.id).neq('payment_status', 'voided').neq('payment_status', 'draft')
+    .gte('created_at', todayStart).order('created_at', { ascending: false })
+  const todaySales = (todaySalesRows || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
+  const recentActivity = (todaySalesRows || []).slice(0, 5).map((s: any) => ({
+    time: s.created_at, customer: s.customer_name || 'Walk-in', amount: parseFloat(s.total || 0), method: s.payment_method || 'cash',
+  }))
+
+  const { data: cashSess } = await admin.from('cash_sessions')
+    .select('status, expected_cash, opening_balance').eq('vendor_id', vendor.id).eq('session_date', colToday).maybeSingle()
+
+  const { data: creditRows } = await admin.from('sales')
+    .select('balance_due, customer_id').eq('vendor_id', vendor.id)
+    .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0)
+  const creditOwed = (creditRows || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
+  const creditCustomers = new Set((creditRows || []).map((r: any) => r.customer_id).filter(Boolean)).size
+
+  let payablesDue = 0, payOverdueCount = 0, payOldestDays = 0
+  const { data: payRows } = await admin.from('supplier_invoices')
+    .select('amount, amount_paid, due_date').eq('vendor_id', vendor.id).neq('status', 'paid')
+  for (const inv of (payRows || [])) {
+    payablesDue += (parseInt(inv.amount || 0) - parseInt(inv.amount_paid || 0))
+    if (inv.due_date && inv.due_date < colToday) {
+      payOverdueCount++
+      const days = Math.floor((Date.now() - new Date(inv.due_date).getTime()) / 86400000)
+      if (days > payOldestDays) payOldestDays = days
+    }
+  }
+
+  const { count: grnDrafts } = await admin.from('grns')
+    .select('id', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'draft')
+
+  const dashboard = {
+    todaySales, todayCount: (todaySalesRows || []).length,
+    cashSession: cashSess ? { status: cashSess.status, expected: parseInt(cashSess.expected_cash ?? cashSess.opening_balance ?? 0) } : null,
+    creditOwed, creditCustomers,
+    payables: { due: payablesDue, overdueCount: payOverdueCount, oldestDays: payOldestDays },
+    grnDrafts: grnDrafts || 0,
+    recentActivity,
+  }
+
   const response = NextResponse.json({
     vendor,
     products,
-    stats: { totalProducts, activeProducts, totalStock, stockValue, totalSales, totalSalesCount }
+    stats: { totalProducts, activeProducts, totalStock, stockValue, totalSales, totalSalesCount },
+    dashboard,
   })
   response.headers.set('Cache-Control', 'private, max-age=30, stale-while-revalidate=60')
   return response
