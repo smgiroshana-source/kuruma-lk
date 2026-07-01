@@ -130,6 +130,7 @@ export default function TabCash({ vendor, showToast }: Props) {
   // Open session form
   const [openingBalance, setOpeningBalance] = useState<number | ''>(0)
   const [opening, setOpening] = useState(false)
+  const [openingPrefilled, setOpeningPrefilled] = useState(false)
 
   // Close session form
   const [showCloseForm, setShowCloseForm] = useState(false)
@@ -165,6 +166,22 @@ export default function TabCash({ vendor, showToast }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, expMonth])
+
+  // Most recent CLOSED session — its counted closing balance is the cash left in
+  // the drawer overnight, i.e. the natural opening float for the next day.
+  const lastClosed = [...recentSessions]
+    .filter(s => s.status === 'closed' && s.closing_balance != null)
+    .sort((a, b) => (a.session_date < b.session_date ? 1 : -1))[0] || null
+
+  // Prefill the opening-balance field with the carried-over float once, when
+  // there's no session yet today. Operator can still edit it (e.g. banked cash).
+  useEffect(() => {
+    if (!openingPrefilled && todaySession === null && lastClosed) {
+      setOpeningBalance(Math.round(lastClosed.closing_balance as number))
+      setOpeningPrefilled(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [todaySession, recentSessions])
 
   // ── Fetch helpers ──────────────────────────────────────────────────────────
 
@@ -543,6 +560,19 @@ export default function TabCash({ vendor, showToast }: Props) {
                     onChange={e => setOpeningBalance(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
                   />
                 </div>
+                {lastClosed && (
+                  <p className="text-[11px] text-slate-400">
+                    Carried over from {formatDate(lastClosed.session_date)} closing:{' '}
+                    <button
+                      type="button"
+                      onClick={() => setOpeningBalance(Math.round(lastClosed.closing_balance as number))}
+                      className="font-bold text-orange-500 hover:text-orange-600 underline decoration-dotted"
+                    >
+                      {formatRs(lastClosed.closing_balance as number)}
+                    </button>
+                    {' '}— edit if you banked cash overnight.
+                  </p>
+                )}
                 <button
                   onClick={handleOpenSession}
                   disabled={opening}

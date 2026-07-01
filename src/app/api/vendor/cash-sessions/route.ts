@@ -106,7 +106,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid session_date — expected YYYY-MM-DD' }, { status: 400 })
     }
 
-    const openingBal = typeof opening_balance === 'number' ? opening_balance : 0
+    // Opening balance = whatever the operator confirms. If not supplied, carry
+    // forward the cash left in the drawer overnight — the most recent CLOSED
+    // session's counted closing balance becomes today's opening float.
+    let openingBal: number
+    if (typeof opening_balance === 'number') {
+      openingBal = opening_balance
+    } else {
+      const { data: prev } = await admin
+        .from('cash_sessions')
+        .select('closing_balance')
+        .eq('vendor_id', vendor.id)
+        .eq('status', 'closed')
+        .lt('session_date', session_date)
+        .not('closing_balance', 'is', null)
+        .order('session_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      openingBal = prev && prev.closing_balance != null ? parseInt(prev.closing_balance) : 0
+    }
 
     // Check for duplicate
     const { data: existing } = await admin
