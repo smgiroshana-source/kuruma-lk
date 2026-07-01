@@ -1,8 +1,9 @@
 'use client'
 // ── WHEEL MART ONLY — never import this from _standard/ ──────────────────────
-// Shows the gazette CRN register (Tax Credit Notes) + Customer Credit sub-tabs.
+// Shows the gazette CRN register (Tax Credit Notes). Customer receivables now
+// live in their own 'receivables' tab (see WheelMartSidebar / page.tsx).
 import { useState, useEffect, useCallback } from 'react'
-import TabCredit, { CommonTabProps } from '../_shared/TabCredit'
+import { CommonTabProps } from '../_shared/TabCredit'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
 
@@ -13,9 +14,7 @@ function fmtDate(iso: string) {
 function monthStart() { return colomboToday().slice(0, 7) + '-01' }
 function today()      { return colomboToday() }
 
-export default function TabCreditNotes({ vendor, products, vendorSettings, showToast, onDataChanged }: CommonTabProps) {
-  const [subTab, setSubTab] = useState<'crn' | 'customer'>('crn')
-
+export default function TabCreditNotes({ vendor, vendorSettings, showToast }: CommonTabProps) {
   // ── CRN register state ───────────────────────────────────────────────────
   const [crnData, setCrnData]         = useState<any[]>([])
   const [crnLoading, setCrnLoading]   = useState(false)
@@ -36,7 +35,7 @@ export default function TabCreditNotes({ vendor, products, vendorSettings, showT
     setCrnLoading(false)
   }, [crnFrom, crnTo])
 
-  useEffect(() => { if (subTab === 'crn') fetchCrn() }, [subTab, fetchCrn])
+  useEffect(() => { fetchCrn() }, [fetchCrn])
 
   const totalVat   = crnData.reduce((s, cn) => s + (Number(cn.vat_amount)  || 0), 0)
   const totalNet   = crnData.reduce((s, cn) => s + (Number(cn.net_amount)  || 0), 0)
@@ -147,26 +146,11 @@ th{padding:7px 8px;text-align:left;font-size:9px;font-weight:700;text-transform:
       {/* Page header */}
       <div>
         <h1 className="text-2xl font-black text-slate-800">📋 Credit Notes</h1>
-        <p className="text-sm text-slate-500 mt-1">Tax Credit Notes (CRN) issued against gazette invoices · Customer advances &amp; outstanding credit</p>
-      </div>
-
-      {/* Sub-tab switcher */}
-      <div className="flex gap-0 border border-slate-200 rounded-xl overflow-hidden w-fit">
-        <button
-          onClick={() => setSubTab('crn')}
-          className={`px-5 py-2.5 text-sm font-bold transition-colors ${subTab === 'crn' ? 'bg-orange-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>
-          🧾 Tax Credit Notes
-        </button>
-        <button
-          onClick={() => setSubTab('customer')}
-          className={`px-5 py-2.5 text-sm font-bold transition-colors border-l border-slate-200 ${subTab === 'customer' ? 'bg-orange-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>
-          💰 Customer Credit &amp; Advances
-        </button>
+        <p className="text-sm text-slate-500 mt-1">Tax Credit Notes (CRN) issued against gazette invoices. To collect money owed by customers, use <strong>Receivables</strong>.</p>
       </div>
 
       {/* ── CRN Register ─────────────────────────────────────────────────── */}
-      {subTab === 'crn' && (
-        <div className="space-y-4">
+      <div className="space-y-4">
           {/* Date filter + refresh */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-2">
@@ -272,18 +256,6 @@ th{padding:7px 8px;text-align:left;font-size:9px;font-weight:700;text-transform:
             </div>
           )}
         </div>
-      )}
-
-      {/* ── Customer Credit & Advances ───────────────────────────────────── */}
-      {subTab === 'customer' && (
-        <TabCredit
-          vendor={vendor}
-          products={products}
-          vendorSettings={vendorSettings}
-          showToast={showToast}
-          onDataChanged={onDataChanged}
-        />
-      )}
     </div>
   )
 }

@@ -88,7 +88,7 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
     attention.push({
       icon: '📝', tone: 'amber',
       text: `${formatRs(d.creditOwed)} owed by ${d.creditCustomers} customer${d.creditCustomers !== 1 ? 's' : ''} on credit`,
-      cta: 'Collect', tab: 'sales',
+      cta: 'Collect', tab: 'receivables',
     })
   }
 
@@ -100,7 +100,7 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
   // ── 6 quick actions ──
   const actions: { icon: string; label: string; tab: string; cls: string }[] = [
     { icon: '🛒', label: 'New Sale (POS)', tab: 'pos', cls: 'bg-green-500 hover:bg-green-600 active:bg-green-700 text-white' },
-    { icon: '💰', label: 'Receive Payment', tab: 'sales', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+    { icon: '💰', label: 'Receive Payment', tab: 'receivables', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
     { icon: '📥', label: 'Receive Stock', tab: 'stocktake', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
     { icon: '🏭', label: 'Pay Supplier', tab: 'suppliers', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
     { icon: '➕', label: 'Add Product', tab: 'add', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
@@ -150,7 +150,7 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
 
         {/* Credit owed to us */}
         <button
-          onClick={() => onNavigate('sales')}
+          onClick={() => onNavigate('receivables')}
           className="text-left bg-white rounded-xl border border-slate-200 p-4 hover:border-orange-300 transition-colors"
         >
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Credit Owed</p>
