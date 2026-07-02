@@ -1492,7 +1492,7 @@ ${(() => {
           (expected != null ? '<div class="method-box"><div class="val orange">Rs.' + expected.toLocaleString() + '</div><div class="lbl">Expected in Drawer</div></div>' : '') +
           (isClosed && counted != null
             ? '<div class="method-box"><div class="val green">Rs.' + counted.toLocaleString() + '</div><div class="lbl">Counted</div></div>' +
-              (variance != null ? '<div class="method-box"><div class="val ' + (variance === 0 ? 'green' : (variance < 0 ? 'red' : 'orange')) + '">' + (variance > 0 ? '+' : '') + 'Rs.' + variance.toLocaleString() + '</div><div class="lbl">' + (variance === 0 ? 'Balanced' : (variance < 0 ? 'Short' : 'Over')) + '</div></div>' : '')
+              (variance != null ? '<div class="method-box"><div class="val ' + (variance === 0 ? 'green' : (variance < 0 ? 'red' : 'orange')) + '">' + (variance > 0 ? '+' : variance < 0 ? '−' : '') + 'Rs.' + Math.abs(variance).toLocaleString() + '</div><div class="lbl">' + (variance === 0 ? 'Balanced' : (variance < 0 ? 'Short' : 'Over')) + '</div></div>' : '')
             : '<div class="method-box"><div class="val" style="color:#94a3b8">OPEN</div><div class="lbl">Not yet closed</div></div>') +
         '</div>'
     })()}
@@ -1545,6 +1545,11 @@ ${(() => {
   async function openPeriodReport(from?: string, to?: string) {
     const pFrom = from || reportFrom
     const pTo = to || reportTo
+    // Keep page-level range in sync — the modal header and the generated PDF
+    // read reportFrom/reportTo, so a range passed in from the Reports tab must
+    // land there too or the printed period won't match the fetched data.
+    if (from) setReportFrom(from)
+    if (to) setReportTo(to)
     setPeriodReportLoading(true)
     try {
       const r = await fetch(`/api/vendor/sales?from=${pFrom}&to=${pTo}`)
@@ -1741,7 +1746,9 @@ ${customerRows.map(c => `<tr>
       if (!r.ok) { showToast(`Failed (${r.status})`) }
       else {
         const j = await r.json()
-        let cashSession: any = null
+        // undefined = couldn't check (omit the reconciliation section entirely);
+        // null = checked, genuinely no session that day ("No cash session" note).
+        let cashSession: any = undefined
         try { if (cs.ok) cashSession = (await cs.json()).session || null } catch {}
         generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession)
       }

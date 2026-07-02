@@ -62,10 +62,15 @@ const METHOD_LABEL: Record<string, string> = {
 }
 
 export default function TabOverview({ vendor, stats, dashboard, products, onNavigate }: Props) {
+  // dashboard is undefined during the quick (phase-1) load — the aggregates only
+  // arrive with the full load. Render placeholders then, NOT zeros: zeros would
+  // flash "Rs.0 sales / ✅ All clear" at the owner before the real numbers land.
+  const dashLoading = !dashboard
   const d: Dashboard = dashboard || {
     todaySales: 0, todayCount: 0, cashSession: null, creditOwed: 0, creditCustomers: 0,
     payables: { due: 0, overdueCount: 0, oldestDays: 0 }, grnDrafts: 0, recentActivity: [],
   }
+  const num = (v: string) => dashLoading ? '…' : v
 
   // ── Needs-attention items (only show what genuinely needs action) ──
   const attention: { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string }[] = []
@@ -93,8 +98,12 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
   }
 
   const cashState =
-    !d.cashSession ? { label: 'No session', sub: 'Open the drawer', tone: 'amber' as const }
-    : d.cashSession.status === 'open' ? { label: 'Open', sub: `Expected ${formatRs(d.cashSession.expected)}`, tone: 'green' as const }
+    dashLoading ? { label: '…', sub: 'Loading', tone: 'slate' as const }
+    // expected_cash is only computed at close — while the session is open the
+    // API falls back to the opening balance, so label it as the float, not
+    // "Expected" (which would imply sales are already counted in).
+    : !d.cashSession ? { label: 'No session', sub: 'Open the drawer', tone: 'amber' as const }
+    : d.cashSession.status === 'open' ? { label: 'Open', sub: `Float ${formatRs(d.cashSession.expected)}`, tone: 'green' as const }
     : { label: 'Closed', sub: 'Reconciled', tone: 'slate' as const }
 
   // ── 6 quick actions ──
@@ -132,8 +141,8 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
         {/* Today's sales */}
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Today's Sales</p>
-          <p className="text-2xl font-black text-slate-900 mt-1 leading-tight">{formatRs(d.todaySales)}</p>
-          <p className="text-xs text-slate-400 mt-0.5">{d.todayCount} sale{d.todayCount !== 1 ? 's' : ''} today</p>
+          <p className="text-2xl font-black text-slate-900 mt-1 leading-tight">{num(formatRs(d.todaySales))}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{dashLoading ? 'Loading' : `${d.todayCount} sale${d.todayCount !== 1 ? 's' : ''} today`}</p>
         </div>
 
         {/* Cash drawer */}
@@ -155,9 +164,9 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
         >
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Credit Owed</p>
           <p className={`text-2xl font-black mt-1 leading-tight ${d.creditOwed > 0 ? 'text-red-600' : 'text-slate-900'}`}>
-            {formatRs(d.creditOwed)}
+            {num(formatRs(d.creditOwed))}
           </p>
-          <p className="text-xs text-slate-400 mt-0.5">{d.creditCustomers} customer{d.creditCustomers !== 1 ? 's' : ''}</p>
+          <p className="text-xs text-slate-400 mt-0.5">{dashLoading ? 'Loading' : `${d.creditCustomers} customer${d.creditCustomers !== 1 ? 's' : ''}`}</p>
         </button>
 
         {/* Payables due */}
@@ -167,16 +176,21 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
         >
           <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Payables Due</p>
           <p className={`text-2xl font-black mt-1 leading-tight ${d.payables.overdueCount > 0 ? 'text-red-600' : 'text-slate-900'}`}>
-            {formatRs(d.payables.due)}
+            {num(formatRs(d.payables.due))}
           </p>
           <p className="text-xs text-slate-400 mt-0.5">
-            {d.payables.overdueCount > 0 ? `${d.payables.overdueCount} overdue` : 'on track'}
+            {dashLoading ? 'Loading' : d.payables.overdueCount > 0 ? `${d.payables.overdueCount} overdue` : 'on track'}
           </p>
         </button>
       </div>
 
       {/* ── Needs Attention ─────────────────────────────────────────────────── */}
-      {attention.length > 0 ? (
+      {dashLoading ? (
+        <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 mb-6 flex items-center gap-3">
+          <span className="text-lg">⏳</span>
+          <span className="text-sm font-semibold text-slate-400">Checking for items that need attention…</span>
+        </div>
+      ) : attention.length > 0 ? (
         <div className="bg-white rounded-xl border-2 border-amber-300 p-5 mb-6">
           <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2 mb-3">
             <span>⚠️</span><span>Needs Attention</span>
@@ -234,7 +248,11 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
             View all →
           </button>
         </div>
-        {d.recentActivity.length === 0 ? (
+        {dashLoading ? (
+          <div className="py-8 text-center">
+            <p className="text-sm text-slate-400">Loading today's sales…</p>
+          </div>
+        ) : d.recentActivity.length === 0 ? (
           <div className="py-8 text-center">
             <p className="text-sm text-slate-400">No sales yet today.</p>
             <button onClick={() => onNavigate('pos')} className="mt-2 text-sm font-bold text-green-600 hover:text-green-700">

@@ -176,7 +176,9 @@ export default function TabCash({ vendor, showToast }: Props) {
   // Prefill the opening-balance field with the carried-over float once, when
   // there's no session yet today. Operator can still edit it (e.g. banked cash).
   useEffect(() => {
-    if (!openingPrefilled && todaySession === null && lastClosed) {
+    // Only prefill an untouched field (still at the initial 0) — if the operator
+    // already typed a value before the sessions fetch returned, keep theirs.
+    if (!openingPrefilled && todaySession === null && lastClosed && (openingBalance === 0 || openingBalance === '')) {
       setOpeningBalance(Math.round(lastClosed.closing_balance as number))
       setOpeningPrefilled(true)
     }
