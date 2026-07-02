@@ -20,16 +20,33 @@ function confirmedAgo(dateStr: string | null): { label: string; cls: string } | 
   return { label: `${days}d ago`, cls: 'text-red-600 bg-red-50' }
 }
 
+type StockMainView = 'stocktake' | 'suppliers' | 'receive' | 'history' | 'transfer'
+
 interface TabStockLkTaxProps {
   vendor: any
   products: any[]
   vendorSettings: any
   showToast: (msg: string) => void
   onDataChanged: () => void
+  // Deep-link target from the dashboard (e.g. 'receive', 'history'). Applied
+  // once on arrival, then cleared via onInitialViewConsumed.
+  initialView?: string | null
+  onInitialViewConsumed?: () => void
 }
 
-export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged }: TabStockLkTaxProps) {
-  const [stockMainView, setStockMainView] = useState<'stocktake' | 'suppliers' | 'receive' | 'history' | 'transfer'>('stocktake')
+const STOCK_VIEWS: StockMainView[] = ['stocktake', 'suppliers', 'receive', 'history', 'transfer']
+
+export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed }: TabStockLkTaxProps) {
+  const [stockMainView, setStockMainView] = useState<StockMainView>('stocktake')
+
+  // Honour a dashboard deep-link (Receive Stock → 'receive', Post GRN → 'history').
+  useEffect(() => {
+    if (initialView && (STOCK_VIEWS as string[]).includes(initialView)) {
+      setStockMainView(initialView as StockMainView)
+      onInitialViewConsumed?.()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialView])
   const [stockView, setStockView] = useState<'browse' | 'assign'>('browse')
   const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [stocktakeSearch, setStocktakeSearch] = useState('')

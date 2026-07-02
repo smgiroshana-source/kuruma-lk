@@ -521,6 +521,9 @@ export default function VendorDashboard() {
   const cleanupRanRef = useRef(false)
   const settingsTabLoadedRef = useRef(false)
   const [tab, setTab] = useState<VendorTab>('overview')
+  // Deep-link a sub-view when arriving from the dashboard (e.g. Receive Stock →
+  // stocktake's 'receive' view). Consumed + cleared by the target tab on mount.
+  const [stockInitialView, setStockInitialView] = useState<string | null>(null)
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [productsLoading, setProductsLoading] = useState(true)
@@ -2059,7 +2062,7 @@ ${customerRows.map(c => `<tr>
             staffRole={staffRole}
             products={products}
             vendorSettings={vendorSettings}
-            onNavigate={t => startTransition(() => setTab(t as VendorTab))}
+            onNavigate={(t, sub) => startTransition(() => { setTab(t as VendorTab); setStockInitialView(sub ?? null) })}
             showToast={showToast}
           />
         )}
@@ -4281,6 +4284,8 @@ ${customerRows.map(c => `<tr>
             vendorSettings={vendorSettings}
             showToast={showToast}
             onDataChanged={fetchData}
+            initialView={stockInitialView}
+            onInitialViewConsumed={() => setStockInitialView(null)}
           />
         )}
         {tab === 'stocktake' && !isLkTax && (

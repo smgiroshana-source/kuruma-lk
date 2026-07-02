@@ -25,7 +25,7 @@ type Props = {
   staffRole?: string
   products: any[]
   vendorSettings: any
-  onNavigate: (tab: string) => void
+  onNavigate: (tab: string, sub?: string) => void
   showToast: (msg: string) => void
 }
 
@@ -68,7 +68,7 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
   }
 
   // ── Needs-attention items (only show what genuinely needs action) ──
-  const attention: { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string }[] = []
+  const attention: { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string }[] = []
   if (d.payables.overdueCount > 0) {
     attention.push({
       icon: '🏭', tone: 'red',
@@ -81,7 +81,7 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
     attention.push({
       icon: '📥', tone: 'amber',
       text: `${d.grnDrafts} stock receipt${d.grnDrafts !== 1 ? 's' : ''} (GRN) not yet posted`,
-      cta: 'Post GRN', tab: 'stocktake',
+      cta: 'Post GRN', tab: 'stocktake', sub: 'history',
     })
   }
   if (d.creditOwed > 0) {
@@ -98,10 +98,10 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
     : { label: 'Closed', sub: 'Reconciled', tone: 'slate' as const }
 
   // ── 6 quick actions ──
-  const actions: { icon: string; label: string; tab: string; cls: string }[] = [
+  const actions: { icon: string; label: string; tab: string; sub?: string; cls: string }[] = [
     { icon: '🛒', label: 'New Sale (POS)', tab: 'pos', cls: 'bg-green-500 hover:bg-green-600 active:bg-green-700 text-white' },
     { icon: '💰', label: 'Receive Payment', tab: 'receivables', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
-    { icon: '📥', label: 'Receive Stock', tab: 'stocktake', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
+    { icon: '📥', label: 'Receive Stock', tab: 'stocktake', sub: 'receive', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
     { icon: '🏭', label: 'Pay Supplier', tab: 'suppliers', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
     { icon: '➕', label: 'Add Product', tab: 'add', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
     { icon: '📊', label: "Today's Report", tab: 'reports', cls: 'bg-white hover:bg-slate-50 border border-slate-200 text-slate-800' },
@@ -186,7 +186,7 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
             {attention.map((a, i) => (
               <button
                 key={i}
-                onClick={() => onNavigate(a.tab)}
+                onClick={() => onNavigate(a.tab, a.sub)}
                 className={`flex items-center gap-3 text-left px-3 py-2.5 rounded-lg border transition-colors ${
                   a.tone === 'red'
                     ? 'bg-red-50 border-red-200 hover:bg-red-100'
@@ -216,7 +216,7 @@ export default function TabOverview({ vendor, stats, dashboard, products, onNavi
           {actions.map((a) => (
             <button
               key={a.tab + a.label}
-              onClick={() => onNavigate(a.tab)}
+              onClick={() => onNavigate(a.tab, a.sub)}
               className={`flex items-center gap-2.5 px-4 py-4 rounded-xl font-bold text-sm transition-colors shadow-sm ${a.cls}`}
             >
               <span className="text-xl leading-none">{a.icon}</span>
