@@ -4,6 +4,16 @@ import { useState, useEffect } from 'react'
 type Props = {
   vendor: any
   showToast: (msg: string) => void
+  // Report builders live in page.tsx (shared with the Sales tab). Passed in so
+  // the Daily/Period reports can live here under Reports without duplicating the
+  // HTML generators. Absent → the Daily Report sub-tab is hidden.
+  reportTools?: {
+    runDailyReport: (date: string) => void
+    runWhatsAppDaily: (date: string) => void
+    openPeriodReport: (from?: string, to?: string) => void
+    dailyReportLoading: boolean
+    periodReportLoading: boolean
+  }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -44,7 +54,7 @@ interface StockValue {
   top_categories: Array<{ category: string; cost_value: number; units: number }>
 }
 
-type SubTab = 'reorder' | 'gp' | 'stock_value' | 'cashflow'
+type SubTab = 'daily' | 'reorder' | 'gp' | 'stock_value' | 'cashflow'
 type GPPeriod = 'today' | 'week' | 'month'
 
 function lkToday(): string { return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }) }
@@ -58,8 +68,13 @@ function formatRs(n: number): string {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TabReports({ vendor, showToast }: Props) {
-  const [activeTab, setActiveTab] = useState<SubTab>('reorder')
+export default function TabReports({ vendor, showToast, reportTools }: Props) {
+  const [activeTab, setActiveTab] = useState<SubTab>(reportTools ? 'daily' : 'reorder')
+
+  // ── Daily / Period report state (only used when reportTools is provided) ────
+  const [dailyDate, setDailyDate] = useState(lkToday())
+  const [periodFrom, setPeriodFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
+  const [periodTo, setPeriodTo] = useState(lkToday())
 
   // ── Reorder state ─────────────────────────────────────────────────────────
   const [reorderProducts, setReorderProducts] = useState<ReorderProduct[]>([])
@@ -202,6 +217,7 @@ export default function TabReports({ vendor, showToast }: Props) {
       <div className="flex gap-2 mb-6">
         {(
           [
+            ...(reportTools ? [{ key: 'daily' as SubTab, label: '📅 Daily Report' }] : []),
             { key: 'reorder', label: 'Reorder Alerts' },
             { key: 'cashflow', label: 'Cash Flow' },
             { key: 'gp', label: 'GP Report' },
@@ -221,6 +237,50 @@ export default function TabReports({ vendor, showToast }: Props) {
           </button>
         ))}
       </div>
+
+      {/* ── Daily / Period Report ───────────────────────────────────────────── */}
+      {activeTab === 'daily' && reportTools && (
+        <div className="space-y-4 max-w-3xl">
+          <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <h3 className="font-bold text-sm text-slate-800 mb-1">📅 Daily Report</h3>
+            <p className="text-xs text-slate-400 mb-3">Full day (Asia/Colombo) — sales, payments received, cash breakdown & cash reconciliation.</p>
+            <div className="flex items-end gap-3 flex-wrap">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date</label>
+                <input type="date" value={dailyDate} onChange={e => setDailyDate(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <button disabled={reportTools.dailyReportLoading} onClick={() => reportTools!.runDailyReport(dailyDate)} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">📄 Generate PDF</button>
+              <button disabled={reportTools.dailyReportLoading} onClick={() => reportTools!.runWhatsAppDaily(dailyDate)} className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">💬 WhatsApp to Owner</button>
+            </div>
+            <div className="flex gap-2 mt-3">
+              {[{ l: 'Today', d: lkToday() }, { l: 'Yesterday', d: new Date(Date.now() - 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }) }].map(p => (
+                <button key={p.l} onClick={() => setDailyDate(p.d)} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <h3 className="font-bold text-sm text-slate-800 mb-1">📆 Period Report</h3>
+            <p className="text-xs text-slate-400 mb-3">Customer-wise sales breakdown with selectable PDF.</p>
+            <div className="flex items-end gap-3 flex-wrap">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label>
+                <input type="date" value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label>
+                <input type="date" value={periodTo} onChange={e => setPeriodTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <button disabled={reportTools.periodReportLoading} onClick={() => reportTools!.openPeriodReport(periodFrom, periodTo)} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">{reportTools.periodReportLoading ? '⏳ Loading…' : '📊 View Report'}</button>
+            </div>
+            <div className="flex gap-2 mt-3">
+              {[{ l: 'Last 7 Days', f: 7 }, { l: 'Last 30 Days', f: 30 }, { l: 'Last 3 Months', f: 90 }].map(p => (
+                <button key={p.l} onClick={() => { setPeriodFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setPeriodTo(lkToday()) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Cash Flow ───────────────────────────────────────────────────────── */}
       {activeTab === 'cashflow' && (

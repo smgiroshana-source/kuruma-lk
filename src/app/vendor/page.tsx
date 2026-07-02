@@ -1384,7 +1384,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1468,6 +1468,32 @@ ${methodTotals.bank > 0 ? '<div class="method-box"><div class="val" style="color
 ${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color:#0891b2">Rs.' + methodTotals.card.toLocaleString() + '</div><div class="lbl">💳 Card</div></div>' : ''}
 </div>
 
+${(() => {
+      // Cash reconciliation for the day (from the cash session, if one was opened).
+      // undefined = caller didn't provide one (e.g. Sakura, which has no cash
+      // sessions) → omit the section entirely. null = WHEEL MART looked, none open.
+      if (cashSession === undefined) return ''
+      if (!cashSession) {
+        return '<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Cash Reconciliation</h3>' +
+          '<p style="font-size:12px;color:#94a3b8;margin:4px 0 12px">No cash session was opened for this day.</p>'
+      }
+      const opening  = parseInt(cashSession.opening_balance || 0)
+      const expected = cashSession.expected_cash != null ? parseInt(cashSession.expected_cash) : null
+      const counted  = cashSession.closing_balance != null ? parseInt(cashSession.closing_balance) : null
+      const variance = cashSession.variance != null ? parseInt(cashSession.variance)
+        : (counted != null && expected != null ? counted - expected : null)
+      const isClosed = cashSession.status === 'closed'
+      return '<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Cash Reconciliation</h3>' +
+        '<div class="method-grid">' +
+          '<div class="method-box"><div class="val blue">Rs.' + opening.toLocaleString() + '</div><div class="lbl">Opening Float</div></div>' +
+          (expected != null ? '<div class="method-box"><div class="val orange">Rs.' + expected.toLocaleString() + '</div><div class="lbl">Expected in Drawer</div></div>' : '') +
+          (isClosed && counted != null
+            ? '<div class="method-box"><div class="val green">Rs.' + counted.toLocaleString() + '</div><div class="lbl">Counted</div></div>' +
+              (variance != null ? '<div class="method-box"><div class="val ' + (variance === 0 ? 'green' : (variance < 0 ? 'red' : 'orange')) + '">' + (variance > 0 ? '+' : '') + 'Rs.' + variance.toLocaleString() + '</div><div class="lbl">' + (variance === 0 ? 'Balanced' : (variance < 0 ? 'Short' : 'Over')) + '</div></div>' : '')
+            : '<div class="method-box"><div class="val" style="color:#94a3b8">OPEN</div><div class="lbl">Not yet closed</div></div>') +
+        '</div>'
+    })()}
+
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Transactions (${filtered.length})</h3>
 <table><thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr></thead><tbody>
 ${filtered.map((s: any) => {
@@ -1513,10 +1539,12 @@ ${(() => {
     if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
   }
 
-  async function openPeriodReport() {
+  async function openPeriodReport(from?: string, to?: string) {
+    const pFrom = from || reportFrom
+    const pTo = to || reportTo
     setPeriodReportLoading(true)
     try {
-      const r = await fetch(`/api/vendor/sales?from=${reportFrom}&to=${reportTo}`)
+      const r = await fetch(`/api/vendor/sales?from=${pFrom}&to=${pTo}`)
       if (!r.ok) { showToast(`Failed to fetch sales (${r.status})`); setPeriodReportLoading(false); return }
       const j = await r.json()
       const sales = (j.sales || []).filter((s: any) =>
@@ -1691,6 +1719,46 @@ ${customerRows.map(c => `<tr>
     const msg = encodeURIComponent(lines.join('\n'))
     const waNum = toPhone ? toPhone.replace(/\D/g, '').replace(/^0/, '94') : ''
     window.open(`https://wa.me/${waNum}?text=${msg}`, '_blank')
+  }
+
+  // Orchestrators — fetch a day's sales (+ cash session for reconciliation) and
+  // hand off to the report builders. Shared by the Sales tab (Sakura) and the
+  // WHEEL MART Reports tab so both entry points behave identically.
+  async function runDailyReport(date: string) {
+    setDailyReportLoading(true)
+    showToast('Fetching sales...')
+    try {
+      // Early-morning Colombo sales (+5:30) are stored under yesterday's UTC date;
+      // fetch the previous UTC day too and pin each row to its Colombo day.
+      const prev = new Date(date + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
+      const [r, cs] = await Promise.all([
+        fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${date}`),
+        fetch(`/api/vendor/cash-sessions?date=${date}`),
+      ])
+      if (!r.ok) { showToast(`Failed (${r.status})`) }
+      else {
+        const j = await r.json()
+        let cashSession: any = null
+        try { if (cs.ok) cashSession = (await cs.json()).session || null } catch {}
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession)
+      }
+    } catch { showToast('Failed') }
+    setDailyReportLoading(false)
+  }
+
+  async function runWhatsAppDaily(date: string) {
+    setDailyReportLoading(true)
+    showToast('Fetching sales...')
+    try {
+      const prev = new Date(date + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
+      const r = await fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${date}`)
+      if (!r.ok) { showToast(`Failed (${r.status})`) }
+      else {
+        const j = await r.json()
+        whatsAppDailyReport(j.sales || [], j.vendor || data?.vendor, date, (j.vendor || data?.vendor)?.whatsapp || (j.vendor || data?.vendor)?.phone)
+      }
+    } catch { showToast('Failed') }
+    setDailyReportLoading(false)
   }
 
   // ── End of Day Report ───────────────────────────────────────────────────
@@ -2047,7 +2115,7 @@ ${customerRows.map(c => `<tr>
 
         {/* REPORTS — WHEEL MART only */}
         {tab === 'reports' && isLkTax && (
-          <TabReports vendor={vendor} showToast={showToast} />
+          <TabReports vendor={vendor} showToast={showToast} reportTools={{ runDailyReport, runWhatsAppDaily, openPeriodReport, dailyReportLoading, periodReportLoading }} />
         )}
 
         {/* PRODUCTS */}
@@ -2793,7 +2861,7 @@ ${customerRows.map(c => `<tr>
               return (<>
                 <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1">
                   {/* ══ WHEEL MART ONLY: adds '🧾 Tax' sub-tab for lk_tax vendors ══ */}
-                  {([{v:'overview',l:'Overview'},{v:'transactions',l:'Transactions'},{v:'customers',l:'Customers'},{v:'reports',l:'📊 Reports'},...(isLkTax ? [{v:'tax',l:'🧾 Tax'}] : [])]).map(t => (
+                  {([{v:'overview',l:'Overview'},{v:'transactions',l:'Transactions'},{v:'customers',l:'Customers'},...(!isLkTax ? [{v:'reports',l:'📊 Reports'}] : []),...(isLkTax ? [{v:'tax',l:'🧾 Tax'}] : [])]).map(t => (
                     <button key={t.v} onClick={() => setSalesSubTab(t.v)} className={`flex-1 py-2 text-xs font-bold rounded-md transition ${salesSubTab === t.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>{t.l}</button>
                   ))}
                 </div>
@@ -3304,7 +3372,7 @@ ${customerRows.map(c => `<tr>
                       <div className="flex items-end gap-3 flex-wrap">
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">From</label><input type="date" value={reportFrom} onChange={e => setReportFrom(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
                         <div><label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">To</label><input type="date" value={reportTo} onChange={e => setReportTo(e.target.value)} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-                        <button onClick={openPeriodReport} disabled={periodReportLoading} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">{periodReportLoading ? '⏳ Loading…' : '📊 View Report'}</button>
+                        <button onClick={() => openPeriodReport()} disabled={periodReportLoading} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">{periodReportLoading ? '⏳ Loading…' : '📊 View Report'}</button>
                       </div>
                       <div className="flex gap-2 mt-3">
                         {[{l:"Last 7 Days",f:7},{l:"Last 30 Days",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(colomboToday()) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
