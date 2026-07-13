@@ -237,83 +237,83 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
 html{background:#8c9194;min-height:100%;padding:10mm 0 20mm}
 body{
   font-family:Arial,'Helvetica Neue',sans-serif;
-  font-size:12px;color:#111;line-height:1.55;
+  font-size:13.5px;color:#111;line-height:1.5;
   width:210mm;min-height:297mm;
-  margin:0 auto;padding:18mm 18mm 14mm;
+  margin:0 auto;padding:16mm 16mm 13mm;
   background:#fff;
   box-shadow:0 4px 24px rgba(0,0,0,.4);
   display:flex;flex-direction:column;
 }
 @media print{
   html{background:#fff;padding:0}
-  body{width:100%;min-height:297mm;margin:0;padding:18mm 18mm 14mm;box-shadow:none}
+  body{width:100%;min-height:297mm;margin:0;padding:16mm 16mm 13mm;box-shadow:none}
 }
 /* ─── Header ─────────────────────────────────────────────── */
 .hdr{display:flex;justify-content:space-between;align-items:flex-start;
-     gap:16px;padding-bottom:10px;border-bottom:2px solid #000;margin-bottom:11px}
+     gap:16px;padding-bottom:13px;border-bottom:3px solid #000;margin-bottom:14px}
 .hl{flex:1}
-.hl-name{font-size:15px;font-weight:900;line-height:1.2}
-.hl-sub{font-size:10px;color:#444;margin-top:3px}
-.hl-tin{font-size:10px;font-weight:700;margin-top:3px}
+.hl-name{font-size:23px;font-weight:900;line-height:1.15}
+.hl-sub{font-size:12px;color:#444;margin-top:4px}
+.hl-tin{font-size:12.5px;font-weight:700;margin-top:4px}
 .hr{text-align:right;flex-shrink:0}
-.hr-badge{display:inline-block;border:2.5px solid #000;padding:6px 16px;
-          font-size:19px;font-weight:900;letter-spacing:2px;line-height:1.2}
-.hr-sno{font-size:9px;font-weight:700;margin-top:6px;
-        font-family:'Courier New',monospace;letter-spacing:.3px}
+.hr-badge{display:inline-block;border:3px solid #000;padding:8px 20px;
+          font-size:24px;font-weight:900;letter-spacing:2.5px;line-height:1.2}
+.hr-sno{font-size:12px;font-weight:700;margin-top:8px;
+        font-family:'Courier New',monospace;letter-spacing:.4px}
 /* ─── Unified info box (parties + dates) ─────────────────── */
-.ibox{border:1px solid #000;margin-bottom:11px}
+.ibox{border:1.5px solid #000;margin-bottom:14px}
 /* flex (not fixed 2-col grid): rows hold 1–3 cells — full-width purchaser,
    and dates row fits Vehicle No when present */
 .irow{display:flex}
 .irow+.irow{border-top:1px solid #000}
-.ic{flex:1;padding:8px 10px}
+.ic{flex:1;padding:10px 14px}
 .ic+.ic{border-left:1px solid #000}
-.ic-lbl{font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;
-        color:#666;border-bottom:1px solid #e0e0e0;padding-bottom:3px;margin-bottom:5px}
-.ic-name{font-size:12px;font-weight:700}
-.ic-sub{font-size:10px;color:#333;margin-top:2px;line-height:1.45}
-.ic-tin{font-size:10px;font-weight:700;margin-top:3px}
-.ic-tinna{font-size:10px;color:#bbb;margin-top:3px}
-.ic-dlbl{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#666}
-.ic-dval{font-size:12px;font-weight:700;font-family:'Courier New',monospace;margin-top:3px}
+.ic-lbl{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;
+        color:#666;border-bottom:1px solid #e0e0e0;padding-bottom:4px;margin-bottom:6px}
+.ic-name{font-size:16px;font-weight:700}
+.ic-sub{font-size:12.5px;color:#333;margin-top:3px;line-height:1.45}
+.ic-tin{font-size:12.5px;font-weight:700;margin-top:4px}
+.ic-tinna{font-size:12px;color:#bbb;margin-top:4px}
+.ic-dlbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#666}
+.ic-dval{font-size:15px;font-weight:700;font-family:'Courier New',monospace;margin-top:4px}
 /* ─── Line-items table ───────────────────────────────────── */
-table{width:100%;border-collapse:collapse;margin-bottom:9px}
-th{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
-   padding:6px 6px;text-align:left;
-   border-top:1.5px solid #000;border-bottom:1.5px solid #000}
-td{font-size:12px;padding:7px 6px;border-bottom:1px solid #e8e8e8;vertical-align:top}
-.c-no{width:24px;text-align:center}
-.c-qty{width:36px;text-align:center}
-.c-price{width:110px;text-align:right;white-space:nowrap}
-.c-amt{width:110px;text-align:right;font-weight:700;white-space:nowrap}
-tbody tr:last-child td{border-bottom:1.5px solid #000}
+table{width:100%;border-collapse:collapse;margin-bottom:12px}
+th{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+   padding:8px 8px;text-align:left;
+   border-top:2px solid #000;border-bottom:2px solid #000}
+td{font-size:13.5px;padding:10px 8px;border-bottom:1px solid #e8e8e8;vertical-align:top}
+.c-no{width:30px;text-align:center}
+.c-qty{width:48px;text-align:center}
+.c-price{width:120px;text-align:right;white-space:nowrap}
+.c-amt{width:120px;text-align:right;font-weight:700;white-space:nowrap}
+tbody tr:last-child td{border-bottom:2px solid #000}
 /* ─── Totals — right-aligned bordered table ──────────────── */
-.twrap{display:flex;justify-content:flex-end;margin-bottom:9px}
-.ttbl{width:54%;border:1px solid #000;border-collapse:collapse;margin-bottom:0}
-.ttbl td{font-size:12px;padding:6px 10px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
+.twrap{display:flex;justify-content:flex-end;margin-bottom:12px}
+.ttbl{width:56%;border:1.5px solid #000;border-collapse:collapse;margin-bottom:0}
+.ttbl td{font-size:13.5px;padding:9px 12px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
 .ttbl tbody tr:last-child td{border-bottom:none}
 .tlbl{color:#333;border-right:1px solid #e8e8e8;white-space:nowrap}
 .tval{text-align:right;font-weight:700;white-space:nowrap}
-.ttbl .grand td{border-top:2px double #000;font-size:14px;font-weight:900;padding:7px 10px}
+.ttbl .grand td{border-top:2px double #000;font-size:18px;font-weight:900;padding:11px 12px}
 .ttbl .grand .tlbl{border-right:1px solid #bbb}
 /* ─── Amount in words ─────────────────────────────────────── */
-.words{border:1px solid #000;padding:7px 10px;margin-bottom:8px}
-.wlbl{font-size:7px;font-weight:900;text-transform:uppercase;
-      letter-spacing:1.2px;color:#666;margin-bottom:3px}
-.wval{font-size:12px;font-weight:700}
+.words{border:1.5px solid #000;padding:10px 14px;margin-bottom:10px}
+.wlbl{font-size:9px;font-weight:900;text-transform:uppercase;
+      letter-spacing:1.2px;color:#666;margin-bottom:4px}
+.wval{font-size:14px;font-weight:700}
 /* ─── Payment ────────────────────────────────────────────── */
-.pmt{border:1px solid #ddd;padding:6px 10px;margin-bottom:0}
-.pmt-lbl{font-size:7px;font-weight:900;text-transform:uppercase;
-         letter-spacing:1.2px;color:#666;margin-bottom:3px}
-.pmt-val{font-size:12px;font-weight:700}
-/* ─── Fixed spacer + signatures + footer ────────────────── */
-.push{min-height:35mm}
+.pmt{border:1px solid #ddd;padding:8px 14px;margin-bottom:0}
+.pmt-lbl{font-size:9px;font-weight:900;text-transform:uppercase;
+         letter-spacing:1.2px;color:#666;margin-bottom:4px}
+.pmt-val{font-size:13.5px;font-weight:700}
+/* ─── Flexible spacer + signatures + footer ──────────────── */
+.push{flex:1;min-height:18mm}
 .sigs{display:flex;justify-content:space-between;gap:48px}
 .sig{flex:1;text-align:center}
-.sig-line{border-top:1px solid #000;padding-top:5px;
-          font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#555}
-.footer{text-align:center;font-size:9px;color:#888;
-        margin-top:10px;padding-top:7px;border-top:1px dashed #ccc}
+.sig-line{border-top:1px solid #000;padding-top:7px;
+          font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#555}
+.footer{text-align:center;font-size:10.5px;color:#888;
+        margin-top:12px;padding-top:8px;border-top:1px dashed #ccc}
 </style></head><body>
 
 <!-- Header -->
