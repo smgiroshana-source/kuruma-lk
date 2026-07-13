@@ -3,6 +3,23 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 
+// Month bucket in the Colombo calendar — slicing the raw UTC timestamp bins
+// late-night (pre-05:30) transactions into the previous month.
+const colomboMonth = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }).slice(0, 7) : 'unknown'
+
+// A full return VOIDS the original invoice (CLAUDE.md) AND issues a CRN. The
+// void already removes the sale's output VAT / SSCL turnover from the reports,
+// so counting the CRN as well would reverse the same tax twice. Returns the
+// original_sale_ids whose sale is voided — those CRNs must not affect totals.
+async function voidedOriginalIds(admin: any, creditNotes: any[]): Promise<Set<string>> {
+  const ids = [...new Set((creditNotes || []).map((c: any) => c.original_sale_id).filter(Boolean))] as string[]
+  if (!ids.length) return new Set()
+  const sales = await fetchAllByIds(ids, (chunk, from, to) => admin
+    .from('sales').select('id, voided_at, payment_status').in('id', chunk).order('id').range(from, to))
+  return new Set((sales || []).filter((s: any) => s.voided_at || s.payment_status === 'voided').map((s: any) => s.id))
+}
+
 async function getVendor() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -40,8 +57,12 @@ export async function GET(req: NextRequest) {
   }
 
   const entityIds = lkTaxEntities.map((e: any) => e.id)
-  const fromTs = `${from}T00:00:00.000Z`
-  const toTs   = `${to}T23:59:59.999Z`
+  // Period boundaries are Colombo calendar days, NOT UTC. A CRN issued at
+  // 00:29 Colombo on the 14th is 18:59 UTC on the 13th — UTC boundaries let it
+  // leak into a register ending on the 13th while its original invoice
+  // (correctly) stays out, producing phantom negative totals.
+  const fromTs = new Date(`${from}T00:00:00.000+05:30`).toISOString()
+  const toTs   = new Date(`${to}T23:59:59.999+05:30`).toISOString()
 
   // ── VAT Output Register ─────────────────────────────────────────────────────
   if (type === 'vat_register') {
@@ -67,7 +88,7 @@ export async function GET(req: NextRequest) {
     // ── Credit notes issued in the same period ── (paginated)
     const creditNotes = await fetchAllRows((from, to) => admin
       .from('credit_notes')
-      .select('credit_note_no, issued_at, customer_name, customer_tin, net_amount, vat_amount, total, original_serial')
+      .select('credit_note_no, issued_at, customer_name, customer_tin, net_amount, vat_amount, total, original_serial, original_sale_id')
       .eq('vendor_id', vendor.id)
       .in('invoice_entity_id', entityIds)
       .gte('issued_at', fromTs)
@@ -75,6 +96,7 @@ export async function GET(req: NextRequest) {
       .order('issued_at', { ascending: true })
       .order('credit_note_no')
       .range(from, to))
+    const voidedOriginals = await voidedOriginalIds(admin, creditNotes)
 
     // Include voided invoices (marked VOID) — they stay in the ledger
     const invoiceRows = (rows || []).map((s: any) => ({
@@ -93,7 +115,9 @@ export async function GET(req: NextRequest) {
       status:       (s.voided_at || s.payment_status === 'voided') ? 'VOID' : 'VALID',
     }))
 
-    // Credit note rows — negative amounts, status = 'CRN'
+    // Credit note rows — negative amounts, status = 'CRN'. When the original
+    // invoice is VOID the void already removed its VAT, so the CRN is listed
+    // for the record but contributes nothing (originalVoided → excluded).
     const cnRows = (creditNotes || []).map((cn: any) => ({
       rowType:      'credit_note' as const,
       serial:       cn.credit_note_no,
@@ -106,6 +130,7 @@ export async function GET(req: NextRequest) {
       total:        -parseInt(cn.total || 0),
       status:       'CRN',
       refSerial:    cn.original_serial,  // reference to original invoice
+      originalVoided: voidedOriginals.has(cn.original_sale_id),
     }))
 
     // Merge and sort by date
@@ -113,15 +138,18 @@ export async function GET(req: NextRequest) {
       new Date(a.invoiceDate).getTime() - new Date(b.invoiceDate).getTime()
     )
 
-    // Totals — valid invoices minus credit notes
+    // Totals — valid invoices minus credit notes (CRNs against voided
+    // invoices excluded: the void already reversed that VAT)
     const validInvoices = invoiceRows.filter(r => r.status === 'VALID')
+    const countedCns    = cnRows.filter(r => !r.originalVoided)
     const totals = {
-      netAmount:  validInvoices.reduce((s, r) => s + r.netAmount, 0) + cnRows.reduce((s, r) => s + r.netAmount, 0),
-      vatAmount:  validInvoices.reduce((s, r) => s + r.vatAmount, 0) + cnRows.reduce((s, r) => s + r.vatAmount, 0),
-      total:      validInvoices.reduce((s, r) => s + r.total, 0)     + cnRows.reduce((s, r) => s + r.total, 0),
+      netAmount:  validInvoices.reduce((s, r) => s + r.netAmount, 0) + countedCns.reduce((s, r) => s + r.netAmount, 0),
+      vatAmount:  validInvoices.reduce((s, r) => s + r.vatAmount, 0) + countedCns.reduce((s, r) => s + r.vatAmount, 0),
+      total:      validInvoices.reduce((s, r) => s + r.total, 0)     + countedCns.reduce((s, r) => s + r.total, 0),
       count:      validInvoices.length,
       voidCount:  invoiceRows.length - validInvoices.length,
       crnCount:   cnRows.length,
+      crnExcludedCount: cnRows.length - countedCns.length,
     }
 
     return NextResponse.json({ register, totals, entity: lkTaxEntities[0].name })
@@ -171,7 +199,7 @@ export async function GET(req: NextRequest) {
         .range(from, to))
 
       for (const item of (items || [])) {
-        const monthKey = saleDateMap[item.sale_id]?.slice(0, 7) ?? 'unknown'
+        const monthKey = colomboMonth(saleDateMap[item.sale_id])
         if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
         const stream = (item.sscl_stream || 'PART') as 'PART' | 'SVC'
         monthMap[monthKey][stream] += parseFloat(item.total || 0)
@@ -182,16 +210,20 @@ export async function GET(req: NextRequest) {
     // (CLAUDE.md), per line-item stream. (paginated)
     const ssclCns = await fetchAllRows((from, to) => admin
       .from('credit_notes')
-      .select('issued_at, items:credit_note_items(sscl_stream, total)')
+      .select('issued_at, original_sale_id, items:credit_note_items(sscl_stream, total)')
       .eq('vendor_id', vendor.id)
       .in('invoice_entity_id', entityIds)
       .gte('issued_at', fromTs)
       .lte('issued_at', toTs)
       .order('id')
       .range(from, to))
+    // Voided originals are already excluded from the turnover above — their
+    // CRNs must not subtract the same turnover a second time.
+    const ssclVoided = await voidedOriginalIds(admin, ssclCns)
 
     for (const cn of (ssclCns || [])) {
-      const monthKey = (cn.issued_at || '').slice(0, 7) || 'unknown'
+      if (ssclVoided.has(cn.original_sale_id)) continue
+      const monthKey = colomboMonth(cn.issued_at)
       if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
       for (const it of (cn.items || [])) {
         const stream = (it.sscl_stream || 'PART') as 'PART' | 'SVC'
@@ -272,7 +304,7 @@ export async function GET(req: NextRequest) {
     // Aggregate by month
     const monthMap: Record<string, { netCost: number; inputVat: number; totalCost: number; count: number }> = {}
     for (const r of rows) {
-      const monthKey = r.receivedAt.slice(0, 7)
+      const monthKey = colomboMonth(r.receivedAt)
       if (!monthMap[monthKey]) monthMap[monthKey] = { netCost: 0, inputVat: 0, totalCost: 0, count: 0 }
       monthMap[monthKey].netCost   += r.netCost
       monthMap[monthKey].inputVat  += r.inputVat
@@ -317,7 +349,7 @@ export async function GET(req: NextRequest) {
         .range(from, to)),
       fetchAllRows((from, to) => admin
         .from('credit_notes')
-        .select('id, net_amount, vat_amount, total')
+        .select('id, net_amount, vat_amount, total, original_sale_id')
         .eq('vendor_id', vendor.id)
         .in('invoice_entity_id', entityIds)
         .gte('issued_at', fromTs)
@@ -327,14 +359,18 @@ export async function GET(req: NextRequest) {
     ])
 
     const validInvoices = (invoices || []).filter((s: any) => !s.voided_at && s.payment_status !== 'voided')
+    // CRNs against voided invoices carry no VAT effect — the void already
+    // removed that output VAT (counting both would reverse it twice).
+    const summaryVoided = await voidedOriginalIds(admin, creditNotes)
+    const countedCns    = (creditNotes || []).filter((c: any) => !summaryVoided.has(c.original_sale_id))
     const outputVatNet  = validInvoices.reduce((s: number, r: any) => s + parseInt(r.vat_amount || 0), 0)
-    const outputVatCrn  = (creditNotes || []).reduce((s: number, r: any) => s + parseInt(r.vat_amount || 0), 0)
+    const outputVatCrn  = countedCns.reduce((s: number, r: any) => s + parseInt(r.vat_amount || 0), 0)
     const outputVat     = outputVatNet - outputVatCrn
 
     const outputNetSales = validInvoices.reduce((s: number, r: any) => s + parseInt(r.net_amount || 0), 0)
-                         - (creditNotes || []).reduce((s: number, r: any) => s + parseInt(r.net_amount || 0), 0)
+                         - countedCns.reduce((s: number, r: any) => s + parseInt(r.net_amount || 0), 0)
     const outputTotal    = validInvoices.reduce((s: number, r: any) => s + parseInt(r.total || 0), 0)
-                         - (creditNotes || []).reduce((s: number, r: any) => s + parseInt(r.total || 0), 0)
+                         - countedCns.reduce((s: number, r: any) => s + parseInt(r.total || 0), 0)
 
     // ── Input VAT: posted GRNs from VAT-registered suppliers only ──
     // supplier_vat_registered=false GRNs are excluded — those invoices are not

@@ -3430,7 +3430,10 @@ ${customerRows.map(c => `<tr>
                     if (taxReportType === 'vat_register') {
                       const rows = (taxReportData.register || []).map((r: any) => {
                         const isCrn = r.status === 'CRN'
-                        const style = r.status === 'VOID' ? 'color:#999;text-decoration:line-through'
+                        // CRN against a VOIDED invoice: listed for the record but excluded
+                        // from totals (the void already reversed that VAT) — grey it out.
+                        const exCrn = isCrn && r.originalVoided
+                        const style = r.status === 'VOID' || exCrn ? 'color:#999;text-decoration:line-through'
                           : isCrn ? 'color:#1d4ed8;background:#eff6ff' : ''
                         const prefix = isCrn ? '−' : ''
                         return `<tr style="${style}">
@@ -3441,10 +3444,11 @@ ${customerRows.map(c => `<tr>
                           <td style="text-align:right">${prefix}Rs.${Math.abs(r.netAmount).toLocaleString()}</td>
                           <td style="text-align:right">${prefix}Rs.${Math.abs(r.vatAmount).toLocaleString()}</td>
                           <td style="text-align:right">${prefix}Rs.${Math.abs(r.total).toLocaleString()}</td>
-                          <td style="text-align:center">${r.status}</td>
+                          <td style="text-align:center">${exCrn ? 'CRN·VOID' : r.status}</td>
                         </tr>`}).join('')
                       const t = taxReportData.totals
-                      const crnNote = t.crnCount > 0 ? `, ${t.crnCount} credit note(s)` : ''
+                      const crnNote = (t.crnCount > 0 ? `, ${t.crnCount} credit note(s)` : '')
+                        + (t.crnExcludedCount > 0 ? ` — ${t.crnExcludedCount} CRN(s) against voided invoices excluded from totals` : '')
                       body = `<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:11px">
                         <thead><tr style="background:#f0f0f0"><th>Serial / Ref</th><th>Date</th><th>Customer</th><th>TIN</th><th>Net</th><th>VAT</th><th>Total</th><th>Status</th></tr></thead>
                         <tbody>${rows}</tbody>
@@ -3620,8 +3624,11 @@ ${customerRows.map(c => `<tr>
                                     {register.map((r: any, i: number) => {
                                       const isCrn  = r.status === 'CRN'
                                       const isVoid = r.status === 'VOID'
+                                      // CRN whose original invoice is VOID: shown for the record,
+                                      // excluded from totals (void already reversed that VAT)
+                                      const exCrn  = isCrn && r.originalVoided
                                       return (
-                                        <tr key={i} className={`border-t border-slate-100 ${isVoid ? 'opacity-40 line-through' : ''} ${isCrn ? 'bg-blue-50' : ''}`}>
+                                        <tr key={i} className={`border-t border-slate-100 ${isVoid || exCrn ? 'opacity-40 line-through' : ''} ${isCrn ? 'bg-blue-50' : ''}`}>
                                           <td className="px-3 py-2">
                                             <span className="font-mono text-[10px]">{r.serial}</span>
                                             {isCrn && r.refSerial && <span className="block text-[9px] text-blue-400">↳ {r.refSerial}</span>}
@@ -3634,10 +3641,10 @@ ${customerRows.map(c => `<tr>
                                           <td className={`px-3 py-2 text-right font-bold ${isCrn ? 'text-blue-600' : ''}`}>{isCrn ? '−' : ''}Rs.{Math.abs(r.total).toLocaleString()}</td>
                                           <td className="px-3 py-2 text-center">
                                             <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
-                                              isVoid ? 'bg-red-100 text-red-600'
+                                              isVoid || exCrn ? 'bg-red-100 text-red-600'
                                               : isCrn ? 'bg-blue-100 text-blue-700'
                                               : 'bg-green-100 text-green-700'
-                                            }`}>{r.status}</span>
+                                            }`}>{exCrn ? 'CRN·VOID' : r.status}</span>
                                           </td>
                                         </tr>
                                       )
@@ -3645,7 +3652,7 @@ ${customerRows.map(c => `<tr>
                                   </tbody>
                                   <tfoot>
                                     <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
-                                      <td className="px-3 py-2" colSpan={4}>NET TOTALS (after credit notes)</td>
+                                      <td className="px-3 py-2" colSpan={4}>NET TOTALS (after credit notes){totals.crnExcludedCount > 0 ? <span className="block text-[10px] font-normal text-slate-400">{totals.crnExcludedCount} CRN(s) against voided invoices excluded — the void already reversed that VAT</span> : null}</td>
                                       <td className="px-3 py-2 text-right">Rs.{totals.netAmount.toLocaleString()}</td>
                                       <td className="px-3 py-2 text-right text-orange-600">Rs.{totals.vatAmount.toLocaleString()}</td>
                                       <td className="px-3 py-2 text-right">Rs.{totals.total.toLocaleString()}</td>
