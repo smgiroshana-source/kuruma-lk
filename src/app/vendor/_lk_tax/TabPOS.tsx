@@ -366,6 +366,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const [posNotes, setPosNotes] = useState('')
   const [posDate, setPosDate] = useState(colomboToday())
   const [posVehicleNo, setPosVehicleNo] = useState('')
+  // Explicit operator acknowledgement that the customer has no vehicle number —
+  // the only way past the vehicle requirement on insurance bills.
+  const [posNoVehicle, setPosNoVehicle] = useState(false)
   const [posLoading, setPosLoading] = useState(false)
   const [posErrors, setPosErrors] = useState<{ name?: boolean; phone?: boolean; vehicle?: boolean; address?: boolean; tin?: boolean }>({})
   const [posReceipt, setPosReceipt] = useState<any>(null)
@@ -535,6 +538,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     // operator types the approved figure and VAT is added on the bill.
     const isInsurance = !!customer.is_insurance
     setPosCustomerIsInsurance(isInsurance)
+    setPosNoVehicle(false) // "no vehicle" acknowledgement never carries across customers
     if (posIsVatEntity) {
       setPosPriceMode(isInsurance ? 'excl' : 'incl')
       if (isInsurance) showToast('🏢 Insurance customer — enter prices EXCLUDING VAT (+' + posVatRate + '% added)')
@@ -566,7 +570,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     if (posCart.length > 0 && !confirm('Clear the current sale and start a new one?')) return
     setPosCart([]); setPosDraftId(null); setPosDraftInvoiceNo('')
     setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
-    setPosVehicleNo(''); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false)
+    setPosVehicleNo(''); setPosNoVehicle(false); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false)
     setPosDiscount(''); setPosNotes(''); setPosErrors({}); setUseAdvance(false)
     setPosPriceMode('incl') // ex-VAT entry is per-job (insurance) — never carry into the next sale
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
@@ -677,7 +681,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     const errors: { name?: boolean; phone?: boolean; vehicle?: boolean; address?: boolean; tin?: boolean } = {}
     if (!posCustomer.name.trim()) errors.name = true
     if (!posCustomer.phone.trim()) errors.phone = true
-    if (posCustomer.require_vehicle_no && !posVehicleNo.trim()) errors.vehicle = true
+    // Insurance bills are per-vehicle claims — vehicle number is compulsory
+    // unless the operator explicitly ticked "vehicle number not available".
+    if ((posCustomer.require_vehicle_no || posCustomerIsInsurance) && !posVehicleNo.trim() && !posNoVehicle) errors.vehicle = true
     // Address is optional for walk-in customers (gazette allows blank for unregistered purchasers)
     // TIN is required only if purchaser is VAT-registered
     if (isLkTax && posDocType === 'tax_invoice' && posCustomerVatReg) {
@@ -688,7 +694,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       setPosErrors(errors)
       if (errors.tin) showToast('⚠️ 9-digit customer TIN required (VAT-registered purchaser)')
       if (errors.address) showToast('⚠️ Customer address required (VAT-registered purchaser)')
-      if (errors.vehicle) showToast('⚠️ Vehicle number required for this customer')
+      if (errors.vehicle) showToast(posCustomerIsInsurance ? '⚠️ Vehicle number required for insurance bills — or tick "not available"' : '⚠️ Vehicle number required for this customer')
       setTimeout(() => setPosErrors({}), 4000)
       return
     }
@@ -756,7 +762,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
         showToast(j.message)
         setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-        setPosNotes(''); setPosDate(colomboToday()); setPosVehicleNo(''); setUseAdvance(false)
+        setPosNotes(''); setPosDate(colomboToday()); setPosVehicleNo(''); setPosNoVehicle(false); setUseAdvance(false)
         setPosDraftId(null); setPosDraftInvoiceNo('')
         setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false)
         setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' })
@@ -789,7 +795,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       const j = await res.json()
       if (j.success) {
         showToast('📦 ' + j.invoiceNo + ' sent on approval')
-        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo(''); setPosPriceMode('incl'); setPosCustomerIsInsurance(false)
+        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo(''); setPosNoVehicle(false); setPosPriceMode('incl'); setPosCustomerIsInsurance(false)
         await onDataChanged()
         fetchAllDrafts()
       } else showToast(j.error || 'Error')
@@ -920,7 +926,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 <p className="font-black text-amber-900 text-base">{posCustomer.name}{posDraftInvoiceNo ? ' · ' + posDraftInvoiceNo : ''}</p>
                 <p className="text-xs text-amber-600 mt-0.5">Edit prices, add vehicle number &amp; payment — then Complete Invoice</p>
               </div>
-              <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo(''); setPosPriceMode('incl'); setPosCustomerIsInsurance(false) }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
+              <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo(''); setPosNoVehicle(false); setPosPriceMode('incl'); setPosCustomerIsInsurance(false) }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
             </div>
           )}
 
@@ -1177,8 +1183,14 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               {/* Vehicle & Date */}
               <div className="flex gap-2">
                 <div className="flex-1 relative">
-                  <input type="text" value={posVehicleNo} onChange={e => { let v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = v.match(/^([A-Z]{2,3})(\d{1,4})$/); if (m) v = m[1] + '-' + m[2]; setPosVehicleNo(v); if (posErrors.vehicle) setPosErrors(prev => ({...prev, vehicle: false})) }} placeholder={posCustomer.require_vehicle_no ? 'ABC-1234 (required)' : 'ABC-1234'} maxLength={8} className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono font-bold tracking-wider transition-all ' + (posErrors.vehicle ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400')} />
-                  {posCustomer.require_vehicle_no && <span className="absolute right-2 top-2 text-[9px] font-black text-red-500">REQ</span>}
+                  <input type="text" value={posVehicleNo} onChange={e => { let v = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); const m = v.match(/^([A-Z]{2,3})(\d{1,4})$/); if (m) v = m[1] + '-' + m[2]; setPosVehicleNo(v); if (v) setPosNoVehicle(false); if (posErrors.vehicle) setPosErrors(prev => ({...prev, vehicle: false})) }} placeholder={(posCustomer.require_vehicle_no || posCustomerIsInsurance) ? 'ABC-1234 (required)' : 'ABC-1234'} maxLength={8} className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono font-bold tracking-wider transition-all ' + (posErrors.vehicle ? 'border-red-400 bg-red-50 animate-[shake_0.3s_ease-in-out]' : 'border-slate-200 focus:border-orange-400')} />
+                  {(posCustomer.require_vehicle_no || posCustomerIsInsurance) && !posNoVehicle && !posVehicleNo.trim() && <span className="absolute right-2 top-2 text-[9px] font-black text-red-500">REQ</span>}
+                  {(posCustomer.require_vehicle_no || posCustomerIsInsurance) && !posVehicleNo.trim() && (
+                    <label className="flex items-center gap-1.5 cursor-pointer mt-1">
+                      <input type="checkbox" checked={posNoVehicle} onChange={e => { setPosNoVehicle(e.target.checked); if (e.target.checked) setPosErrors(prev => ({ ...prev, vehicle: false })) }} className="w-3.5 h-3.5 accent-amber-500" />
+                      <span className="text-[10px] font-semibold text-slate-500">Vehicle number not available</span>
+                    </label>
+                  )}
                 </div>
                 <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
               </div>
