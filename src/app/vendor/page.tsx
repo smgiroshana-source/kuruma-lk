@@ -1407,14 +1407,14 @@ export default function VendorDashboard() {
     const dayCollections = (collections || []).filter((c: any) => colomboBusinessDay(c.created_at) === reportDate)
     const totalCollections = dayCollections.reduce((s: number, c: any) => s + c.amount, 0)
 
-    // For same-day returns: credit_return is already baked into sale.total, so exclude to avoid double-counting.
-    // For OLD invoice returns (not in today's filtered list): credit_return must be shown — it's not in today's totals at all.
+    // Only REAL money-out refunds (cash/cheque/bank/card) belong here.
+    // credit_return rows are receivable adjustments — no cash moves, ever:
+    // same-day returns are already reflected in sale.total / the voided sale
+    // being excluded from gross, and old-invoice credit returns just reduce
+    // the customer's balance. Counting them showed "Net Sales Rs.0" and a
+    // phantom "Cash Refund" after a same-day full return of a credit sale.
     const allReturns = (returns || []).filter((r: any) => colomboBusinessDay(r.created_at) === reportDate)
-    const filteredSaleIds = new Set(filtered.map((s: any) => s.id))
-    const cashReturns = allReturns.filter((r: any) => {
-      if (r.payment_method === 'credit_return') return !filteredSaleIds.has(r.sale_id)
-      return true
-    })
+    const cashReturns = allReturns.filter((r: any) => r.payment_method !== 'credit_return')
     const totalCashReturnAmount = cashReturns.reduce((s: number, r: any) => s + r.amount, 0)
 
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)

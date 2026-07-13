@@ -178,19 +178,25 @@ export async function POST(req: NextRequest) {
     const sessionDate: string = session.session_date
     const openingBal: number = parseInt(session.opening_balance || 0)
 
-    // 1. Sum cash sales for this session_date (Asia/Colombo time, UTC+5:30)
+    // 1. Net cash through the drawer for this session_date (Asia/Colombo) from
+    //    the PAYMENTS ledger — not sales.total. Invoice totals counted unpaid
+    //    credit sales as cash, missed split payments, ignored credit
+    //    collections on old invoices, and never subtracted cash refunds — the
+    //    drawer then showed a false Over/Short at close.
     const dateStart = `${sessionDate}T00:00:00+05:30`
-    const dateEnd   = `${sessionDate}T23:59:59+05:30`
-    const { data: salesRows } = await admin
-      .from('sales')
-      .select('total')
+    const dateEnd   = `${sessionDate}T23:59:59.999+05:30`
+    const { data: payRows } = await admin
+      .from('payments')
+      .select('amount')
       .eq('vendor_id', vendor.id)
       .eq('payment_method', 'cash')
-      .is('voided_at', null)
       .gte('created_at', new Date(dateStart).toISOString())
       .lte('created_at', new Date(dateEnd).toISOString())
 
-    const cashSales = (salesRows || []).reduce((sum: number, s: any) => sum + parseInt(s.total || 0), 0)
+    // Positive rows = cash in (today's sales + credit collections);
+    // negative rows = cash refunds paid out. credit_return/advance rows have
+    // their own payment_method values, so they never enter this sum.
+    const cashSales = Math.round((payRows || []).reduce((sum: number, p: any) => sum + parseFloat(p.amount || 0), 0))
 
     // 2. Sum cash expenses for this session_date
     const { data: expenseRows } = await admin
