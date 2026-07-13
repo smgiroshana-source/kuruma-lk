@@ -381,7 +381,7 @@ export async function POST(req: NextRequest) {
       saleDate, vehicleNo,
       // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
       invoiceEntityId, documentType,
-      customerAddress, customerTin, customerVatRegistered,
+      customerAddress, customerTin, customerVatRegistered, customerIsInsurance,
     } = body
 
     if (!items || items.length === 0) return NextResponse.json({ error: 'No items in sale' }, { status: 400 })
@@ -473,6 +473,7 @@ export async function POST(req: NextRequest) {
         if (customerAddress?.trim()) custPatch.address = customerAddress.trim()
         if (customerVatRegistered !== undefined) custPatch.vat_registered = customerVatRegistered
         if (customerTin?.trim() && customerVatRegistered) custPatch.tin = customerTin.trim()
+        if (customerIsInsurance !== undefined) custPatch.is_insurance = !!customerIsInsurance
         if (Object.keys(custPatch).length > 0) {
           await admin.from('customers').update(custPatch).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
         }
@@ -1172,7 +1173,7 @@ export async function POST(req: NextRequest) {
       saleId, customerId: bodyCustomerId, useAdvance, items: finalItems, payments: paymentLines,
       discount, vehicleNo, notes, saleDate, customerName, customerPhone,
       // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
-      invoiceEntityId, customerAddress, customerTin, customerVatRegistered,
+      invoiceEntityId, customerAddress, customerTin, customerVatRegistered, customerIsInsurance,
     } = body
     const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
@@ -1298,6 +1299,7 @@ export async function POST(req: NextRequest) {
       if (customerAddress?.trim()) custPatch.address = customerAddress.trim()
       if (customerVatRegistered !== undefined) custPatch.vat_registered = customerVatRegistered
       if (customerTin?.trim() && customerVatRegistered) custPatch.tin = customerTin.trim()
+      if (customerIsInsurance !== undefined) custPatch.is_insurance = !!customerIsInsurance
       if (Object.keys(custPatch).length > 0) {
         await admin.from('customers').update(custPatch).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
       }

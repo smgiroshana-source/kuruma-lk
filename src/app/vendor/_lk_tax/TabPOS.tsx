@@ -385,6 +385,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const [posCustomerAddress, setPosCustomerAddress] = useState('')
   const [posCustomerTin, setPosCustomerTin] = useState('')
   const [posCustomerVatReg, setPosCustomerVatReg] = useState(false)
+  const [posCustomerIsInsurance, setPosCustomerIsInsurance] = useState(false)
   const [showManualLine, setShowManualLine] = useState(false)
   const [manualLine, setManualLine] = useState({ name: '', qty: '1', price: '' })
 
@@ -530,6 +531,14 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     setPosCustomerAddress(customer.address || '')
     setPosCustomerVatReg(!!customer.vat_registered)
     setPosCustomerTin(customer.vat_registered ? (customer.tin || '') : '')
+    // Insurance companies quote ex-VAT: auto-switch the price-entry mode so the
+    // operator types the approved figure and VAT is added on the bill.
+    const isInsurance = !!customer.is_insurance
+    setPosCustomerIsInsurance(isInsurance)
+    if (posIsVatEntity) {
+      setPosPriceMode(isInsurance ? 'excl' : 'incl')
+      if (isInsurance) showToast('🏢 Insurance customer — enter prices EXCLUDING VAT (+' + posVatRate + '% added)')
+    }
     setPosErrors(prev => ({ ...prev, name: false, phone: false, address: false, tin: false }))
     setCustomerSuggestions([])
     if (advance > 0) setUseAdvance(true)
@@ -557,7 +566,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     if (posCart.length > 0 && !confirm('Clear the current sale and start a new one?')) return
     setPosCart([]); setPosDraftId(null); setPosDraftInvoiceNo('')
     setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
-    setPosVehicleNo(''); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
+    setPosVehicleNo(''); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false)
     setPosDiscount(''); setPosNotes(''); setPosErrors({}); setUseAdvance(false)
     setPosPriceMode('incl') // ex-VAT entry is per-job (insurance) — never carry into the next sale
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
@@ -712,6 +721,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               documentType: posDocType,
               customerAddress: posCustomerAddress.trim() || null,
               customerVatRegistered: posCustomerVatReg,
+              customerIsInsurance: posCustomerIsInsurance,
               customerTin: posCustomerVatReg ? posCustomerTin.trim() || null : null,
             } : {}),
           }
@@ -733,6 +743,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               documentType: posDocType,
               customerAddress: posCustomerAddress.trim() || null,
               customerVatRegistered: posCustomerVatReg,
+              customerIsInsurance: posCustomerIsInsurance,
               customerTin: posCustomerVatReg ? posCustomerTin.trim() || null : null,
             } : {}),
           }
@@ -747,7 +758,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
         setPosNotes(''); setPosDate(colomboToday()); setPosVehicleNo(''); setUseAdvance(false)
         setPosDraftId(null); setPosDraftInvoiceNo('')
-        setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
+        setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false)
         setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' })
         setPosPriceMode('incl')
         setPosPreview(false)
@@ -778,7 +789,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       const j = await res.json()
       if (j.success) {
         showToast('📦 ' + j.invoiceNo + ' sent on approval')
-        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo(''); setPosPriceMode('incl')
+        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo(''); setPosPriceMode('incl'); setPosCustomerIsInsurance(false)
         await onDataChanged()
         fetchAllDrafts()
       } else showToast(j.error || 'Error')
@@ -909,7 +920,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 <p className="font-black text-amber-900 text-base">{posCustomer.name}{posDraftInvoiceNo ? ' · ' + posDraftInvoiceNo : ''}</p>
                 <p className="text-xs text-amber-600 mt-0.5">Edit prices, add vehicle number &amp; payment — then Complete Invoice</p>
               </div>
-              <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo(''); setPosPriceMode('incl') }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
+              <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo(''); setPosPriceMode('incl'); setPosCustomerIsInsurance(false) }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
             </div>
           )}
 
@@ -1133,6 +1144,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={posCustomerVatReg} onChange={e => { setPosCustomerVatReg(e.target.checked); if (!e.target.checked) setPosCustomerTin('') }} className="w-4 h-4 accent-orange-500" />
                       <span className="text-xs font-bold text-slate-600">VAT-Registered Purchaser</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={posCustomerIsInsurance} onChange={e => { const v = e.target.checked; setPosCustomerIsInsurance(v); if (posIsVatEntity) setPosPriceMode(v ? 'excl' : 'incl') }} className="w-4 h-4 accent-amber-500" />
+                      <span className="text-xs font-bold text-slate-600">🏢 Insurance Company <span className="font-normal text-slate-400">(quotes excl. VAT — remembered for next time)</span></span>
                     </label>
                     {posCustomerVatReg && (
                       <input value={posCustomerTin} onChange={e => { setPosCustomerTin(e.target.value.replace(/[^0-9]/g, '').slice(0, 9)); if ((posErrors as any).tin) setPosErrors(prev => ({ ...prev, tin: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono ${(posErrors as any).tin ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Purchaser TIN (9 digits) *" />
