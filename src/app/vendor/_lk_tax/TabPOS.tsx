@@ -2,7 +2,7 @@
 import { toWhatsAppNumber } from '@/lib/constants'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
-import { gpPercent, isBelowCost } from '@/lib/margin'
+import { gpPercent, isBelowCost, netOfVat } from '@/lib/margin'
 import { useState, useEffect, useMemo } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
@@ -591,6 +591,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const posVatRate = Number(vendorSettings?.vat_rate) || 18
   const posVatAmount = posIsVatEntity ? Math.round(posTotal * posVatRate / (100 + posVatRate)) : 0
   const posNetAmount = posIsVatEntity ? posTotal - posVatAmount : posTotal
+  // Entered prices are VAT-inclusive. For the VAT entity the shop only keeps the
+  // ex-VAT slice, so GP%/below-cost must compare cost against that, not the
+  // sticker price — otherwise a loss-making sale can pass the warning.
+  const posMarginBase = (p: number | null | undefined) => posIsVatEntity ? netOfVat(p, posVatRate) : (Number(p) || 0)
 
   // ── Parse tyre size from a search string ─────────────────────────────
   function parseTyreSize(q: string): { width: number; profile: number; rim: number } | null {
@@ -1005,10 +1009,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(item.unitPrice, item.cost) ? 'border-red-400 bg-red-50' : 'border-slate-200')} />
-                            {Number(item.cost) > 0 && (isBelowCost(item.unitPrice, item.cost)
-                              ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost Rs.{Number(item.cost).toLocaleString()}</p>
-                              : Number(item.unitPrice) > 0 && <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(item.unitPrice, item.cost)}%</p>)}
+                            <input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), item.cost) ? 'border-red-400 bg-red-50' : 'border-slate-200')} />
+                            {Number(item.cost) > 0 && (isBelowCost(posMarginBase(item.unitPrice), item.cost)
+                              ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost Rs.{Number(item.cost).toLocaleString()}{posIsVatEntity ? ` (excl. VAT Rs.${posMarginBase(item.unitPrice).toLocaleString()})` : ''}</p>
+                              : Number(item.unitPrice) > 0 && <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), item.cost)}%{posIsVatEntity ? ' net' : ''}</p>)}
                           </td>
                           <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td>
                           <td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td>

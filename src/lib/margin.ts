@@ -15,3 +15,15 @@ export function isBelowCost(price: number | null | undefined, cost: number | nul
   const c = Number(cost) || 0
   return p > 0 && c > 0 && p <= c
 }
+
+/**
+ * The ex-VAT portion of a VAT-inclusive price. For a VAT-registered seller the
+ * VAT slice is remitted to IRD, so margin/below-cost checks must compare cost
+ * against this, not the sticker price.
+ */
+export function netOfVat(price: number | null | undefined, vatRatePercent: number): number {
+  const p = Number(price) || 0
+  const r = Number(vatRatePercent) || 0
+  if (p <= 0 || r <= 0) return p
+  return Math.round((p * 100) / (100 + r))
+}
