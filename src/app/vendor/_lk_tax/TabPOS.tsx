@@ -353,6 +353,11 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
 
   // ── POS state ──────────────────────────────────────────────────────────
   const [posCart, setPosCart] = useState<any[]>([])
+  // Price-entry mode: 'incl' (default — operator types the customer-pays price)
+  // or 'excl' (insurance jobs — operator types the approved ex-VAT figure and
+  // VAT is added on top). The cart ALWAYS stores VAT-inclusive unit prices;
+  // this only changes what the price inputs mean.
+  const [posPriceMode, setPosPriceMode] = useState<'incl' | 'excl'>('incl')
   const [posSearch, setPosSearch] = useState('')
   const [posCustomer, setPosCustomer] = useState<any>({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
   const [customerSuggestions, setCustomerSuggestions] = useState<any[]>([])
@@ -554,13 +559,15 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
     setPosVehicleNo(''); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
     setPosDiscount(''); setPosNotes(''); setPosErrors({}); setUseAdvance(false)
+    setPosPriceMode('incl') // ex-VAT entry is per-job (insurance) — never carry into the next sale
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
   }
 
   function addManualLine() {
     const name = manualLine.name.trim()
     const qty = Math.max(1, parseInt(manualLine.qty) || 1)
-    const price = parseInt(manualLine.price) || 0
+    const entered = parseInt(manualLine.price) || 0
+    const price = posEntryExcl ? grossOfNet(entered) : entered // cart stores VAT-inclusive
     if (!name) return
     setPosCart(prev => [...prev, {
       productId: null, productName: name, productSku: '', unitPrice: price,
@@ -595,6 +602,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ex-VAT slice, so GP%/below-cost must compare cost against that, not the
   // sticker price — otherwise a loss-making sale can pass the warning.
   const posMarginBase = (p: number | null | undefined) => posIsVatEntity ? netOfVat(p, posVatRate) : (Number(p) || 0)
+  // Ex-VAT price entry (insurance quotes): only meaningful on the VAT entity.
+  const posEntryExcl = posIsVatEntity && posPriceMode === 'excl'
+  const grossOfNet = (p: number) => Math.round((Number(p) || 0) * (100 + posVatRate) / 100)
 
   // ── Parse tyre size from a search string ─────────────────────────────
   function parseTyreSize(q: string): { width: number; profile: number; rim: number } | null {
@@ -739,6 +749,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
         setPosDraftId(null); setPosDraftInvoiceNo('')
         setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false)
         setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' })
+        setPosPriceMode('incl')
         setPosPreview(false)
         await onDataChanged()
         fetchAllDrafts()
@@ -767,7 +778,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       const j = await res.json()
       if (j.success) {
         showToast('📦 ' + j.invoiceNo + ' sent on approval')
-        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo('')
+        setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0 }); setPosVehicleNo(''); setPosPriceMode('incl')
         await onDataChanged()
         fetchAllDrafts()
       } else showToast(j.error || 'Error')
@@ -898,7 +909,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 <p className="font-black text-amber-900 text-base">{posCustomer.name}{posDraftInvoiceNo ? ' · ' + posDraftInvoiceNo : ''}</p>
                 <p className="text-xs text-amber-600 mt-0.5">Edit prices, add vehicle number &amp; payment — then Complete Invoice</p>
               </div>
-              <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo('') }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
+              <button onClick={() => { setPosDraftId(null); setPosDraftInvoiceNo(''); setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false }); setPosVehicleNo(''); setPosPriceMode('incl') }} className="shrink-0 text-amber-400 hover:text-red-500 text-2xl font-bold leading-none">✕</button>
             </div>
           )}
 
@@ -981,15 +992,28 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 <div className="bg-white rounded-xl border border-slate-200 p-8 text-center"><p className="text-3xl opacity-30">🛒</p><p className="text-slate-400 font-semibold">Add products above</p></div>
               ) : (
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                  <div className="flex items-center justify-between px-3 sm:px-4 py-2 border-b border-slate-100">
+                  <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-slate-100 flex-wrap">
                     <span className="text-xs font-bold text-slate-500">{posCart.length} item{posCart.length !== 1 ? 's' : ''} in cart</span>
-                    <button onClick={clearPos} className="text-xs font-bold text-red-500 hover:text-red-700 active:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50">🗑 Clear / New Sale</button>
+                    <div className="flex items-center gap-2">
+                      {posIsVatEntity && (
+                        <div className="flex rounded-lg border border-slate-200 overflow-hidden" title="Insurance quotes are ex-VAT — switch to enter approved amounts and VAT is added on the bill">
+                          <button onClick={() => setPosPriceMode('incl')} className={`px-2 py-1 text-[10px] font-bold transition-colors ${posPriceMode === 'incl' ? 'bg-slate-700 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>Incl. VAT</button>
+                          <button onClick={() => setPosPriceMode('excl')} className={`px-2 py-1 text-[10px] font-bold border-l border-slate-200 transition-colors ${posPriceMode === 'excl' ? 'bg-amber-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>Excl. VAT +{posVatRate}%</button>
+                        </div>
+                      )}
+                      <button onClick={clearPos} className="text-xs font-bold text-red-500 hover:text-red-700 active:text-red-700 px-2 py-1 rounded-lg hover:bg-red-50">🗑 Clear / New Sale</button>
+                    </div>
                   </div>
+                  {posEntryExcl && (
+                    <div className="px-3 sm:px-4 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] font-bold text-amber-800">
+                      ⚠ Ex-VAT entry (insurance): type the approved amount WITHOUT VAT — {posVatRate}% is added to the bill automatically.
+                    </div>
+                  )}
                   <table className="w-full text-sm">
                     <thead><tr className="bg-slate-50">
                       <th className="px-2 sm:px-4 py-2 text-left text-xs font-bold text-slate-500">Item</th>
                       <th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-28 sm:w-36">Qty</th>
-                      <th className="px-2 sm:px-4 py-2 text-xs font-bold text-slate-500 w-20 sm:w-28">Price</th>
+                      <th className={`px-2 sm:px-4 py-2 text-xs font-bold w-20 sm:w-28 ${posEntryExcl ? 'text-amber-600' : 'text-slate-500'}`}>{posEntryExcl ? 'Price (excl. VAT)' : 'Price'}</th>
                       <th className="px-2 sm:px-4 py-2 text-right text-xs font-bold text-slate-500 w-20 sm:w-24">Total</th>
                       <th className="w-8"></th>
                     </tr></thead>
@@ -1009,7 +1033,8 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="text" inputMode="numeric" value={item.unitPrice || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); updateCartPrice(i, v ? parseInt(v) : 0) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), item.cost) ? 'border-red-400 bg-red-50' : 'border-slate-200')} />
+                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), item.cost) ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
+                            {posEntryExcl && Number(item.unitPrice) > 0 && <p className="text-[9px] font-bold text-amber-700 mt-0.5 leading-none">= Rs.{Number(item.unitPrice).toLocaleString()} with VAT</p>}
                             {Number(item.cost) > 0 && (isBelowCost(posMarginBase(item.unitPrice), item.cost)
                               ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost Rs.{Number(item.cost).toLocaleString()}{posIsVatEntity ? ` (excl. VAT Rs.${posMarginBase(item.unitPrice).toLocaleString()})` : ''}</p>
                               : Number(item.unitPrice) > 0 && <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), item.cost)}%{posIsVatEntity ? ' net' : ''}</p>)}
@@ -1036,7 +1061,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                       <input value={manualLine.name} onChange={e => setManualLine(p => ({ ...p, name: e.target.value }))} placeholder="Description (e.g. Wheel Alignment)" className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none focus:border-blue-400" />
                       <div className="flex gap-2">
                         <input type="text" inputMode="numeric" value={manualLine.qty} onChange={e => setManualLine(p => ({ ...p, qty: e.target.value.replace(/[^0-9]/g, '') }))} placeholder="Qty" className="w-20 px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none text-center" />
-                        <input type="text" inputMode="numeric" value={manualLine.price} onChange={e => setManualLine(p => ({ ...p, price: e.target.value.replace(/[^0-9]/g, '') }))} placeholder="Price (Rs.)" className="flex-1 px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none" />
+                        <input type="text" inputMode="numeric" value={manualLine.price} onChange={e => setManualLine(p => ({ ...p, price: e.target.value.replace(/[^0-9]/g, '') }))} placeholder={posEntryExcl ? `Price excl. VAT (+${posVatRate}% added)` : 'Price (Rs.)'} className={`flex-1 px-3 py-2 rounded-lg border-2 text-sm outline-none ${posEntryExcl ? 'border-amber-300 bg-amber-50' : 'border-blue-200'}`} />
                         <button onClick={addManualLine} className="bg-blue-600 text-white font-bold px-3 py-2 rounded-lg text-sm">Add</button>
                         <button onClick={() => { setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' }) }} className="text-slate-400 hover:text-red-500 font-bold px-2">✕</button>
                       </div>
