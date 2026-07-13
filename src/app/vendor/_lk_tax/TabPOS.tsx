@@ -66,6 +66,7 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const purchaserAddress = escapeHtml(sale.customer_address)
   const purchaserTin     = escapeHtml(sale.customer_tin)
   const purchaserPhone   = escapeHtml(sale.customer_phone)
+  const vehicleNo        = escapeHtml(sale.vehicle_no)
   const logoHtml = (s.logo_url && s.invoice_show_logo !== false)
     ? `<img src="${escapeHtml(s.logo_url)}" style="height:52px;max-width:120px;object-fit:contain;display:block;margin-bottom:4px">`
     : ''
@@ -118,9 +119,11 @@ body{
         font-family:'Courier New',monospace;letter-spacing:.3px}
 /* ─── Unified info box (parties + dates) ─────────────────── */
 .ibox{border:1px solid #000;margin-bottom:11px}
-.irow{display:grid;grid-template-columns:1fr 1fr}
+/* flex (not fixed 2-col grid): rows hold 1–3 cells — full-width purchaser,
+   and dates row fits Vehicle No when present */
+.irow{display:flex}
 .irow+.irow{border-top:1px solid #000}
-.ic{padding:8px 10px}
+.ic{flex:1;padding:8px 10px}
 .ic+.ic{border-left:1px solid #000}
 .ic-lbl{font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;
         color:#666;border-bottom:1px solid #e0e0e0;padding-bottom:3px;margin-bottom:5px}
@@ -184,15 +187,9 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
   </div>
 </div>
 
-<!-- Supplier / Purchaser / Dates -->
+<!-- Purchaser / Dates (supplier appears once, in the letterhead — gazette: top-left) -->
 <div class="ibox">
   <div class="irow">
-    <div class="ic">
-      <div class="ic-lbl">Supplier</div>
-      <div class="ic-name">${supplierName}</div>
-      <div class="ic-sub">${supplierAddress}</div>
-      <div class="ic-tin">TIN: ${supplierTin}</div>
-    </div>
     <div class="ic">
       <div class="ic-lbl">Bill To (Purchaser)</div>
       <div class="ic-name">${purchaserName || '&mdash;'}</div>
@@ -212,6 +209,11 @@ tbody tr:last-child td{border-bottom:1.5px solid #000}
       <div class="ic-dlbl">Date of Supply</div>
       <div class="ic-dval">${supplyDate}</div>
     </div>
+    ${vehicleNo ? `
+    <div class="ic">
+      <div class="ic-dlbl">Vehicle No</div>
+      <div class="ic-dval">${vehicleNo}</div>
+    </div>` : ''}
   </div>
 </div>
 
