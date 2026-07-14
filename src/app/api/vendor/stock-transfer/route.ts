@@ -39,6 +39,15 @@ async function getVendor() {
   return null
 }
 
+// Moving stock out of the shop (and overwriting cost/price at the destination)
+// is an owner/manager action — cashier staff are limited to the POS.
+async function callerMayTransfer(admin: ReturnType<typeof createAdminClient>, vendor: any, userId: string): Promise<boolean> {
+  if (vendor.user_id === userId) return true // shop owner
+  const { data: staff } = await admin.from('vendor_staff')
+    .select('role').eq('vendor_id', vendor.id).eq('user_id', userId).eq('active', true).maybeSingle()
+  return !!staff && staff.role !== 'cashier'
+}
+
 // ─── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   const auth = await getVendor()
@@ -79,6 +88,10 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
   const body = await req.json()
   const { action } = body
+
+  if ((action === 'preview' || action === 'execute') && !(await callerMayTransfer(admin, vendor, userId))) {
+    return NextResponse.json({ success: false, error: 'Stock transfers require owner or manager access' }, { status: 403 })
+  }
 
   // ── PREVIEW — validate items without executing ────────────────────────────
   if (action === 'preview') {
@@ -142,6 +155,12 @@ export async function POST(req: NextRequest) {
       const q = Number(item.quantity)
       if (!Number.isInteger(q) || q < 1)
         return NextResponse.json({ success: false, error: 'Quantities must be whole numbers of at least 1' }, { status: 400 })
+      // Cost/price overwrite the destination product — negative or NaN values
+      // must never land there.
+      for (const k of ['transferCost', 'transferPrice'] as const) {
+        if (item[k] != null && (!Number.isFinite(Number(item[k])) || Number(item[k]) < 0))
+          return NextResponse.json({ success: false, error: 'Transfer cost/price must be zero or positive' }, { status: 400 })
+      }
       const existing = aggregated.get(item.fromProductId)
       if (existing) existing.quantity += q
       else aggregated.set(item.fromProductId, { ...item, quantity: q })
@@ -227,6 +246,17 @@ export async function POST(req: NextRequest) {
         }
         destProductId   = created.id
         destProductName = created.name
+
+        // Photos live in product_images, not on the product row — copy the
+        // references so the product doesn't arrive photo-less. Best-effort:
+        // a failure here shouldn't undo a completed stock move.
+        const { data: srcImages } = await admin.from('product_images')
+          .select('url, sort_order').eq('product_id', src.id).order('sort_order')
+        if (srcImages && srcImages.length > 0) {
+          await admin.from('product_images').insert(
+            srcImages.map((img: any) => ({ product_id: created.id, url: img.url, sort_order: img.sort_order }))
+          )
+        }
       }
 
       // Seed the destination's FIFO layer with the moved cost
