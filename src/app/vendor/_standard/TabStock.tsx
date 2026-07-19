@@ -1,6 +1,7 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
+import DamageCapture from '../_shared/DamageCapture'
 import { colomboToday } from '@/lib/dates'
 
 function locLabel(p: any) { return [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ') }
@@ -28,6 +29,40 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   const [stockQtyEdits, setStockQtyEdits] = useState<Record<string, number>>({})
   const [stockConfirmSet, setStockConfirmSet] = useState<Set<string>>(new Set())
   const [stocktakeSaving, setStocktakeSaving] = useState(false)
+  // Auto-saved confirmations (no qty change): flushed ~1.5s after the last tap
+  // so a counter on a phone never loses work by forgetting the Save button.
+  const [savedConfirms, setSavedConfirms] = useState<Set<string>>(new Set())
+  const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
+  // Damage capture sheet target (product found damaged during the count)
+  const [damageProduct, setDamageProduct] = useState<any>(null)
+
+  useEffect(() => {
+    const ids = [...stockConfirmSet].filter(id => !(id in stockQtyEdits))
+    if (!ids.length) return
+    const t = setTimeout(() => flushConfirms(ids), 1500)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockConfirmSet, stockQtyEdits])
+
+  async function flushConfirms(ids: string[]) {
+    setAutoSaveState('saving')
+    const now = new Date().toISOString()
+    const results = await Promise.all(ids.map(async id => {
+      try {
+        const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', productId: id, data: { last_stock_confirmed_at: now } }) })
+        const j = await r.json()
+        return j.success ? id : null
+      } catch { return null }
+    }))
+    const ok = new Set(results.filter(Boolean) as string[])
+    if (ok.size > 0) {
+      setSavedConfirms(prev => new Set([...prev, ...ok]))
+      setStockConfirmSet(prev => new Set([...prev].filter(id => !ok.has(id))))
+    }
+    setAutoSaveState(ok.size === ids.length ? 'saved' : 'idle')
+    if (ok.size < ids.length) showToast('⚠ Some confirmations failed to save — kept for the Save button')
+  }
   const [assignLoc, setAssignLoc] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [assignSearch, setAssignSearch] = useState('')
   const [assignLoading, setAssignLoading] = useState<string | null>(null)
@@ -226,6 +261,8 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
           {/* Results header */}
           <div className="flex items-center justify-between mb-3">
             <p className="text-xs font-bold text-slate-400 uppercase">{browseProducts.length} product{browseProducts.length !== 1 ? 's' : ''}{anyFilter ? ' matching' : ''}</p>
+            {autoSaveState === 'saving' && <p className="text-xs font-bold text-amber-500">Saving…</p>}
+            {autoSaveState === 'saved' && stockConfirmSet.size === 0 && <p className="text-xs font-bold text-emerald-500">✓ Confirmations saved</p>}
           </div>
 
           {/* Product list */}
@@ -240,9 +277,10 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
               {browseProducts.map((p: any) => {
                 const curQty = stockQtyEdits[p.id] ?? p.quantity
                 const changed = stockQtyEdits[p.id] !== undefined
-                const confirmed = stockConfirmSet.has(p.id)
+                const autoSaved = savedConfirms.has(p.id)
+                const confirmed = stockConfirmSet.has(p.id) || autoSaved
                 const loc = locLabel(p)
-                const ago = confirmedAgo(p.last_stock_confirmed_at)
+                const ago = autoSaved ? { label: 'Confirmed today', cls: 'text-emerald-700 bg-emerald-50' } : confirmedAgo(p.last_stock_confirmed_at)
                 return (
                   <div key={p.id} className={`bg-white rounded-xl border p-4 ${changed ? 'border-orange-300 bg-orange-50' : confirmed ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
                     {/* Top row: info + confirmed badge */}
@@ -262,14 +300,15 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                           ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ago.cls}`}>✓ {ago.label}</span>
                           : <span className="text-[10px] font-semibold text-slate-300 px-2 py-0.5 rounded-full bg-slate-50">Never confirmed</span>}
                         {!changed && (
-                          <button onClick={() => setStockConfirmSet(prev => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n })}
+                          <button
+                            onClick={() => { if (autoSaved) return; setStockConfirmSet(prev => { const n = new Set(prev); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n }) }}
                             className={`text-[11px] font-bold px-3 py-1.5 rounded-lg border transition active:scale-95 ${confirmed ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-slate-500 border-slate-200 hover:border-emerald-400 hover:text-emerald-600'}`}>
-                            {confirmed ? '✓ Confirmed' : 'Confirm'}
+                            {autoSaved ? '✓ Saved' : confirmed ? '✓ Confirmed' : 'Confirm'}
                           </button>
                         )}
                       </div>
                     </div>
-                    {/* Bottom row: qty controls */}
+                    {/* Bottom row: qty controls + damage */}
                     <div className="flex items-center gap-2">
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
@@ -278,6 +317,10 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                         className="w-20 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
+                      <button onClick={() => setDamageProduct(p)}
+                        className="ml-auto h-10 px-3 rounded-xl border-2 border-amber-200 bg-amber-50 text-amber-700 font-bold text-xs active:bg-amber-100">
+                        ⚠ Damage
+                      </button>
                     </div>
                   </div>
                 )
@@ -494,6 +537,16 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
       {/* ── TRANSFER STOCK ── */}
       {stockView === 'transfer' && (
         <StockTransfer vendor={vendor} products={products} showToast={showToast} onDataChanged={onDataChanged} />
+      )}
+
+      {/* ── Damage capture sheet (from stock count) ── */}
+      {damageProduct && (
+        <DamageCapture
+          product={damageProduct}
+          showToast={showToast}
+          onClose={() => setDamageProduct(null)}
+          onSaved={() => onDataChanged()}
+        />
       )}
     </div>
   )
