@@ -1,6 +1,6 @@
 'use client'
 import { colomboToday } from '@/lib/dates'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
 import DamageCapture from '../_shared/DamageCapture'
 
@@ -487,6 +487,83 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       .slice(0, 20)
     : []
   const anyAssignLoc = assignLoc.store || assignLoc.floor || assignLoc.sub1 || assignLoc.sub2
+
+  // ── Assign basket: pick products one by one, then assign ALL to the current
+  // location in one go. One catalog refetch at the end instead of one per part,
+  // and the operator reviews the list before anything is written.
+  const [assignBasket, setAssignBasket] = useState<any[]>([])
+  const [assignSaving, setAssignSaving] = useState(false)
+  const basketKey = `assign-basket-${vendor?.id || 'v'}`
+  const basketHydrated = useRef(false)
+  useEffect(() => {
+    // Restore a basket left over from a tab switch/reload (ids → products once
+    // the catalog has loaded).
+    if (basketHydrated.current || !products.length) return
+    basketHydrated.current = true
+    try {
+      const ids: string[] = JSON.parse(sessionStorage.getItem(basketKey) || '[]')
+      if (ids.length) {
+        const found = products.filter((p: any) => ids.includes(p.id))
+        if (found.length) setAssignBasket(found)
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products])
+  useEffect(() => {
+    if (!basketHydrated.current) return
+    try {
+      if (assignBasket.length) sessionStorage.setItem(basketKey, JSON.stringify(assignBasket.map((p: any) => p.id)))
+      else sessionStorage.removeItem(basketKey)
+    } catch {}
+  }, [assignBasket, basketKey])
+
+  async function assignAllBasket() {
+    if (!anyAssignLoc || assignBasket.length === 0 || assignSaving) return
+    setAssignSaving(true)
+    const loc = { loc_store: assignLoc.store || null, loc_floor: assignLoc.floor || null, loc_sub1: assignLoc.sub1 || null, loc_sub2: assignLoc.sub2 || null }
+    const results = await Promise.all(assignBasket.map(async (p: any) => {
+      try {
+        const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'update', productId: p.id, data: loc }) })
+        return r.ok ? p.id : null
+      } catch { return null }
+    }))
+    const ok = new Set(results.filter(Boolean))
+    const failed = assignBasket.filter((p: any) => !ok.has(p.id))
+    setAssignBasket(failed) // failures stay in the list for retry
+    setAssignSaving(false)
+    if (ok.size > 0) { showToast(`📍 ${ok.size} part${ok.size !== 1 ? 's' : ''} assigned`); await onDataChanged() }
+    if (failed.length > 0) showToast(`⚠️ ${failed.length} failed — kept in the list`)
+  }
+
+  const assignBasketBlock = assignBasket.length > 0 ? (
+    <div className="mb-5 bg-white border-2 border-amber-400 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 border-b border-amber-200">
+        <p className="text-xs font-black text-amber-800 uppercase">To assign here — {assignBasket.length}</p>
+        <button onClick={() => setAssignBasket([])} className="text-[11px] font-bold text-slate-400 hover:text-red-500">Clear all</button>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {assignBasket.map((p: any) => (
+          <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
+            <div className="flex-1 min-w-0">
+              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{p.sku}</span>
+              <p className="font-semibold text-slate-900 text-sm leading-tight mt-0.5 truncate">{p.name}</p>
+            </div>
+            <button onClick={() => setAssignBasket(prev => prev.filter((b: any) => b.id !== p.id))}
+              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 border border-slate-200 text-lg font-bold">✕</button>
+          </div>
+        ))}
+      </div>
+      <div className="p-3 bg-amber-50/50">
+        <button onClick={assignAllBasket} disabled={!anyAssignLoc || assignSaving}
+          className="w-full bg-amber-500 active:bg-amber-600 text-white font-bold py-3 rounded-xl disabled:opacity-40 text-sm">
+          {assignSaving ? 'Assigning…' : anyAssignLoc
+            ? `📍 Assign all ${assignBasket.length} to ${[assignLoc.store, assignLoc.floor, assignLoc.sub1, assignLoc.sub2].filter(Boolean).join(' › ')}`
+            : 'Set a location above first'}
+        </button>
+      </div>
+    </div>
+  ) : null
 
   const dropdownCls = "px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white w-full"
 
@@ -1397,6 +1474,10 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
             <p className="text-sm text-slate-400 text-center py-6">No products match &ldquo;{assignSearch}&rdquo;</p>
           )}
 
+          {/* Basket on top while browsing; while searching it renders below the
+              results instead so matches stay the first thing under the box */}
+          {assignSearch.length < 2 && assignBasketBlock}
+
           {/* ── At this location ── browse aid; hidden while searching so the
                  searched item (with its Assign button) is the first thing under
                  the search box instead of buried below the whole location list */}
@@ -1457,7 +1538,6 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
               <p className="text-xs font-bold text-slate-400 uppercase mb-1">Search results — {assignResults.length}{assignResults.length === 20 ? '+' : ''}</p>
               {assignResults.map((p: any) => {
                 const currentLoc = locLabel(p)
-                const isSaving = assignLoading === p.id
                 const alreadyHere = anyAssignLoc &&
                   (!assignLoc.store || p.loc_store === assignLoc.store) &&
                   (!assignLoc.floor || p.loc_floor === assignLoc.floor) &&
@@ -1475,20 +1555,18 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     </div>
                     {alreadyHere ? (
                       <span className="text-emerald-600 font-bold text-sm shrink-0">✓ Here</span>
+                    ) : assignBasket.some((b: any) => b.id === p.id) ? (
+                      <button onClick={() => setAssignBasket(prev => prev.filter((b: any) => b.id !== p.id))}
+                        className="text-amber-700 font-bold text-sm shrink-0 px-3 py-2.5 rounded-xl border-2 border-amber-300 bg-amber-50">
+                        ✓ Added
+                      </button>
                     ) : (
+                      /* Adds to the basket and clears the search — ready to type
+                         the next SKU. Everything commits together via Assign all. */
                       <button
-                        disabled={!anyAssignLoc || isSaving}
-                        onClick={async () => {
-                          if (!anyAssignLoc) return
-                          setAssignLoading(p.id)
-                          await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ action: 'update', productId: p.id, data: { loc_store: assignLoc.store || null, loc_floor: assignLoc.floor || null, loc_sub1: assignLoc.sub1 || null, loc_sub2: assignLoc.sub2 || null } }) })
-                          await onDataChanged()
-                          setAssignLoading(null)
-                          showToast(`📍 ${p.sku} assigned`)
-                        }}
-                        className="bg-amber-500 active:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-40 shrink-0">
-                        {isSaving ? '…' : 'Assign'}
+                        onClick={() => { setAssignBasket(prev => [...prev, p]); setAssignSearch('') }}
+                        className="bg-amber-500 active:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shrink-0">
+                        + Add
                       </button>
                     )}
                   </div>
@@ -1496,6 +1574,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
               })}
             </div>
           )}
+
+          {assignSearch.length >= 2 && assignBasketBlock}
         </div>
       )}
       </div>
