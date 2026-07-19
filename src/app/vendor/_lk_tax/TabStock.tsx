@@ -432,6 +432,10 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         showToast(`${total} product${total !== 1 ? 's' : ''} saved & confirmed`)
         setStockQtyEdits({})
         setStockConfirmSet(new Set())
+        // Clear synchronously: onDataChanged() unmounts this tab during the
+        // reload, which can beat the persistence effect — the saved pending
+        // set would then be restored from storage as "unsaved" on remount.
+        try { sessionStorage.removeItem(pendingKey) } catch {}
         await onDataChanged()
       }
     } catch { showToast('Error saving') }
