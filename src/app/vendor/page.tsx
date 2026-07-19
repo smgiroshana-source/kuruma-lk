@@ -4,6 +4,7 @@ import { escapeHtml } from '@/lib/escapeHtml'
 import { colomboToday } from '@/lib/dates'
 import { saleStatusChip } from '@/lib/saleStatus'
 import { gpPercent, isBelowCost, netOfVat } from '@/lib/margin'
+import { compressImage } from '@/lib/compressImage'
 
 // "Business day" of a sale/return/collection = the Asia/Colombo calendar date it
 // actually occurred on. No evening cutoff: an 8 PM sale belongs to that day's
@@ -41,19 +42,6 @@ const TYRE_BRANDS  = ['Bridgestone','Michelin','Dunlop','MRF','Apollo','Yokohama
 const PAY_METHODS = ['cash','cheque','bank','card']
 const PAY_LABELS: Record<string, string> = { cash:'Cash', cheque:'Cheque', bank:'Bank Transfer', card:'Card', advance:'Advance', credit:'Credit' }
 
-async function compressImage(file: File, maxSizeKB = 125): Promise<File> {
-  return new Promise((resolve) => {
-    const img = new Image(); const url = URL.createObjectURL(file)
-    img.onload = () => {
-      URL.revokeObjectURL(url); const canvas = document.createElement('canvas')
-      let { width, height } = img; if (width > 1200) { height = Math.round(height * (1200 / width)); width = 1200 }
-      canvas.width = width; canvas.height = height; const ctx = canvas.getContext('2d')!; ctx.drawImage(img, 0, 0, width, height)
-      let lo = 0.1, hi = 0.92, bestBlob: Blob | null = null
-      function tryQ() { const mid = (lo + hi) / 2; canvas.toBlob((blob) => { if (!blob) { resolve(file); return }; if (blob.size / 1024 <= maxSizeKB) { bestBlob = blob; lo = mid } else { hi = mid; if (!bestBlob) bestBlob = blob }; if (hi - lo > 0.02) tryQ(); else resolve(new File([bestBlob || blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' })) }, 'image/jpeg', mid) }
-      tryQ()
-    }; img.src = url
-  })
-}
 function generatePartId() { const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; let id = 'P-'; for (let i = 0; i < 6; i++) id += c[Math.floor(Math.random() * c.length)]; return id }
 
 function parseCSV(text: string): Record<string, string>[] {
