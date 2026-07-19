@@ -587,7 +587,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 <button onClick={() => removeFromBasket(p.id)}
                   className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 border border-slate-200 text-lg font-bold">✕</button>
               </div>
-              {q !== p.quantity && (
+              {p.quantity === 0 ? (
+                <p className="text-[10px] font-bold text-red-600 mt-1 bg-red-50 border border-red-200 rounded px-2 py-1">
+                  🔴 SOLD OUT — this listing&apos;s unit was already sold. If the part in hand is a different unit, add it as a NEW product (reviving this one leaves it with no cost for GP). If the sold one came back, process a return on the original invoice instead.
+                </p>
+              ) : q !== p.quantity && (
                 <p className="text-[10px] font-bold text-amber-600 mt-1">stock was {p.quantity} → will save {q}</p>
               )}
             </div>
