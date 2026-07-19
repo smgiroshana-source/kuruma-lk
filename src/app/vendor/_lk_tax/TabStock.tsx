@@ -495,6 +495,9 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   // ── Assign basket: pick products one by one, then assign ALL to the current
   // location in one go. One catalog refetch at the end instead of one per part,
   // and the operator reviews the list before anything is written.
+  // Collapse the tall location editor to a one-line banner once the operator
+  // confirms where they're standing — frees most of a phone screen.
+  const [locCollapsed, setLocCollapsed] = useState(false)
   const [assignBasket, setAssignBasket] = useState<any[]>([])
   // Counted qty per basket item — defaults to 1 (operator is holding the part);
   // saved onto the product together with the location, so assigning doubles as
@@ -580,7 +583,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => setBasketQty(prev => ({ ...prev, [p.id]: Math.max(1, q - 1) }))}
                     className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 font-bold text-lg flex items-center justify-center active:bg-slate-200 select-none">−</button>
-                  <input type="number" min="1" value={q}
+                  <input type="number" inputMode="numeric" min="1" value={q}
                     onChange={e => setBasketQty(prev => ({ ...prev, [p.id]: Math.max(1, parseInt(e.target.value) || 1) }))}
                     className="w-12 h-8 text-center font-bold text-sm border-2 rounded-lg outline-none focus:border-amber-400 border-slate-200 bg-white" />
                   <button onClick={() => setBasketQty(prev => ({ ...prev, [p.id]: q + 1 }))}
@@ -1327,14 +1330,14 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
       {/* ── STOCKTAKE (Stock Levels) ── */}
       {stockMainView === 'stocktake' && (<div>
-      {/* ── Mode toggle ── */}
-      <div className="flex items-center gap-2 mb-5">
+      {/* ── Mode toggle — horizontal scroll on narrow screens ── */}
+      <div className="flex items-center gap-2 mb-5 overflow-x-auto pb-1">
         <button onClick={() => setStockView('browse')}
-          className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'browse' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}`}>
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'browse' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'}`}>
           📦 Browse & Count
         </button>
         <button onClick={() => setStockView('assign')}
-          className={`px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'assign' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-500 border-slate-200'}`}>
+          className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'assign' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-slate-500 border-slate-200'}`}>
           📍 Quick Assign
         </button>
         {pendingCount > 0 && stockView === 'browse' && (
@@ -1448,7 +1451,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     <div className="flex items-center gap-2">
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, (prev[p.id] ?? p.quantity) - 1)}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">−</button>
-                      <input type="number" min="0" value={curQty}
+                      <input type="number" inputMode="numeric" min="0" value={curQty}
                         onChange={e => setStockQtyEdits(prev => ({...prev, [p.id]: Math.max(0, parseInt(e.target.value) || 0)}))}
                         className="w-20 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
@@ -1480,8 +1483,15 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       {/* QUICK ASSIGN MODE                         */}
       {/* ══════════════════════════════════════════ */}
       {stockView === 'assign' && (
-        <div>
-          {/* Set current location — locked until changed */}
+        <div className="pb-24 sm:pb-4">
+          {/* Set current location — collapses to a one-line banner once set */}
+          {locCollapsed && anyAssignLoc ? (
+            <div className="bg-amber-100 border-2 border-amber-300 rounded-xl px-3 py-2.5 mb-4 flex items-center gap-2">
+              <p className="flex-1 text-sm font-bold text-amber-900 truncate">📍 {[assignLoc.store, assignLoc.floor, assignLoc.sub1, assignLoc.sub2].filter(Boolean).join(' › ')}</p>
+              <button onClick={() => setLocCollapsed(false)}
+                className="shrink-0 text-xs font-bold text-amber-700 border border-amber-300 bg-white rounded-lg px-2.5 py-1.5 active:bg-amber-50">✎ Change</button>
+            </div>
+          ) : (
           <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 mb-5">
             <p className="text-xs font-bold text-amber-800 uppercase mb-3">📍 I'm standing at this location</p>
             <div className="grid grid-cols-2 gap-2 mb-3">
@@ -1511,10 +1521,15 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
               </div>
             </div>
             {anyAssignLoc
-              ? <div className="bg-amber-100 border border-amber-300 rounded-lg px-3 py-2 text-sm font-bold text-amber-900">📍 {[assignLoc.store, assignLoc.floor, assignLoc.sub1, assignLoc.sub2].filter(Boolean).join(' › ')}</div>
+              ? <>
+                  <div className="bg-amber-100 border border-amber-300 rounded-lg px-3 py-2 text-sm font-bold text-amber-900">📍 {[assignLoc.store, assignLoc.floor, assignLoc.sub1, assignLoc.sub2].filter(Boolean).join(' › ')}</div>
+                  <button onClick={() => setLocCollapsed(true)}
+                    className="mt-2 w-full bg-amber-500 active:bg-amber-600 text-white font-bold py-2.5 rounded-lg text-sm">✓ Done — start assigning</button>
+                </>
               : <p className="text-xs text-amber-600">Fill at least one field above to start assigning</p>
             }
           </div>
+          )}
 
           {/* Product search */}
           <div className="relative mb-3">
@@ -1634,6 +1649,16 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           )}
 
           {assignSearch.length >= 2 && assignBasketBlock}
+
+          {/* Sticky assign bar — mobile: reachable without scrolling back up */}
+          {assignBasket.length > 0 && (
+            <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-amber-300 p-3 z-50 sm:hidden">
+              <button onClick={assignAllBasket} disabled={!anyAssignLoc || assignSaving}
+                className="w-full bg-amber-500 active:bg-amber-600 text-white font-bold py-3 rounded-xl disabled:opacity-40 text-sm">
+                {assignSaving ? 'Assigning…' : anyAssignLoc ? `📍 Assign all ${assignBasket.length}` : `${assignBasket.length} picked — set a location first`}
+              </button>
+            </div>
+          )}
         </div>
       )}
       </div>
