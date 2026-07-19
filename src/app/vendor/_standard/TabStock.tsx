@@ -179,19 +179,33 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   // location in one go. One catalog refetch at the end instead of one per part,
   // and the operator reviews the list before anything is written.
   const [assignBasket, setAssignBasket] = useState<any[]>([])
+  // Counted qty per basket item — defaults to 1 (operator is holding the part);
+  // saved onto the product together with the location, so assigning doubles as
+  // a stock count + confirmation.
+  const [basketQty, setBasketQty] = useState<Record<string, number>>({})
   const [assignSaving, setAssignSaving] = useState(false)
   const basketKey = `assign-basket-${vendor?.id || 'v'}`
   const basketHydrated = useRef(false)
+  function removeFromBasket(id: string) {
+    setAssignBasket(prev => prev.filter((b: any) => b.id !== id))
+    setBasketQty(prev => { const n = { ...prev }; delete n[id]; return n })
+  }
   useEffect(() => {
-    // Restore a basket left over from a tab switch/reload (ids → products once
-    // the catalog has loaded).
+    // Restore a basket left over from a tab switch/reload (ids+qty → products
+    // once the catalog has loaded). Tolerates the old ids-only format.
     if (basketHydrated.current || !products.length) return
     basketHydrated.current = true
     try {
-      const ids: string[] = JSON.parse(sessionStorage.getItem(basketKey) || '[]')
-      if (ids.length) {
-        const found = products.filter((p: any) => ids.includes(p.id))
-        if (found.length) setAssignBasket(found)
+      const raw = JSON.parse(sessionStorage.getItem(basketKey) || '[]')
+      const entries: Array<{ id: string; q: number }> = Array.isArray(raw)
+        ? raw.map((e: any) => typeof e === 'string' ? { id: e, q: 1 } : { id: e.id, q: Math.max(1, parseInt(e.q) || 1) })
+        : []
+      if (entries.length) {
+        const found = products.filter((p: any) => entries.some(e => e.id === p.id))
+        if (found.length) {
+          setAssignBasket(found)
+          setBasketQty(Object.fromEntries(entries.map(e => [e.id, e.q])))
+        }
       }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -199,47 +213,73 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   useEffect(() => {
     if (!basketHydrated.current) return
     try {
-      if (assignBasket.length) sessionStorage.setItem(basketKey, JSON.stringify(assignBasket.map((p: any) => p.id)))
+      if (assignBasket.length) sessionStorage.setItem(basketKey, JSON.stringify(assignBasket.map((p: any) => ({ id: p.id, q: basketQty[p.id] ?? 1 }))))
       else sessionStorage.removeItem(basketKey)
     } catch {}
-  }, [assignBasket, basketKey])
+  }, [assignBasket, basketQty, basketKey])
 
   async function assignAllBasket() {
     if (!anyAssignLoc || assignBasket.length === 0 || assignSaving) return
     setAssignSaving(true)
     const loc = { loc_store: assignLoc.store || null, loc_floor: assignLoc.floor || null, loc_sub1: assignLoc.sub1 || null, loc_sub2: assignLoc.sub2 || null }
+    const now = new Date().toISOString()
     const results = await Promise.all(assignBasket.map(async (p: any) => {
       try {
         const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'update', productId: p.id, data: loc }) })
+          // Location + counted qty + confirmation stamp — assigning the part in
+          // hand IS a stock count, so all three save together.
+          body: JSON.stringify({ action: 'update', productId: p.id, data: { ...loc, quantity: Math.max(1, basketQty[p.id] ?? 1), last_stock_confirmed_at: now } }) })
         return r.ok ? p.id : null
       } catch { return null }
     }))
     const ok = new Set(results.filter(Boolean))
     const failed = assignBasket.filter((p: any) => !ok.has(p.id))
     setAssignBasket(failed) // failures stay in the list for retry
+    setBasketQty(prev => { const n = { ...prev }; ok.forEach((id: any) => delete n[id]); return n })
     setAssignSaving(false)
-    if (ok.size > 0) { showToast(`📍 ${ok.size} part${ok.size !== 1 ? 's' : ''} assigned`); await onDataChanged() }
+    if (ok.size > 0) { showToast(`📍 ${ok.size} part${ok.size !== 1 ? 's' : ''} assigned & counted`); await onDataChanged() }
     if (failed.length > 0) showToast(`⚠️ ${failed.length} failed — kept in the list`)
   }
 
   const assignBasketBlock = assignBasket.length > 0 ? (
     <div className="mb-5 bg-white border-2 border-amber-400 rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 border-b border-amber-200">
-        <p className="text-xs font-black text-amber-800 uppercase">To assign here — {assignBasket.length}</p>
-        <button onClick={() => setAssignBasket([])} className="text-[11px] font-bold text-slate-400 hover:text-red-500">Clear all</button>
+      <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-black text-amber-800 uppercase">To assign here — {assignBasket.length}</p>
+          <button onClick={() => { setAssignBasket([]); setBasketQty({}) }} className="text-[11px] font-bold text-slate-400 hover:text-red-500">Clear all</button>
+        </div>
+        <p className="text-[10px] text-amber-600 mt-0.5">Qty = counted stock — saved with the location &amp; marked confirmed</p>
       </div>
       <div className="divide-y divide-slate-100">
-        {assignBasket.map((p: any) => (
-          <div key={p.id} className="flex items-center gap-3 px-4 py-2.5">
-            <div className="flex-1 min-w-0">
-              <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{p.sku}</span>
-              <p className="font-semibold text-slate-900 text-sm leading-tight mt-0.5 truncate">{p.name}</p>
+        {assignBasket.map((p: any) => {
+          const q = basketQty[p.id] ?? 1
+          return (
+            <div key={p.id} className="px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{p.sku}</span>
+                  <p className="font-semibold text-slate-900 text-sm leading-tight mt-0.5 truncate">{p.name}</p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => setBasketQty(prev => ({ ...prev, [p.id]: Math.max(1, q - 1) }))}
+                    className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 font-bold text-lg flex items-center justify-center active:bg-slate-200 select-none">−</button>
+                  <input type="number" min="1" value={q}
+                    onChange={e => setBasketQty(prev => ({ ...prev, [p.id]: Math.max(1, parseInt(e.target.value) || 1) }))}
+                    className="w-12 h-8 text-center font-bold text-sm border-2 rounded-lg outline-none focus:border-amber-400 border-slate-200 bg-white" />
+                  <button onClick={() => setBasketQty(prev => ({ ...prev, [p.id]: q + 1 }))}
+                    className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 font-bold text-lg flex items-center justify-center active:bg-slate-200 select-none">+</button>
+                </div>
+                <button onClick={() => setDamageProduct(p)} title="Record damage"
+                  className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 text-amber-700 text-sm font-bold active:bg-amber-100">⚠</button>
+                <button onClick={() => removeFromBasket(p.id)}
+                  className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 border border-slate-200 text-lg font-bold">✕</button>
+              </div>
+              {q !== p.quantity && (
+                <p className="text-[10px] font-bold text-amber-600 mt-1">stock was {p.quantity} → will save {q}</p>
+              )}
             </div>
-            <button onClick={() => setAssignBasket(prev => prev.filter((b: any) => b.id !== p.id))}
-              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 border border-slate-200 text-lg font-bold">✕</button>
-          </div>
-        ))}
+          )
+        })}
       </div>
       <div className="p-3 bg-amber-50/50">
         <button onClick={assignAllBasket} disabled={!anyAssignLoc || assignSaving}
@@ -548,15 +588,16 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                     {alreadyHere ? (
                       <span className="text-emerald-600 font-bold text-sm shrink-0">✓ Here</span>
                     ) : assignBasket.some((b: any) => b.id === p.id) ? (
-                      <button onClick={() => setAssignBasket(prev => prev.filter((b: any) => b.id !== p.id))}
+                      <button onClick={() => removeFromBasket(p.id)}
                         className="text-amber-700 font-bold text-sm shrink-0 px-3 py-2.5 rounded-xl border-2 border-amber-300 bg-amber-50">
                         ✓ Added
                       </button>
                     ) : (
-                      /* Adds to the basket and clears the search — ready to type
-                         the next SKU. Everything commits together via Assign all. */
+                      /* Adds to the basket (counted qty defaults to 1) and clears
+                         the search — ready to type the next SKU. Everything
+                         commits together via Assign all. */
                       <button
-                        onClick={() => { setAssignBasket(prev => [...prev, p]); setAssignSearch('') }}
+                        onClick={() => { setAssignBasket(prev => [...prev, p]); setBasketQty(prev => ({ ...prev, [p.id]: 1 })); setAssignSearch('') }}
                         className="bg-amber-500 active:bg-amber-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl shrink-0">
                         + Add
                       </button>
