@@ -383,9 +383,14 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
           {assignSearch.length < 2 && (
             <p className="text-xs text-slate-400 text-center py-6">Type at least 2 characters to search products</p>
           )}
+          {assignSearch.length >= 2 && assignResults.length === 0 && (
+            <p className="text-sm text-slate-400 text-center py-6">No products match &ldquo;{assignSearch}&rdquo;</p>
+          )}
 
-          {/* ── At this location ── always visible when a location is set */}
-          {anyAssignLoc && (() => {
+          {/* ── At this location ── browse aid; hidden while searching so the
+                 searched item (with its Assign button) is the first thing under
+                 the search box instead of buried below the whole location list */}
+          {anyAssignLoc && assignSearch.length < 2 && (() => {
             const atLoc = allProducts.filter((p: any) =>
               (!assignLoc.store || p.loc_store === assignLoc.store) &&
               (!assignLoc.floor || p.loc_floor === assignLoc.floor) &&
@@ -441,6 +446,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
 
           {assignResults.length > 0 && (
             <div className="space-y-2">
+              <p className="text-xs font-bold text-slate-400 uppercase mb-1">Search results — {assignResults.length}{assignResults.length === 20 ? '+' : ''}</p>
               {assignResults.map((p: any) => {
                 const currentLoc = locLabel(p)
                 const isSaving = assignLoading === p.id
