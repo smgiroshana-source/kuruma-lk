@@ -591,8 +591,17 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 <p className="text-[10px] font-bold text-red-600 mt-1 bg-red-50 border border-red-200 rounded px-2 py-1">
                   🔴 SOLD OUT — this listing&apos;s unit was already sold. If the part in hand is a different unit, add it as a NEW product (reviving this one leaves it with no cost for GP). If the sold one came back, process a return on the original invoice instead.
                 </p>
-              ) : q !== p.quantity && (
-                <p className="text-[10px] font-bold text-amber-600 mt-1">stock was {p.quantity} → will save {q}</p>
+              ) : q < p.quantity ? (
+                /* Direction-aware: lowering the count destroys units the system
+                   can't see anywhere else — one location per product, so the
+                   rest may be fine in another store/rack. */
+                <p className="text-[10px] font-bold text-red-600 mt-1 bg-red-50 border border-red-200 rounded px-2 py-1">
+                  ⚠ Saving {q} makes {p.quantity - q} unit{p.quantity - q !== 1 ? 's' : ''} vanish with no record (stock was {p.quantity}). Sure this is ALL of them? Check other locations first — if genuinely gone, use the Write-offs tab instead (keeps cost &amp; audit trail).
+                </p>
+              ) : q > p.quantity && (
+                <p className="text-[10px] font-bold text-amber-700 mt-1 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                  ⚠ Saving {q} adds {q - p.quantity} unit{q - p.quantity !== 1 ? 's' : ''} with NO purchase cost (stock was {p.quantity}) — GP won&apos;t be accurate. Receive found stock via a GRN (Receive Stock) instead so it carries a cost.
+                </p>
               )}
             </div>
           )
