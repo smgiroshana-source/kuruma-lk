@@ -158,6 +158,26 @@ export async function POST(req: NextRequest) {
 
     const results: any[] = []
 
+    // Generate slugs for the new rows — bulk imports used to skip this, which
+    // published hundreds of UUID-only URLs (flagged in Search Console as soft
+    // 404s / crawl waste). Uniqueness: one query for DB collisions against all
+    // base slugs, then dedupe within the batch; any collision falls back to
+    // slug-sku, matching the single-create path.
+    if (toInsert.length > 0) {
+      const baseSlugs = toInsert.map((r: any) => generateProductSlug(r.name, r.make, r.model, r.condition))
+      const taken = new Set<string>()
+      for (const b of chunk([...new Set(baseSlugs)])) {
+        const { data: rows } = await admin.from('products').select('slug').in('slug', b)
+        for (const r of (rows || [])) if (r.slug) taken.add(r.slug)
+      }
+      toInsert.forEach((row: any, i: number) => {
+        let slug = baseSlugs[i]
+        if (taken.has(slug)) slug = `${slug}-${row.sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`
+        taken.add(slug) // also guards duplicates within this same batch
+        row.slug = slug
+      })
+    }
+
     // Insert new products in batches
     for (const batch of chunk(toInsert)) {
       const { data: created, error } = await admin.from('products').insert(batch).select()

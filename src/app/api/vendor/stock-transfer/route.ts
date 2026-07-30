@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
+import { generateProductSlug } from '@/lib/slug'
 
 /**
  * Transfers are restricted to linked shops — vendors owned by the source shop's
@@ -222,6 +223,12 @@ export async function POST(req: NextRequest) {
         // Create new product at destination — copy all fields, override vendor + qty + cost/price
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { id: _id, vendor_id: _vid, created_at: _ca, updated_at: _ua, slug: _sl, ...srcFields } = src
+        // Real slug at creation (nothing "regenerates" null slugs later — that
+        // assumption published UUID-only URLs). slug-sku on collision, like the
+        // products create path.
+        let destSlug = generateProductSlug(src.name, src.make, src.model, src.condition)
+        const { data: slugTaken } = await admin.from('products').select('id').eq('slug', destSlug).maybeSingle()
+        if (slugTaken) destSlug = `${destSlug}-${(src.sku || '').toLowerCase().replace(/[^a-z0-9]/g, '-')}`
         const { data: created, error: createErr } = await admin.from('products').insert({
           ...srcFields,
           vendor_id:  toVendorId,
@@ -229,7 +236,7 @@ export async function POST(req: NextRequest) {
           cost:       item.transferCost  ?? src.cost,
           price:      item.transferPrice ?? src.price,
           is_active:  true,
-          slug: null,    // will be regenerated on next product fetch
+          slug: destSlug,
         }).select('id, name').single()
         if (createErr || !created) {
           // Roll the source stock back — nothing arrived at the destination
