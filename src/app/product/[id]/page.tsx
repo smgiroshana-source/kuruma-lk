@@ -29,7 +29,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const admin = createAdminClient()
     const { data: product } = await findProduct(
       admin, id,
-      'name, description, price, show_price, category, condition, make, model, year, sku, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order)'
+      'name, description, price, show_price, category, condition, make, model, model_code, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order)'
     )
 
     if (!product) {
@@ -52,16 +52,33 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
     const conditionLabel = product.condition ? ` (${product.condition})` : ''
     const title = `${product.name}${conditionLabel} Sri Lanka`
+    // Per-product uniqueness first: lead with the seller's own description text
+    // when it exists (Search Console flagged the old one-template-fits-all
+    // descriptions as thin/duplicate), then layer part-specific facts.
+    const ownDesc = (product.description || '').replace(/\s+/g, ' ').trim()
+    const tyreSize = product.tyre_width && product.tyre_profile && product.tyre_rim
+      ? `${product.tyre_width}/${product.tyre_profile}R${product.tyre_rim}` : ''
+    const facts = [
+      product.model_code ? `Model code ${product.model_code}` : '',
+      tyreSize ? `Size ${tyreSize}` : '',
+      product.origin_country ? `Imported from ${product.origin_country}` : '',
+      `Part ID ${product.sku}`,
+    ].filter(Boolean).join(' · ')
     const description = [
-      `${product.condition ? product.condition + ' ' : ''}${product.name}${vehicle ? ' for ' + vehicle : ''} available in Sri Lanka.`,
+      ownDesc ? ownDesc.slice(0, 150) + (ownDesc.length > 150 ? '…' : '') :
+        `${product.condition ? product.condition + ' ' : ''}${product.name}${vehicle ? ' for ' + vehicle : ''} available in Sri Lanka.`,
+      facts ? facts + '.' : '',
       priceText ? `Price: ${priceText}.` : 'Contact for price.',
       vendorName ? `Sold by ${vendorName}${vendorLocation ? ', ' + vendorLocation : ''}.` : '',
-      'Buy auto parts online at kuruma.lk — Sri Lanka\'s trusted vehicle parts marketplace.',
     ].filter(Boolean).join(' ')
 
     return {
       title,
       description,
+      // Sold-out one-of-a-kind used parts are permanently dead pages — keep
+      // them reachable for direct links but out of the index (Search Console
+      // reported empty stock pages as soft 404s / crawled-not-indexed).
+      robots: Number(product.quantity) > 0 ? undefined : { index: false, follow: true },
       keywords: [
         product.name,
         vehicle ? `${vehicle} ${product.name}` : '',
@@ -170,17 +187,35 @@ export default async function ProductPage({ params }: Props) {
     if (!data) notFound()           // Product deleted or hidden → proper 404 (not soft 404)
     if (data!.slug) redirect(`/product/${data!.slug}`)
     // No slug yet — fall through and render with UUID
-  } else {
-    // Slug-based URL — verify the product actually exists.
-    const { data } = await (admin.from('products') as any)
-      .select('id')
-      .eq('slug', id)
-      .eq('is_active', true)
-      .single()
-    if (!data) notFound()           // Unknown slug → proper 404
   }
 
+  // Full product for the server-rendered details section below (also serves as
+  // the slug-existence check → proper 404 for unknown slugs).
+  const { data: product } = await findProduct(
+    admin, id,
+    'name, description, price, show_price, category, condition, make, model, model_code, year, sku, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location)'
+  )
+  if (!product) notFound()
+
   const jsonLd = await getProductJsonLd(id)
+
+  const vehicle = [product.make, product.model, product.year].filter(Boolean).join(' ')
+  const tyreSize = product.tyre_width && product.tyre_profile && product.tyre_rim
+    ? `${product.tyre_width}/${product.tyre_profile}R${product.tyre_rim}` : ''
+  const vendorName = (product.vendor as any)?.name || ''
+  const vendorLocation = (product.vendor as any)?.location || ''
+  const specs: Array<[string, string]> = ([
+    ['Part ID', product.sku],
+    ['Condition', product.condition],
+    ['Make', product.make],
+    ['Model', [product.model, product.model_code ? `(${product.model_code})` : ''].filter(Boolean).join(' ')],
+    ['Year', product.year],
+    ['Category', product.category],
+    tyreSize ? ['Tyre size', tyreSize] : null,
+    product.origin_country ? ['Origin', product.origin_country] : null,
+    ['Availability', Number(product.quantity) > 0 ? `In stock (${product.quantity})` : 'Sold out'],
+    vendorName ? ['Seller', [vendorName, vendorLocation].filter(Boolean).join(', ')] : null,
+  ].filter(Boolean) as Array<[string, any]>).filter(([, v]) => v)
 
   return (
     <>
@@ -191,6 +226,32 @@ export default async function ProductPage({ params }: Props) {
         />
       )}
       <ProductDetailClient />
+
+      {/* Server-rendered part details — substantive, unique, crawlable content
+          on every listing (Search Console flagged the client-rendered pages as
+          thin). Real information for buyers, not filler. */}
+      <section className="max-w-5xl mx-auto px-4 pb-10">
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 sm:p-6">
+          <h2 className="text-lg font-black text-slate-900 mb-4">Part Details — {product.name}</h2>
+          <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 text-sm mb-5">
+            {specs.map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">{label}</dt>
+                <dd className="font-semibold text-slate-800 mt-0.5">{String(value)}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-sm text-slate-600 leading-relaxed">
+            This {product.condition ? product.condition.toLowerCase() + ' ' : ''}{product.name}
+            {vehicle ? ` fits ${vehicle} vehicles` : ''}
+            {tyreSize ? ` in size ${tyreSize}` : ''}
+            {product.origin_country ? `, imported from ${product.origin_country}` : ''}.
+            {vendorName ? ` It is listed by ${vendorName}${vendorLocation ? ` in ${vendorLocation}` : ''}, a verified seller on kuruma.lk.` : ''}
+            {' '}Quote part ID <strong>{product.sku}</strong> when contacting the seller to confirm fitment
+            {product.make ? ` for your exact ${product.make} variant` : ''}.
+          </p>
+        </div>
+      </section>
     </>
   )
 }
