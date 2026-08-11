@@ -116,7 +116,7 @@ export default function HomePage() {
   }
 
   function buildWhatsAppUrl(vendor: Vendor, items: Product[]) {
-    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'
+    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://www.kuruma.lk'
     const lines = items.map((p: any) => {
       const price = p.show_price && p.price ? `Rs.${Number(p.price).toLocaleString()}` : 'Ask price'
       return `🔧 ${p.sku} — ${p.name} (${price})\n   ${siteUrl}/product/${p.id}`
@@ -143,7 +143,7 @@ export default function HomePage() {
     if (!product.vendor) return '#'
     const price = product.show_price && product.price ? `Rs.${Number(product.price).toLocaleString()}` : 'price not listed'
     const vehicle = [product.make, product.model, product.year].filter(Boolean).join(' ')
-    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'
+    const siteUrl = typeof window !== 'undefined' ? window.location.origin : 'https://www.kuruma.lk'
     const msg = encodeURIComponent(
       `Hi ${product.vendor.name},\n\n` +
       `I'm interested in this part from kuruma.lk:\n` +

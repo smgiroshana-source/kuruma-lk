@@ -7,7 +7,7 @@ import MakePageClient from './MakePageClient'
 // Regenerate every hour — same cadence as homepage
 export const revalidate = 3600
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://kuruma.lk'
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 type Props = { params: Promise<{ make: string }> }
 

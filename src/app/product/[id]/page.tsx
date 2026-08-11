@@ -7,7 +7,7 @@ import ProductDetailClient from './ProductDetail'
 // Cache product pages for 24 hours — revalidated on-demand when product is updated via API
 export const revalidate = 86400
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://kuruma.lk'
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 type Props = {
   params: Promise<{ id: string }>

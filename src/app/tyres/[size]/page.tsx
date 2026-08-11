@@ -8,7 +8,7 @@ import ProductThumb from '@/components/ProductThumb'
 // lanka"-style queries, the dominant way tyre buyers search.
 export const revalidate = 3600
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://kuruma.lk'
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 type Props = { params: Promise<{ size: string }> }
 

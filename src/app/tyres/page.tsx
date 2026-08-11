@@ -7,7 +7,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // this page + the size pages capture those queries.
 export const revalidate = 3600
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://kuruma.lk'
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 export const metadata: Metadata = {
   title: 'Tyres Sri Lanka — All Sizes In Stock',

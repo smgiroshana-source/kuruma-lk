@@ -3,7 +3,7 @@ import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
 import ScrollToTop from '@/components/ScrollToTop'
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://kuruma.lk'
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 export const viewport: Viewport = {
   width: 'device-width',
