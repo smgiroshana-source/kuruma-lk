@@ -49,7 +49,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   // Make hub pages — /toyota, /honda, /nissan, etc.
   const { data: makeRows } = await (admin.from('products') as any)
-    .select('make')
+    .select('make, model, tyre_width, tyre_profile, tyre_rim')
     .eq('is_active', true)
     .gt('quantity', 0)
 
@@ -75,5 +75,43 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.9, // Higher than product pages — these rank for broad "Toyota parts Sri Lanka" queries
     }))
 
-  return [...staticPages, ...makePages, ...productPages]
+  // Model hub pages — /suzuki/wagon-r etc. (≥3 in-stock parts). These target
+  // the model-level queries that dominate the SL parts market.
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '')
+  const modelCounts = new Map<string, number>()
+  const sizeCounts = new Map<string, number>()
+  for (const row of (makeRows || [])) {
+    if (row.make && row.model) {
+      const mk = norm(row.make), md = norm(row.model)
+      if (mk.length >= 2 && md.length >= 1) {
+        const key = `${mk}/${md}`
+        modelCounts.set(key, (modelCounts.get(key) || 0) + 1)
+      }
+    }
+    if (row.tyre_width && row.tyre_profile && row.tyre_rim) {
+      const s = `${row.tyre_width}-${row.tyre_profile}-r${row.tyre_rim}`
+      sizeCounts.set(s, (sizeCounts.get(s) || 0) + 1)
+    }
+  }
+  const modelPages: MetadataRoute.Sitemap = [...modelCounts.entries()]
+    .filter(([, count]) => count >= 3)
+    .map(([path]) => ({
+      url: `${SITE_URL}/${path}`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.9,
+    }))
+
+  // Tyre pages — the /tyres hub plus one page per in-stock size
+  const tyrePages: MetadataRoute.Sitemap = sizeCounts.size === 0 ? [] : [
+    { url: `${SITE_URL}/tyres`, lastModified: new Date(), changeFrequency: 'daily' as const, priority: 0.9 },
+    ...[...sizeCounts.keys()].map((size) => ({
+      url: `${SITE_URL}/tyres/${size}`,
+      lastModified: new Date(),
+      changeFrequency: 'daily' as const,
+      priority: 0.85,
+    })),
+  ]
+
+  return [...staticPages, ...makePages, ...modelPages, ...tyrePages, ...productPages]
 }

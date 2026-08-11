@@ -68,7 +68,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ownDesc ? ownDesc.slice(0, 150) + (ownDesc.length > 150 ? '…' : '') :
         `${product.condition ? product.condition + ' ' : ''}${product.name}${vehicle ? ' for ' + vehicle : ''} available in Sri Lanka.`,
       facts ? facts + '.' : '',
-      priceText ? `Price: ${priceText}.` : 'Contact for price.',
+      // Dynamic-pricing business — no fixed list prices; sell the freshness.
+      priceText ? `Price: ${priceText}.` : `Message the seller for today's best market price.`,
       vendorName ? `Sold by ${vendorName}${vendorLocation ? ', ' + vendorLocation : ''}.` : '',
     ].filter(Boolean).join(' ')
 
@@ -202,6 +203,29 @@ export default async function ProductPage({ params }: Props) {
   const vehicle = [product.make, product.model, product.year].filter(Boolean).join(' ')
   const tyreSize = product.tyre_width && product.tyre_profile && product.tyre_rim
     ? `${product.tyre_width}/${product.tyre_profile}R${product.tyre_rim}` : ''
+
+  // Breadcrumb trail — internal links up to the make/model (or tyre-size) hubs
+  // plus BreadcrumbList schema. This is what turns each product page from a
+  // sitemap-only orphan into a linked node Google considers worth indexing.
+  const toSlug = (s: string) => s.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '')
+  const tyreSizeSlug = tyreSize ? `${product.tyre_width}-${product.tyre_profile}-r${product.tyre_rim}` : ''
+  const isTyre = !!tyreSize
+  const crumbs: Array<{ name: string; href: string }> = [{ name: 'Home', href: '/' }]
+  if (isTyre) {
+    crumbs.push({ name: 'Tyres', href: '/tyres' })
+    crumbs.push({ name: `${tyreSize} Tyres`, href: `/tyres/${tyreSizeSlug}` })
+  } else if (product.make) {
+    crumbs.push({ name: `${product.make} Parts`, href: `/${toSlug(product.make)}` })
+    if (product.model) crumbs.push({ name: `${product.model} Parts`, href: `/${toSlug(product.make)}/${toSlug(product.model)}` })
+  }
+  const breadcrumbJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      ...crumbs.map((c, i) => ({ '@type': 'ListItem', position: i + 1, name: c.name, item: `${SITE_URL}${c.href === '/' ? '' : c.href}` })),
+      { '@type': 'ListItem', position: crumbs.length + 1, name: product.name },
+    ],
+  }
   const vendorName = (product.vendor as any)?.name || ''
   const vendorLocation = (product.vendor as any)?.location || ''
   const specs: Array<[string, string]> = ([
@@ -225,6 +249,20 @@ export default async function ProductPage({ params }: Props) {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       )}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+
+      {/* Breadcrumb trail — visible internal links to the hub pages */}
+      <nav className="max-w-5xl mx-auto px-4 pt-4 text-xs text-slate-400" aria-label="Breadcrumb">
+        {crumbs.map((c, i) => (
+          <span key={c.href}>
+            {i > 0 && <span className="mx-1">›</span>}
+            <a href={c.href} className="hover:text-orange-500">{c.name}</a>
+          </span>
+        ))}
+        <span className="mx-1">›</span>
+        <span className="text-slate-600 font-semibold">{product.name}</span>
+      </nav>
+
       <ProductDetailClient />
 
       {/* Server-rendered part details — substantive, unique, crawlable content
@@ -249,7 +287,31 @@ export default async function ProductPage({ params }: Props) {
             {vendorName ? ` It is listed by ${vendorName}${vendorLocation ? ` in ${vendorLocation}` : ''}, a verified seller on kuruma.lk.` : ''}
             {' '}Quote part ID <strong>{product.sku}</strong> when contacting the seller to confirm fitment
             {product.make ? ` for your exact ${product.make} variant` : ''}.
+            {!(product.show_price && product.price) && ' Prices follow the market, so ask the seller for today’s best price — quotes are quick and free.'}
           </p>
+          {/* Hub links — flow link equity both ways between products and hubs */}
+          <div className="flex flex-wrap gap-2 mt-4">
+            {isTyre && (
+              <a href={`/tyres/${tyreSizeSlug}`} className="text-xs font-bold text-orange-600 bg-orange-50 border border-orange-200 rounded-full px-3 py-1.5 hover:bg-orange-100">
+                More {tyreSize} tyres →
+              </a>
+            )}
+            {!isTyre && product.make && product.model && (
+              <a href={`/${toSlug(product.make)}/${toSlug(product.model)}`} className="text-xs font-bold text-orange-600 bg-orange-50 border border-orange-200 rounded-full px-3 py-1.5 hover:bg-orange-100">
+                More {product.make} {product.model} parts →
+              </a>
+            )}
+            {!isTyre && product.make && (
+              <a href={`/${toSlug(product.make)}`} className="text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5 hover:bg-slate-100">
+                All {product.make} parts →
+              </a>
+            )}
+            {isTyre && (
+              <a href="/tyres" className="text-xs font-bold text-slate-600 bg-slate-50 border border-slate-200 rounded-full px-3 py-1.5 hover:bg-slate-100">
+                All tyre sizes →
+              </a>
+            )}
+          </div>
         </div>
       </section>
     </>
