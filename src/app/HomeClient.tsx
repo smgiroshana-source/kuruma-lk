@@ -559,11 +559,12 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
           <img src="/hero.webp" alt="Reconditioned Japanese auto parts — headlight, grille, mirror, suspension and alternator"
             fetchPriority="high"
             className="absolute inset-0 w-full h-full object-cover object-right" />
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(13,21,38,0.55) 0%, rgba(13,21,38,0.25) 45%, rgba(13,21,38,0) 70%)' }} />
-          {/* Image-first hero (per owner): no overlay copy, just make chips
-              linking to the hub pages */}
-          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 h-40 sm:h-64 md:h-80 flex items-end pb-4 sm:pb-6">
-            <div className="flex flex-wrap gap-2">
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(13,21,38,0.94) 0%, rgba(13,21,38,0.6) 45%, rgba(13,21,38,0) 72%)' }} />
+          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-16">
+            <h1 className="text-[24px] sm:text-[42px] font-black text-white leading-[1.12]">Sri Lanka&apos;s Auto Parts<br />Marketplace</h1>
+            <p className="text-[13px] sm:text-base text-slate-300 mt-3 max-w-md sm:max-w-xl">5,000+ genuine, aftermarket &amp; reconditioned parts from verified sellers across Sri Lanka.</p>
+            <p className="text-[13px] sm:text-base font-bold text-[#ff8f5c] mt-1.5">WhatsApp sellers for today&apos;s best price →</p>
+            <div className="flex flex-wrap gap-2 mt-5">
               {[
                 { label: 'Toyota', href: '/toyota' },
                 { label: 'Honda', href: '/honda' },
