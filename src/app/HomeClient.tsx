@@ -556,7 +556,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
       {!isVendorView && !searchDisplay && (
         <section className="relative overflow-hidden" style={{ background: '#0d1526' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/hero.webp" alt="Reconditioned Japanese auto parts — headlight, grille, mirror, suspension and alternator"
+          <img src="/hero-v2.webp" alt="Reconditioned Japanese auto parts — headlight, grille, mirror, suspension and alternator"
             fetchPriority="high"
             className="absolute inset-0 w-full h-full object-cover object-right" />
           <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(13,21,38,0.94) 0%, rgba(13,21,38,0.6) 45%, rgba(13,21,38,0) 72%)' }} />
