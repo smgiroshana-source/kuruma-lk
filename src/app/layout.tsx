@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     default: 'kuruma.lk — Auto Parts Marketplace Sri Lanka',
     template: '%s | kuruma.lk',
   },
-  description: 'Sri Lanka\'s largest multi-vendor auto parts marketplace. Find genuine & aftermarket parts for Toyota, Honda, Nissan, Suzuki & more from trusted dealers across the country. Compare prices, WhatsApp sellers directly.',
+  description: 'Sri Lanka\'s largest marketplace for auto parts & tyres — 5,000+ genuine, aftermarket & reconditioned parts for Wagon R, Prius, Aqua, Vezel, Fit & more. WhatsApp verified sellers directly for today\'s best price.',
   keywords: [
     'auto parts Sri Lanka', 'car parts online', 'vehicle spare parts',
     'Toyota parts Sri Lanka', 'Honda parts Sri Lanka', 'brake pads',
@@ -66,7 +66,13 @@ export const metadata: Metadata = {
     canonical: SITE_URL,
   },
   icons: {
-    icon: '/favicon.svg',
+    // SVG first (crisp everywhere), PNG fallback ≥48px for Google's favicon
+    // crawler, plus the classic /favicon.ico (branded — no more Vercel triangle).
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+    ],
     apple: '/apple-touch-icon.png',
   },
   manifest: '/manifest.json',
