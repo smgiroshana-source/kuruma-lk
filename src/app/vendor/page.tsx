@@ -522,6 +522,8 @@ export default function VendorDashboard() {
   const [editingProduct, setEditingProduct] = useState<any>(null)
   const [productSearch, setProductSearch] = useState('')
   const [showSoldOut, setShowSoldOut] = useState(false)
+  // WHEEL MART only: filter to in-stock products with no cost (cost-entry worklist)
+  const [showMissingCost, setShowMissingCost] = useState(false)
   // Spreadsheet view
   const [productsViewMode, setProductsViewMode] = useState<'grid'|'sheet'>('grid')
   const [sheetSort, setSheetSort] = useState<{col:string;dir:'asc'|'desc'}>({col:'sku',dir:'asc'})
@@ -1988,6 +1990,12 @@ ${customerRows.map(c => `<tr>
     const prods: any[] = (data?.products) || []
     const s = productSearch.toLowerCase()
     return prods.filter((p: any) => {
+      // WHEEL MART cost-entry worklist: in-stock actives with no cost — these
+      // sell with zero COGS (GP overstated) until someone types the cost in.
+      if (showMissingCost) {
+        const missingCost = p.quantity > 0 && p.is_active && !(parseInt(p.cost) > 0)
+        if (!missingCost) return false
+      }
       const matchesSearch = !productSearch || p.name.toLowerCase().includes(s) || (p.sku || '').toLowerCase().includes(s) || (p.make || '').toLowerCase().includes(s)
       if (!matchesSearch) return false
       // If sold out (qty 0): show if showSoldOut is on, OR if searching by SKU and it matches
@@ -1998,7 +2006,7 @@ ${customerRows.map(c => `<tr>
       }
       return true
     })
-  }, [data, productSearch, showSoldOut])
+  }, [data, productSearch, showSoldOut, showMissingCost])
 
 
 
@@ -2140,6 +2148,15 @@ ${customerRows.map(c => `<tr>
             <div className="flex items-center gap-3">
               <input type="text" placeholder="Search..." value={productSearch} onChange={e => setProductSearch(e.target.value)} className="px-4 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 w-56" />
               <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-slate-500"><input type="checkbox" checked={showSoldOut} onChange={e => setShowSoldOut(e.target.checked)} className="w-3.5 h-3.5 accent-orange-500" />Show Sold Out</label>
+              {isLkTax && (() => {
+                const missingCount = ((data?.products) || []).filter((p: any) => p.quantity > 0 && p.is_active && !(parseInt(p.cost) > 0)).length
+                return (
+                  <label className={`flex items-center gap-1.5 cursor-pointer text-xs font-semibold ${missingCount > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
+                    <input type="checkbox" checked={showMissingCost} onChange={e => setShowMissingCost(e.target.checked)} className="w-3.5 h-3.5 accent-amber-500" />
+                    Missing cost{missingCount > 0 ? ` (${missingCount})` : ''}
+                  </label>
+                )
+              })()}
               {selectedProducts.size > 0 && <span className="text-xs font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-full">{selectedProducts.size} selected</span>}
             </div>
             <div className="flex gap-2">
