@@ -1,7 +1,11 @@
 import type { Metadata, Viewport } from 'next'
+import Script from 'next/script'
 import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
 import ScrollToTop from '@/components/ScrollToTop'
+
+// Google tag (GA4 / Google Ads) — measurement IDs are public by design
+const GA_ID = 'G-5E9P59B4WZ'
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
@@ -136,6 +140,14 @@ export default function RootLayout({
           <ScrollToTop />
         </AuthProvider>
         <script dangerouslySetInnerHTML={{ __html: `if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(sw){sw.unregister()})})}` }} />
+        {/* Google tag — afterInteractive so it never blocks page render */}
+        <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />
+        <Script id="gtag-init" strategy="afterInteractive" dangerouslySetInnerHTML={{ __html: `
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', '${GA_ID}');
+        ` }} />
       </body>
     </html>
   )
