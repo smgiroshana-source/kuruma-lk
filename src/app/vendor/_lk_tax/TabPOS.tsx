@@ -942,7 +942,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                     <button key={e.id}
                       onClick={() => { setPosEntityId(e.id) }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold border-2 transition ${posEntityId === e.id ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-200 text-slate-600 hover:border-slate-400'}`}>
-                      {e.is_default ? '★ ' : ''}{e.name.replace('MacForce Auto Engineering', 'MacForce')}
+                      {e.is_default ? '★ ' : ''}{e.name.replace('MacForce Auto Engineering', 'MacForce')}{e.serial_qqqq === 'REPR' ? ' · Workshop' : e.serial_qqqq === 'PART' ? ' · Parts' : ''}
                     </button>
                   ))}
                 </div>
