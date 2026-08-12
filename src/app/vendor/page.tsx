@@ -507,9 +507,21 @@ function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
   window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`, '_blank')
 }
 
+const DEFAULT_VENDOR_SETTINGS = {
+  invoice_title: '', invoice_footer: '', invoice_terms: '', invoice_show_logo: true,
+  logo_url: '', address_line1: '', address_line2: '', tax_id: '', email: ''
+}
+
 export default function VendorDashboard() {
   const cleanupRanRef = useRef(false)
   const settingsTabLoadedRef = useRef(false)
+  // Session-consistency guard: the login cookie is shared by every browser tab, so
+  // if the user logs into the OTHER shop elsewhere (or this page is restored from
+  // bfcache), fresh API responses belong to a different vendor than the one this
+  // page rendered. Track the vendor id of the first response; on mismatch, hard
+  // reload so the page rebuilds as one consistent shop instead of showing shop A's
+  // shell around shop B's data (and worse, submitting sales to the wrong shop).
+  const sessionVendorIdRef = useRef<string | null>(null)
   const [tab, setTab] = useState<VendorTab>('overview')
   // Deep-link a sub-view when arriving from the dashboard (e.g. Receive Stock →
   // stocktake's 'receive' view). Consumed + cleared by the target tab on mount.
@@ -591,10 +603,7 @@ export default function VendorDashboard() {
   const [customerHistory, setCustomerHistory] = useState<any[] | null>(null)
 
   // Settings
-  const [vendorSettings, setVendorSettings] = useState<any>({
-    invoice_title: '', invoice_footer: '', invoice_terms: '', invoice_show_logo: true,
-    logo_url: '', address_line1: '', address_line2: '', tax_id: '', email: ''
-  })
+  const [vendorSettings, setVendorSettings] = useState<any>({ ...DEFAULT_VENDOR_SETTINGS })
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [logoUploading, setLogoUploading] = useState(false)
   const [passwordForm, setPasswordForm] = useState({ current: '', new1: '', new2: '' })
@@ -671,6 +680,25 @@ export default function VendorDashboard() {
   const [pendingChangeRequest, setPendingChangeRequest] = useState<any>(null)
 
   useEffect(() => { fetchData(); fetchSettings() }, [])
+  // Close the two stale-page entry points the fetch-time guard can't reach:
+  // (1) bfcache restore brings back the previous shop's page with live React state
+  //     and fires NO fetches — force a fresh load;
+  // (2) returning to a backgrounded tab after logging into the other shop elsewhere
+  //     — revalidate the session's vendor so the guard reloads before any action.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) window.location.reload() }
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      fetch('/api/vendor/data?quick=1')
+        .then(r => (r.ok ? r.json() : null))
+        .then(j => { if (j) guardVendorSession(j.vendor?.id) })
+        .catch(() => {})
+    }
+    window.addEventListener('pageshow', onPageShow)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { window.removeEventListener('pageshow', onPageShow); document.removeEventListener('visibilitychange', onVisible) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   useEffect(() => { if (tab === 'sales') fetchSales() }, [tab, salesPeriod])
   useEffect(() => {
     if (!customerHistoryId) { setCustomerHistory(null); return }
@@ -711,8 +739,12 @@ export default function VendorDashboard() {
       const res = await fetch('/api/vendor/settings')
       if (res.ok) {
         const j = await res.json()
+        if (!guardVendorSession(j.vendor?.id)) return
         if (j.settings) {
-          setVendorSettings({ ...vendorSettings, ...j.settings })
+          // REPLACE (defaults + server settings), never merge into previous state:
+          // merging let a stale invoice_mode from the previously-viewed shop survive
+          // a vendor switch, rendering shop A's shell around shop B's data.
+          setVendorSettings({ ...DEFAULT_VENDOR_SETTINGS, ...j.settings })
           // Load invoice entities for lk_tax vendors (WHEEL MART)
           if (j.settings.invoice_mode === 'lk_tax') fetchInvoiceEntities()
         }
@@ -836,6 +868,18 @@ export default function VendorDashboard() {
     } catch {}
   }
 
+  // Returns false (after triggering a full reload) when an API response belongs to
+  // a different vendor than this page first rendered — see sessionVendorIdRef.
+  function guardVendorSession(vendorId: string | null | undefined): boolean {
+    if (!vendorId) return true
+    if (sessionVendorIdRef.current && sessionVendorIdRef.current !== vendorId) {
+      window.location.reload()
+      return false
+    }
+    sessionVendorIdRef.current = vendorId
+    return true
+  }
+
   async function fetchData(full?: boolean, silent?: boolean) {
     // silent=true: skip setLoading(true) so the full-page spinner doesn't flash and unmount
     // child components (e.g. POS after a sale). Data is still refreshed in the background.
@@ -849,11 +893,19 @@ export default function VendorDashboard() {
       // Phase 1: Quick load — vendor info + stats only (fast)
       const quickR = await quickPromise
       if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
-      if (quickR.ok) { const quickData = await quickR.json(); setData(quickData); if (!silent) setLoading(false) }
+      if (quickR.ok) {
+        const quickData = await quickR.json()
+        if (!guardVendorSession(quickData?.vendor?.id)) return
+        setData(quickData); if (!silent) setLoading(false)
+      }
 
       // Phase 2: Full load — already in flight, just await the result
       const fullR = await fullPromise
-      if (fullR.ok) { const fullData = await fullR.json(); setData(fullData) }
+      if (fullR.ok) {
+        const fullData = await fullR.json()
+        if (!guardVendorSession(fullData?.vendor?.id)) return
+        setData(fullData)
+      }
     } catch {}
     if (!silent) setLoading(false)
     setProductsLoading(false)
