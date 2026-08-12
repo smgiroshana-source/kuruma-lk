@@ -559,23 +559,21 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
           <img src="/hero.webp" alt="Reconditioned Japanese auto parts — headlight, grille, mirror, suspension and alternator"
             fetchPriority="high"
             className="absolute inset-0 w-full h-full object-cover object-right" />
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(13,21,38,0.94) 0%, rgba(13,21,38,0.6) 45%, rgba(13,21,38,0) 72%)' }} />
-          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-9 sm:py-14">
-            <p className="text-[10px] sm:text-xs font-black tracking-[0.22em] text-[#ff8f5c] uppercase mb-2">Sri Lanka&apos;s Auto Parts Marketplace</p>
-            <h1 className="text-[26px] sm:text-5xl font-black text-white leading-[1.1]">Auto Parts for Every<br />Japanese Vehicle</h1>
-            <p className="text-[13px] sm:text-base text-slate-300 mt-3 max-w-md sm:max-w-xl">5,000+ genuine, aftermarket &amp; reconditioned parts from verified sellers across Sri Lanka.</p>
-            <p className="text-[13px] sm:text-base font-bold text-[#ff8f5c] mt-1.5">WhatsApp sellers for today&apos;s best price →</p>
-            <div className="flex flex-wrap gap-2 mt-5">
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(13,21,38,0.55) 0%, rgba(13,21,38,0.25) 45%, rgba(13,21,38,0) 70%)' }} />
+          {/* Image-first hero (per owner): no overlay copy, just make chips
+              linking to the hub pages */}
+          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 h-40 sm:h-64 md:h-80 flex items-end pb-4 sm:pb-6">
+            <div className="flex flex-wrap gap-2">
               {[
-                { label: 'Wagon R', href: '/suzuki/wagon-r' },
-                { label: 'Prius', href: '/toyota/prius' },
-                { label: 'Aqua', href: '/toyota/aqua' },
-                { label: 'Vezel', href: '/honda/vezel' },
-                { label: 'Fit', href: '/honda/fit' },
+                { label: 'Toyota', href: '/toyota' },
+                { label: 'Honda', href: '/honda' },
+                { label: 'Nissan', href: '/nissan' },
+                { label: 'Suzuki', href: '/suzuki' },
+                { label: 'Mitsubishi', href: '/mitsubishi' },
               ].map(c => (
                 <a key={c.href} href={c.href}
-                  className="text-xs sm:text-[13px] font-bold text-white/90 border border-white/25 rounded-full px-3.5 py-1.5 hover:bg-white/10 hover:border-[#ff8f5c] transition-colors backdrop-blur-sm">
-                  {c.label} parts
+                  className="text-xs sm:text-[13px] font-bold text-white/95 bg-black/25 border border-white/30 rounded-full px-3.5 py-1.5 hover:bg-white/15 hover:border-[#ff8f5c] transition-colors backdrop-blur-sm">
+                  {c.label}
                 </a>
               ))}
             </div>
