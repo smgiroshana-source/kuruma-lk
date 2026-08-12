@@ -550,6 +550,39 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
         </div>
       </header>
 
+      {/* ── Hero — branded banner, first image Google sees (replaces the random
+             product photo it was picking as the search thumbnail). Hidden while
+             searching or inside a shop so it never pushes results down. ── */}
+      {!isVendorView && !searchDisplay && (
+        <section className="relative overflow-hidden" style={{ background: '#0d1526' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/hero.webp" alt="Reconditioned Japanese auto parts — headlight, grille, mirror, suspension and alternator"
+            fetchPriority="high"
+            className="absolute inset-0 w-full h-full object-cover object-right" />
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(90deg, rgba(13,21,38,0.94) 0%, rgba(13,21,38,0.6) 45%, rgba(13,21,38,0) 72%)' }} />
+          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-9 sm:py-14">
+            <p className="text-[10px] sm:text-xs font-black tracking-[0.22em] text-[#ff8f5c] uppercase mb-2">Sri Lanka&apos;s Auto Parts Marketplace</p>
+            <h1 className="text-[26px] sm:text-5xl font-black text-white leading-[1.1]">Auto Parts for Every<br />Japanese Vehicle</h1>
+            <p className="text-[13px] sm:text-base text-slate-300 mt-3 max-w-md sm:max-w-xl">5,000+ genuine, aftermarket &amp; reconditioned parts from verified sellers across Sri Lanka.</p>
+            <p className="text-[13px] sm:text-base font-bold text-[#ff8f5c] mt-1.5">WhatsApp sellers for today&apos;s best price →</p>
+            <div className="flex flex-wrap gap-2 mt-5">
+              {[
+                { label: 'Wagon R', href: '/suzuki/wagon-r' },
+                { label: 'Prius', href: '/toyota/prius' },
+                { label: 'Aqua', href: '/toyota/aqua' },
+                { label: 'Vezel', href: '/honda/vezel' },
+                { label: 'Fit', href: '/honda/fit' },
+              ].map(c => (
+                <a key={c.href} href={c.href}
+                  className="text-xs sm:text-[13px] font-bold text-white/90 border border-white/25 rounded-full px-3.5 py-1.5 hover:bg-white/10 hover:border-[#ff8f5c] transition-colors backdrop-blur-sm">
+                  {c.label} parts
+                </a>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
       <main className="max-w-7xl mx-auto px-3 sm:px-5 py-4">
         {(activeTab==='products'||isVendorView) && (<div>
           {isVendorView && selectedVendorObj!.description && <p className="text-[13px] bg-white rounded-[14px] px-4 py-3 mb-3.5 text-[#777] border border-[#eee] leading-relaxed">{selectedVendorObj!.description}</p>}

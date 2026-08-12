@@ -49,7 +49,7 @@ export const metadata: Metadata = {
     description: 'Find auto parts from trusted dealers across Sri Lanka. Compare prices, WhatsApp sellers directly.',
     images: [
       {
-        url: '/og-image.png',
+        url: '/og-image.jpg',
         width: 1200,
         height: 630,
         alt: 'kuruma.lk — Auto Parts Marketplace',
@@ -60,7 +60,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'kuruma.lk — Auto Parts Marketplace Sri Lanka',
     description: 'Find auto parts from trusted dealers across Sri Lanka.',
-    images: ['/og-image.png'],
+    images: ['/og-image.jpg'],
   },
   alternates: {
     canonical: SITE_URL,

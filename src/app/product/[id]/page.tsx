@@ -40,7 +40,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     }
 
     const images = (product.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
-    const imageUrl = images[0]?.url || `${SITE_URL}/og-image.png`
+    const imageUrl = images[0]?.url || `${SITE_URL}/og-image.jpg`
     const vehicle = [product.make, product.model, product.year].filter(Boolean).join(' ')
     const vendorName = (product.vendor as any)?.name || ''
     const vendorLocation = (product.vendor as any)?.location || ''
