@@ -19,10 +19,14 @@ export async function GET() {
   if (!vendor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const admin = createAdminClient()
+  // REPR/WPRO are the WORKSHOP's entities (billed from Workshop Pulse at its
+  // own location) — hidden from the tyre-shop POS picker on purpose. Tax
+  // reports query invoice_entities directly, so they still consolidate REPR.
   const { data: entities, error } = await admin
     .from('invoice_entities')
     .select('id, name, address, tin, vat_registered, invoice_mode, serial_qqqq, receipt_prefix, is_default')
     .eq('vendor_id', vendor.id)
+    .not('serial_qqqq', 'in', '(REPR,WPRO)')
     .order('is_default', { ascending: false })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
