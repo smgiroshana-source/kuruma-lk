@@ -115,7 +115,11 @@ export async function POST(req: NextRequest) {
   }
 
   const subtotal = normItems.reduce((s, i) => s + i.qty * i.unitPrice, 0)
-  const roundedDiscount = Math.min(subtotal, Math.max(0, Math.round(Number(discount) || 0)))
+  // In excl mode the discount is quoted VAT-exclusive too (insurance letters) —
+  // gross it up like the items so the VAT-inclusive total stays consistent
+  let rawDiscount = Math.max(0, Math.round(Number(discount) || 0))
+  if (exclMode && rawDiscount > 0) rawDiscount = Math.round(rawDiscount * (100 + vatRate) / 100)
+  const roundedDiscount = Math.min(subtotal, rawDiscount)
   const total = Math.max(0, subtotal - roundedDiscount)
 
   // ── Customer: find by phone or create under the vendor ──
@@ -172,7 +176,12 @@ export async function POST(req: NextRequest) {
   const netAmount = total - vatAmount
 
   // ── Payments / status ──
-  const cashPaid = (paymentLines || []).reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
+  // payFullCash: the client can't pre-compute the grossed-up total in excl
+  // mode, so it can ask for "paid in full, cash" and we fill the amount here
+  const effectivePayments = body.payFullCash === true
+    ? [{ method: body.payMethod || 'cash', amount: total }]
+    : (paymentLines || [])
+  const cashPaid = effectivePayments.reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
   const paidForBill = Math.min(total, cashPaid)
   const balance = Math.max(0, total - paidForBill)
   const paymentStatus = balance === 0 ? 'paid' : paidForBill > 0 ? 'partial' : 'credit'
@@ -226,7 +235,7 @@ export async function POST(req: NextRequest) {
     return json({ error: itemsErr.message }, 400)
   }
 
-  const paymentRecords = (paymentLines || [])
+  const paymentRecords = effectivePayments
     .filter((p: any) => parseFloat(p.amount) > 0)
     .map((p: any) => ({
       sale_id: sale.id, vendor_id: vendorId, customer_id: customerId,
