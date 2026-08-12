@@ -230,14 +230,42 @@ export async function POST(req: NextRequest) {
   // ─── UPDATE PRODUCT ───
   if (action === 'update') {
     const { productId, data: updateData } = body
-    const { data: existing } = await admin.from('products').select('vendor_id, slug').eq('id', productId).single()
+    const { data: existing } = await admin.from('products').select('vendor_id, slug, cost, quantity').eq('id', productId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     const { error } = await admin.from('products').update(updateData).eq('id', productId)
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
+
+    // "Add the cost later" workflow: products often get listed without a cost
+    // and receive one manually afterwards. Without this, typing a cost into the
+    // Edit form only fills the reference field — no FIFO layer exists, so sales
+    // consume zero cost and GP/stock-value stay wrong forever. Setting a FIRST
+    // cost on an in-stock product with no remaining layers seeds one for the
+    // on-hand units. Existing layers are never touched (a later cost edit is a
+    // reference change, not a purchase).
+    let seededCost = false
+    const newCost = parseInt(updateData?.cost)
+    const hadCost = parseInt(existing.cost) > 0
+    if (Number.isFinite(newCost) && newCost > 0 && !hadCost) {
+      const qtyNow = updateData?.quantity != null ? parseInt(updateData.quantity) : parseInt(existing.quantity || 0)
+      if (qtyNow > 0) {
+        const { data: lay } = await admin.from('cost_layers').select('quantity_remaining').eq('product_id', productId)
+        const remaining = (lay || []).reduce((s: number, l: any) => s + (parseInt(l.quantity_remaining) || 0), 0)
+        if (remaining === 0) {
+          const { error: layErr } = await admin.from('cost_layers').insert({
+            vendor_id: vendor.id, product_id: productId,
+            quantity_received: qtyNow, quantity_remaining: qtyNow,
+            unit_cost: newCost,
+            received_at: new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }),
+          })
+          seededCost = !layErr
+        }
+      }
+    }
+
     // Revalidate both slug URL and legacy UUID URL
     if (existing.slug) revalidatePath(`/product/${existing.slug}`)
     revalidatePath(`/product/${productId}`)
-    return NextResponse.json({ success: true, message: 'Product updated' })
+    return NextResponse.json({ success: true, message: seededCost ? `Product updated — cost layer seeded for on-hand stock` : 'Product updated' })
   }
 
   // ─── TOGGLE ACTIVE/HIDDEN ───
