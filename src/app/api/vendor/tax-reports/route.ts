@@ -27,9 +27,9 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { ...vendor, branchScope: 'both' }
+  if (vendor) return { ...vendor, branchScope: 'both', canFileTax: true }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop' }
+  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop', canFileTax: staffLink.can_file_tax === true }
   return null
 }
 
@@ -63,7 +63,9 @@ export async function GET(req: NextRequest) {
   // owners: tax reports are always whole-company. A branch-scoped staff login
   // still only sees its own side (privacy), and that partial view is flagged
   // `filing_valid: false` so the UI can warn it must never go to IRD.
-  const scope = (vendor as any).branchScope
+  // Someone trusted with tax filing (the owner, or a staff login the owner has
+  // granted it to) always gets the consolidated whole-company figures.
+  const scope = (vendor as any).canFileTax ? 'both' : (vendor as any).branchScope
   const branch = resolveBranch(scope, null)
   const isWorkshop = (e: any) => (e.branch ? e.branch === 'workshop' : ['REPR', 'WPRO'].includes(e.serial_qqqq))
   const lkTaxEntities = branch

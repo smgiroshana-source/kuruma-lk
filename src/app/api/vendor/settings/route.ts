@@ -266,9 +266,12 @@ export async function POST(req: NextRequest) {
     // One-tap changes from the owner's staff list: which branch a login covers,
     // and (optionally) its role. Owner only.
     if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
-    const { staff_id, branch_scope, role: newRole } = body
+    const { staff_id, branch_scope, role: newRole, can_file_tax } = body
     if (!staff_id) return NextResponse.json({ error: 'staff_id required' }, { status: 400 })
     const patch: any = {}
+    // Tax-filing authority: this login sees the CONSOLIDATED whole-company
+    // VAT/SSCL figures (one TIN, one return) even if its branch view is limited
+    if (can_file_tax !== undefined) patch.can_file_tax = can_file_tax === true
     if (branch_scope !== undefined) {
       if (!['shop', 'workshop', 'both'].includes(branch_scope)) return NextResponse.json({ error: 'Invalid branch scope' }, { status: 400 })
       patch.branch_scope = branch_scope

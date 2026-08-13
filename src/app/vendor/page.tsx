@@ -868,6 +868,19 @@ export default function VendorDashboard() {
     staffSaving.current = false
   }
 
+  async function updateStaffTax(staffId: string, canFile: boolean) {
+    try {
+      const res = await fetch('/api/vendor/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_staff', staff_id: staffId, can_file_tax: canFile }),
+      })
+      const j = await res.json()
+      if (!res.ok || j.error) throw new Error(j.error || 'Failed')
+      setStaffList(prev => prev.map((s: any) => s.id === staffId ? { ...s, can_file_tax: canFile } : s))
+      showToast(canFile ? '🧾 Tax filing access granted — sees whole-company figures' : 'Tax filing access removed')
+    } catch (e: any) { showToast('Error: ' + e.message) }
+  }
+
   async function updateStaffScope(staffId: string, scope: string) {
     try {
       const res = await fetch('/api/vendor/settings', {
@@ -4686,6 +4699,16 @@ ${customerRows.map(c => `<tr>
                         <button onClick={() => removeStaff(s.id)} className="text-red-400 text-xs font-bold">✕</button>
                       </div>
                     </div>
+                    {/* Tax filing authority — sees the consolidated whole-company
+                        VAT/SSCL figures (one TIN, one return) and may submit */}
+                    <button
+                      onClick={() => updateStaffTax(s.id, !(s.can_file_tax === true))}
+                      className={'mt-2 w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 transition ' + (s.can_file_tax
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                        : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400')}>
+                      <span>🧾 Tax filing — consolidated VAT/SSCL for the whole Pvt Ltd</span>
+                      <span>{s.can_file_tax ? 'ON' : 'OFF'}</span>
+                    </button>
                     {/* Which side of the business this login covers — tap to change */}
                     <div className="flex items-center gap-1.5 mt-2">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mr-1">Can see</span>
