@@ -191,6 +191,8 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const primaryActions: Action[] = isCashier
     ? [
         { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
+        { icon: '🧾', label: 'Add Expense', tab: 'cash', sub: 'add-expense' },
+        { icon: '💵', label: 'Cash Reconcile', tab: 'cash' },
       ]
     : [
         { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
