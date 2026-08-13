@@ -100,7 +100,6 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const num = (v: string) => dashLoading ? '…' : v
 
   // ── Client-computed product warnings (products are already loaded) ──
-  const missingCostCount = products.filter(p => p.quantity > 0 && p.is_active && !(parseInt(p.cost) > 0)).length
   const lowStock = products.filter(p => p.is_active && (p.min_stock_level || 0) > 0 && p.quantity <= p.min_stock_level)
   const lowStockWorst = lowStock.slice().sort((a, b) => a.quantity - b.quantity)[0]
 
@@ -165,13 +164,10 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         cta: 'Collect', tab: 'receivables',
       })
     }
-    if (missingCostCount > 0) {
-      attention.push({
-        icon: '🏷️', tone: 'amber',
-        text: `${missingCostCount} in-stock product${missingCostCount !== 1 ? 's have' : ' has'} no cost — profit figures are wrong until fixed`,
-        cta: 'Fix', tab: 'products', sub: 'missing-cost',
-      })
-    }
+    // No missing-cost nag here (owner decision, Aug 2026): no-cost items are a
+    // legitimate state — the profit report excludes them honestly and offers
+    // inline rough-cost entry where it matters. The Products "Missing cost"
+    // filter remains for deliberate cleanup sessions.
     if (lowStock.length > 0) {
       attention.push({
         icon: '📉', tone: 'amber',
