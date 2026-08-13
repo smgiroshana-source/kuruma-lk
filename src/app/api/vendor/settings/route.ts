@@ -252,12 +252,35 @@ export async function POST(req: NextRequest) {
       name,
       email,
       role: role || 'cashier',
+      // Which side of the business this login covers. Owners see both always.
+      branch_scope: ['shop', 'workshop', 'both'].includes(body.branch_scope) ? body.branch_scope : 'shop',
       pin: pin || null,
       active: true,
     })
 
     if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 })
     return NextResponse.json({ success: true, tempPassword })
+  }
+
+  if (action === 'update_staff') {
+    // One-tap changes from the owner's staff list: which branch a login covers,
+    // and (optionally) its role. Owner only.
+    if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
+    const { staff_id, branch_scope, role: newRole } = body
+    if (!staff_id) return NextResponse.json({ error: 'staff_id required' }, { status: 400 })
+    const patch: any = {}
+    if (branch_scope !== undefined) {
+      if (!['shop', 'workshop', 'both'].includes(branch_scope)) return NextResponse.json({ error: 'Invalid branch scope' }, { status: 400 })
+      patch.branch_scope = branch_scope
+    }
+    if (newRole !== undefined) {
+      if (!['cashier', 'manager'].includes(newRole)) return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
+      patch.role = newRole
+    }
+    if (Object.keys(patch).length === 0) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+    const { error } = await admin.from('vendor_staff').update(patch).eq('id', staff_id).eq('vendor_id', vendor.id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ success: true })
   }
 
   if (action === 'remove_staff') {

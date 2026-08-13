@@ -41,6 +41,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
   )
   useEffect(() => { if (initialView && onInitialViewConsumed) onInitialViewConsumed() }, [initialView, onInitialViewConsumed])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [scope, setScope] = useState<string>('both')
   const [advances, setAdvances] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
@@ -88,6 +89,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
       if (!r.ok) { setLoading(false); return }
       const j = await r.json()
       setEmployees(j.employees || [])
+      setScope(j.scope || 'both')
       setAdvances(j.advances || [])
       const marks: Record<string, string> = {}
       for (const a of (j.attendance || [])) marks[a.employee_id] = a.status
@@ -248,7 +250,9 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
       {toast && <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-slate-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-lg">{toast}</div>}
 
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h2 className="text-xl font-black text-slate-800">Staff</h2>
+        <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">Staff
+          {scope !== 'both' && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase">{scope} only</span>}
+        </h2>
         <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
           {(['people', 'attendance', 'advances'] as const).map(v => (
             <button key={v} onClick={() => setView(v)} className={`px-3.5 py-1.5 rounded-lg text-xs font-bold capitalize transition ${view === v ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>{v}</button>
@@ -259,7 +263,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
       {/* ── PEOPLE ── */}
       {view === 'people' && (
         <>
-          <button onClick={() => setEditing({ name: '', nic: '', phone: '', address: '', branch: 'shop', join_date: '', pay_type: 'monthly', active: true, pay_items: [], id_photos: [] })}
+          <button onClick={() => setEditing({ name: '', nic: '', phone: '', address: '', branch: scope === 'workshop' ? 'workshop' : 'shop', join_date: '', pay_type: 'monthly', active: true, pay_items: [], id_photos: [] })}
             className="mb-3 px-4 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-bold hover:bg-orange-600">+ Register Staff Member</button>
           {employees.length === 0 && <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-400">No staff registered yet</div>}
           <div className="grid sm:grid-cols-2 gap-3">

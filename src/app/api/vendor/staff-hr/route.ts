@@ -20,9 +20,9 @@ async function getCaller() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { vendor, role: 'owner', email: user.email || '' }
+  if (vendor) return { vendor, role: 'owner', email: user.email || '', scope: 'both' }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { vendor: staffLink.vendor, role: staffLink.role || 'cashier', email: user.email || '' }
+  if (staffLink?.vendor) return { vendor: staffLink.vendor, role: staffLink.role || 'cashier', email: user.email || '', scope: staffLink.branch_scope || 'shop' }
   return null
 }
 
@@ -32,14 +32,17 @@ const audit = (admin: any, vendorId: string, actor: string, action: string, empl
 export async function GET(req: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-  const { vendor, role, email } = caller
+  const { vendor, role, email, scope } = caller
   if (role !== 'owner' && role !== 'manager') return NextResponse.json({ error: 'No access' }, { status: 403 })
 
   const admin = createAdminClient()
   const url = new URL(req.url)
 
-  const { data: employees } = await admin.from('employees')
-    .select('*').eq('vendor_id', vendor.id).order('branch').order('name')
+  // Branch scope: a login limited to one side of the business only ever
+  // receives that side's people (owner and 'both' logins see everything)
+  let empQuery = admin.from('employees').select('*').eq('vendor_id', vendor.id)
+  if (scope === 'shop' || scope === 'workshop') empQuery = empQuery.eq('branch', scope)
+  const { data: employees } = await empQuery.order('branch').order('name')
 
 
   // Pay items: owner sees all; manager only office-visible ones
@@ -71,6 +74,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     role,
+    scope,
     employees: (employees || []).map((e: any) => ({ ...e, pay_items: itemsByEmp[e.id] || [] })),
     attendance,
     advances: advancesRaw || [],
@@ -81,8 +85,9 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-  const { vendor, role, email } = caller
+  const { vendor, role, email, scope } = caller
   if (role !== 'owner' && role !== 'manager') return NextResponse.json({ error: 'No access' }, { status: 403 })
+  const inScope = (branch?: string | null) => scope === 'both' || !branch || branch === scope
 
   const admin = createAdminClient()
 
@@ -133,6 +138,9 @@ export async function POST(req: NextRequest) {
     const photoPaths = Array.isArray(id_photos)
       ? id_photos.filter((p: any) => typeof p === 'string' && p.includes('/staff-docs/'))
       : undefined
+    if (!inScope(branch === 'workshop' ? 'workshop' : 'shop')) {
+      return NextResponse.json({ error: `Your access covers the ${scope} only` }, { status: 403 })
+    }
     const rec: any = {
       name: name.trim(), nic: nicNorm, phone: phone?.trim() || null,
       address: address?.trim() || null,
@@ -220,7 +228,9 @@ export async function POST(req: NextRequest) {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(marks)) {
       return NextResponse.json({ error: 'date and marks required' }, { status: 400 })
     }
-    const { data: emps } = await admin.from('employees').select('id, name, join_date').eq('vendor_id', vendor.id)
+    let empQ = admin.from('employees').select('id, name, join_date').eq('vendor_id', vendor.id)
+    if (scope === 'shop' || scope === 'workshop') empQ = empQ.eq('branch', scope)
+    const { data: emps } = await empQ
     // Nobody can be marked before the day they joined
     const joinById = new Map((emps || []).map((e: any) => [e.id, e.join_date]))
     const tooEarly = marks.filter((m: any) => {
@@ -249,8 +259,9 @@ export async function POST(req: NextRequest) {
     if (!employee_id || !isFinite(amt) || amt <= 0) return NextResponse.json({ error: 'Valid employee and amount required' }, { status: 400 })
     const d = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date().toISOString().slice(0, 10)
     const src = ['drawer', 'bank', 'owner'].includes(source) ? source : 'drawer'
-    const { data: emp } = await admin.from('employees').select('id, name').eq('id', employee_id).eq('vendor_id', vendor.id).single()
+    const { data: emp } = await admin.from('employees').select('id, name, branch').eq('id', employee_id).eq('vendor_id', vendor.id).single()
     if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    if (!inScope(emp.branch)) return NextResponse.json({ error: `Your access covers the ${scope} only` }, { status: 403 })
 
     let expenseId: string | null = null
     if (src !== 'owner') {

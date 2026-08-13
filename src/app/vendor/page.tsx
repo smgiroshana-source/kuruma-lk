@@ -866,6 +866,19 @@ export default function VendorDashboard() {
     staffSaving.current = false
   }
 
+  async function updateStaffScope(staffId: string, scope: string) {
+    try {
+      const res = await fetch('/api/vendor/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_staff', staff_id: staffId, branch_scope: scope }),
+      })
+      const j = await res.json()
+      if (!res.ok || j.error) throw new Error(j.error || 'Failed')
+      setStaffList(prev => prev.map((s: any) => s.id === staffId ? { ...s, branch_scope: scope } : s))
+      showToast(scope === 'both' ? 'Access: shop + workshop' : `Access: ${scope} only`)
+    } catch (e: any) { showToast('Error: ' + e.message) }
+  }
+
   async function removeStaff(staffId: string) {
     if (!confirm('Remove this staff member?')) return
     try {
@@ -4641,17 +4654,35 @@ ${customerRows.map(c => `<tr>
               {staffLoading ? <div className="text-center py-4"><div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" /></div> :
                 staffList.length === 0 ? <p className="text-xs text-slate-400 text-center py-3">No staff yet — you're the sole owner.</p> :
                 <div className="space-y-2">{staffList.map((s: any) => (
-                  <div key={s.id} className="flex items-center justify-between bg-slate-50 rounded-lg px-3 py-2.5">
-                    <div><p className="font-semibold text-sm">{s.name}</p><p className="text-[10px] text-slate-400">{s.email}</p></div>
-                    <div className="flex gap-2 items-center">
-                      <span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (s.role === 'manager' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600')}>{s.role}</span>
-                      <button onClick={() => removeStaff(s.id)} className="text-red-400 text-xs font-bold">✕</button>
+                  <div key={s.id} className="bg-slate-50 rounded-lg px-3 py-2.5">
+                    <div className="flex items-center justify-between">
+                      <div><p className="font-semibold text-sm">{s.name}</p><p className="text-[10px] text-slate-400">{s.email}</p></div>
+                      <div className="flex gap-2 items-center">
+                        <span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (s.role === 'manager' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600')}>{s.role}</span>
+                        <button onClick={() => removeStaff(s.id)} className="text-red-400 text-xs font-bold">✕</button>
+                      </div>
+                    </div>
+                    {/* Which side of the business this login covers — tap to change */}
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mr-1">Can see</span>
+                      {[{ v: 'shop', l: 'Shop' }, { v: 'workshop', l: 'Workshop' }, { v: 'both', l: 'Both' }].map(o => {
+                        const active = (s.branch_scope || 'shop') === o.v
+                        return (
+                          <button key={o.v}
+                            onClick={() => updateStaffScope(s.id, o.v)}
+                            className={'px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 transition ' + (active
+                              ? (o.v === 'both' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800 text-white border-slate-800')
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400')}>
+                            {o.l}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
                 ))}</div>
               }
               <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
-                <p className="text-[10px] text-amber-700"><strong>Cashiers</strong> can only use POS. <strong>Managers</strong> get full access except settings. All actions are logged.</p>
+                <p className="text-[10px] text-amber-700"><strong>Cashiers</strong> handle POS, drawer, receivables, stock and suppliers. <strong>Managers</strong> get everything except settings. <strong>Can see</strong> limits a person to one side of the business — tap <strong>Both</strong> for someone who works across shop and workshop. All actions are logged.</p>
               </div>
 
               {staffTempPassword && (
