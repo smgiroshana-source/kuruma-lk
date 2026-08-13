@@ -89,6 +89,48 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ sessions: sessionsWithCounts })
 }
 
+/**
+ * Expected cash in the drawer for a session, computed from LIVE data so a
+ * closed session re-checks correctly after a late correction.
+ *
+ *   expected = opening + cash received − cash expenses + adjustments in/out
+ *
+ * Cash received comes from the PAYMENTS ledger (not sales.total): invoice
+ * totals counted unpaid credit sales as cash, missed split payments, ignored
+ * credit collections on older invoices, and never subtracted cash refunds.
+ */
+async function computeExpected(admin: any, vendorId: string, session: any) {
+  const sessionDate: string = session.session_date
+  const openingBal = parseInt(session.opening_balance || 0)
+
+  const dateStart = `${sessionDate}T00:00:00+05:30`
+  const dateEnd = `${sessionDate}T23:59:59.999+05:30`
+  const { data: payRows } = await admin
+    .from('payments')
+    .select('amount')
+    .eq('vendor_id', vendorId)
+    .eq('payment_method', 'cash')
+    .gte('created_at', new Date(dateStart).toISOString())
+    .lte('created_at', new Date(dateEnd).toISOString())
+  const cashSales = Math.round((payRows || []).reduce((s: number, p: any) => s + parseFloat(p.amount || 0), 0))
+
+  const { data: expenseRows } = await admin
+    .from('expenses')
+    .select('amount')
+    .eq('vendor_id', vendorId)
+    .eq('expense_date', sessionDate)
+    .eq('payment_method', 'cash')
+  const cashExpenses = (expenseRows || []).reduce((s: number, e: any) => s + parseInt(e.amount || 0), 0)
+
+  const adjIn = parseInt(session.adjustment_in || 0)
+  const adjOut = parseInt(session.adjustment_out || 0)
+
+  return {
+    cashSales, cashExpenses, adjIn, adjOut,
+    expectedCash: openingBal + cashSales - cashExpenses + adjIn - adjOut,
+  }
+}
+
 export async function POST(req: NextRequest) {
   const auth = await getVendor()
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -99,11 +141,85 @@ export async function POST(req: NextRequest) {
   const { action } = body
 
   // ── open ──────────────────────────────────────────────────────────────────────
+  if (action === 'recompute' || action === 'adjust' || action === 'set_opening' || action === 'accept_variance') {
+    // ── Post-close corrections ────────────────────────────────────────────
+    // A closed session can still be made truthful: record an expense or a cash
+    // receipt that was forgotten on the day, fix a wrong opening balance, or
+    // accept the difference as a genuine short/over with a reason. Every
+    // correction recomputes expected cash and variance from live data.
+    const { sessionId } = body
+    if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
+
+    const { data: session } = await admin
+      .from('cash_sessions').select('*').eq('id', sessionId).eq('vendor_id', vendor.id).single()
+    if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
+
+    const patch: any = {}
+
+    if (action === 'adjust') {
+      // Cash that physically moved but was never recorded on the day:
+      // kind 'in'  = money received (e.g. a cash sale entered a day late)
+      // kind 'out' = money paid out that isn't an expense record
+      const amt = Math.round(Number(body.amount))
+      if (!Number.isFinite(amt) || amt <= 0) return NextResponse.json({ error: 'amount must be a positive whole number' }, { status: 400 })
+      const kind = body.kind === 'out' ? 'out' : 'in'
+      const note = String(body.note || '').trim()
+      if (kind === 'in') patch.adjustment_in = parseInt(session.adjustment_in || 0) + amt
+      else patch.adjustment_out = parseInt(session.adjustment_out || 0) + amt
+      patch.adjustment_note = [session.adjustment_note, `${kind === 'in' ? '+' : '-'}Rs.${amt}${note ? ' ' + note : ''}`].filter(Boolean).join(' · ')
+    }
+
+    if (action === 'set_opening') {
+      const amt = Math.round(Number(body.opening_balance))
+      if (!Number.isFinite(amt) || amt < 0) return NextResponse.json({ error: 'opening_balance must be a non-negative whole number' }, { status: 400 })
+      patch.opening_balance = amt
+    }
+
+    if (action === 'accept_variance') {
+      patch.variance_accepted = true
+      patch.variance_reason = String(body.reason || '').trim() || 'Accepted without reason'
+    }
+
+    // Recompute from live data using the patched values
+    const merged = { ...session, ...patch }
+    const { expectedCash, cashExpenses } = await computeExpected(admin, vendor.id, merged)
+    patch.expected_cash = expectedCash
+    patch.cash_expenses = cashExpenses
+    if (merged.closing_balance != null) {
+      patch.variance = parseInt(merged.closing_balance) - expectedCash
+      // A correction that resolves the difference clears any earlier "accepted" flag
+      if (action !== 'accept_variance' && patch.variance === 0) { patch.variance_accepted = false; patch.variance_reason = null }
+    }
+
+    const { error } = await admin.from('cash_sessions').update(patch).eq('id', sessionId).eq('vendor_id', vendor.id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ ok: true, expected_cash: expectedCash, cash_expenses: cashExpenses, variance: patch.variance })
+  }
+
   if (action === 'open') {
     const { session_date, opening_balance } = body
 
     if (!session_date || !/^\d{4}-\d{2}-\d{2}$/.test(session_date)) {
       return NextResponse.json({ error: 'Invalid session_date — expected YYYY-MM-DD' }, { status: 400 })
+    }
+
+    // Never start a new day on top of an unclosed one: the older session's
+    // closing balance is what carries forward, so opening without it makes
+    // BOTH days wrong (the old day short, the new day over by the same amount).
+    const { data: stillOpen } = await admin
+      .from('cash_sessions')
+      .select('id, session_date')
+      .eq('vendor_id', vendor.id)
+      .eq('status', 'open')
+      .lt('session_date', session_date)
+      .order('session_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (stillOpen) {
+      return NextResponse.json({
+        error: `The drawer from ${stillOpen.session_date} was never closed. Close it first — its counted cash becomes today's opening balance.`,
+        blocking_session: stillOpen,
+      }, { status: 409 })
     }
 
     // Opening balance = whatever the operator confirms. If not supplied, carry
@@ -175,41 +291,7 @@ export async function POST(req: NextRequest) {
     if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     if (session.status !== 'open') return NextResponse.json({ error: 'Session is not open' }, { status: 400 })
 
-    const sessionDate: string = session.session_date
-    const openingBal: number = parseInt(session.opening_balance || 0)
-
-    // 1. Net cash through the drawer for this session_date (Asia/Colombo) from
-    //    the PAYMENTS ledger — not sales.total. Invoice totals counted unpaid
-    //    credit sales as cash, missed split payments, ignored credit
-    //    collections on old invoices, and never subtracted cash refunds — the
-    //    drawer then showed a false Over/Short at close.
-    const dateStart = `${sessionDate}T00:00:00+05:30`
-    const dateEnd   = `${sessionDate}T23:59:59.999+05:30`
-    const { data: payRows } = await admin
-      .from('payments')
-      .select('amount')
-      .eq('vendor_id', vendor.id)
-      .eq('payment_method', 'cash')
-      .gte('created_at', new Date(dateStart).toISOString())
-      .lte('created_at', new Date(dateEnd).toISOString())
-
-    // Positive rows = cash in (today's sales + credit collections);
-    // negative rows = cash refunds paid out. credit_return/advance rows have
-    // their own payment_method values, so they never enter this sum.
-    const cashSales = Math.round((payRows || []).reduce((sum: number, p: any) => sum + parseFloat(p.amount || 0), 0))
-
-    // 2. Sum cash expenses for this session_date
-    const { data: expenseRows } = await admin
-      .from('expenses')
-      .select('amount')
-      .eq('vendor_id', vendor.id)
-      .eq('expense_date', sessionDate)
-      .eq('payment_method', 'cash')
-
-    const cashExpenses = (expenseRows || []).reduce((sum: number, e: any) => sum + parseInt(e.amount || 0), 0)
-
-    // 3. Compute expected_cash and variance
-    const expectedCash = openingBal + cashSales - cashExpenses
+    const { expectedCash, cashExpenses } = await computeExpected(admin, vendor.id, session)
     const variance = closing_balance - expectedCash
 
     const updateData: any = {

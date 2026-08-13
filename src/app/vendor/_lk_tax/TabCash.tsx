@@ -157,6 +157,40 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   const [expForm, setExpForm] = useState(blankExpenseForm())
   const [savingExp, setSavingExp] = useState(false)
 
+  // Post-close variance correction: {session, kind: 'in'|'out'|'opening'|'accept'}
+  const [fixCash, setFixCash] = useState<any>(null)
+  const [fixAmount, setFixAmount] = useState('')
+  const [fixNote, setFixNote] = useState('')
+  const [fixSaving, setFixSaving] = useState(false)
+
+  async function submitFix() {
+    if (!fixCash) return
+    const { session, kind } = fixCash
+    const body: any = { sessionId: session.id }
+    if (kind === 'accept') {
+      if (!fixNote.trim()) { showToast('Give a reason so the record makes sense later'); return }
+      body.action = 'accept_variance'; body.reason = fixNote.trim()
+    } else if (kind === 'opening') {
+      const amt = Math.round(Number(fixAmount))
+      if (!Number.isFinite(amt) || amt < 0) { showToast('Enter the correct opening balance'); return }
+      body.action = 'set_opening'; body.opening_balance = amt
+    } else {
+      const amt = Math.round(Number(fixAmount))
+      if (!Number.isFinite(amt) || amt <= 0) { showToast('Enter an amount'); return }
+      body.action = 'adjust'; body.kind = kind; body.amount = amt; body.note = fixNote.trim()
+    }
+    setFixSaving(true)
+    try {
+      const res = await fetch('/api/vendor/cash-sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Failed')
+      showToast(d.variance === 0 ? '✓ Balanced — variance cleared' : `Updated — variance now ${formatRs(Math.abs(d.variance || 0))}`)
+      setFixCash(null); setFixAmount(''); setFixNote('')
+      await fetchTodaySession(); await fetchRecentSessions()
+    } catch (e: any) { showToast(e.message) }
+    setFixSaving(false)
+  }
+
   // Late-close for a past day's still-open session
   const [lateClose, setLateClose] = useState<CashSession | null>(null)
   const [lateCount, setLateCount] = useState('')
@@ -472,12 +506,27 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
         const d = await res.json()
         throw new Error(d.error ?? 'Failed to add expense')
       }
+      // A cash expense added late for an ALREADY-CLOSED day changes what the
+      // drawer should have held — recheck that session so the variance updates
+      // instead of standing as a phantom shortage.
+      if (expForm.payment_method === 'cash') {
+        const target = [todaySession, ...recentSessions].find(
+          s => s && s.session_date === expForm.expense_date && s.status === 'closed'
+        )
+        if (target) {
+          await fetch('/api/vendor/cash-sessions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'recompute', sessionId: target.id }),
+          }).catch(() => {})
+        }
+      }
       showToast('Expense added')
       setShowAddExpModal(false)
       setExpForm(blankExpenseForm())
       await fetchExpenses()
       await fetchTodayExpenses()
       await fetchTodaySession()
+      await fetchRecentSessions()
     } catch (e: any) {
       showToast(e.message)
     } finally {
@@ -884,6 +933,53 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                   <p className="text-xs text-slate-500 italic">&ldquo;{todaySession.notes}&rdquo;</p>
                 </div>
               )}
+
+              {/* Variance is almost always a forgotten entry, not missing money —
+                  offer the three real explanations before accepting a loss */}
+              {todaySession.variance != null && todaySession.variance !== 0 && !(todaySession as any).variance_accepted && (
+                <div className="mx-5 mb-4 rounded-xl border-2 border-amber-300 bg-amber-50 p-3.5">
+                  <p className="text-xs font-black text-amber-800 mb-2">
+                    {todaySession.variance > 0 ? `Rs.${Math.abs(todaySession.variance).toLocaleString()} more in the drawer than expected` : `Rs.${Math.abs(todaySession.variance).toLocaleString()} less in the drawer than expected`}
+                    {' '}— was something not entered?
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {todaySession.variance < 0 && (
+                      <button onClick={() => { setExpForm({ ...blankExpenseForm(), expense_date: todaySession.session_date }); setShowAddExpModal(true) }}
+                        className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">
+                        🧾 Money paid out — add the missed expense
+                      </button>
+                    )}
+                    {todaySession.variance > 0 && (
+                      <button onClick={() => setFixCash({ session: todaySession, kind: 'in' })}
+                        className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">
+                        💵 Cash received but not recorded
+                      </button>
+                    )}
+                    {todaySession.variance < 0 && (
+                      <button onClick={() => setFixCash({ session: todaySession, kind: 'out' })}
+                        className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">
+                        💸 Cash taken out (not an expense)
+                      </button>
+                    )}
+                    <button onClick={() => setFixCash({ session: todaySession, kind: 'opening' })}
+                      className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">
+                      ↩ Fix opening balance
+                    </button>
+                    <button onClick={() => setFixCash({ session: todaySession, kind: 'accept' })}
+                      className="px-3 py-2 rounded-lg bg-white border-2 border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50">
+                      ✓ It really is short/over
+                    </button>
+                  </div>
+                  {((todaySession as any).adjustment_note) && (
+                    <p className="text-[11px] text-amber-700 mt-2">Corrections: {(todaySession as any).adjustment_note}</p>
+                  )}
+                </div>
+              )}
+              {(todaySession as any)?.variance_accepted && (
+                <div className="mx-5 mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-bold text-slate-600">Variance accepted: {(todaySession as any).variance_reason}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -1084,6 +1180,40 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             </div>
           )}
         </div>
+      )}
+
+      {/* ── VARIANCE CORRECTION MODAL ────────────────────────────────────────── */}
+      {fixCash && (
+        <Modal
+          title={fixCash.kind === 'accept' ? 'Accept the difference' : fixCash.kind === 'opening' ? 'Fix opening balance' : fixCash.kind === 'in' ? 'Cash received, not recorded' : 'Cash taken out, not recorded'}
+          onClose={() => !fixSaving && setFixCash(null)}
+        >
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-slate-500">
+              {fixCash.kind === 'accept' ? 'The count is right and nothing is missing from the records — note why, and the difference is filed as a genuine short/over.'
+                : fixCash.kind === 'opening' ? 'The drawer started the day with a different amount than recorded (usually cash carried over from the previous day).'
+                : fixCash.kind === 'in' ? 'Money that came into the drawer but was never entered — e.g. a cash sale rung up the next day, or money put in by the owner.'
+                : 'Money that left the drawer without an expense record — e.g. cash moved to the safe or handed to the owner.'}
+            </p>
+            {fixCash.kind !== 'accept' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">{fixCash.kind === 'opening' ? 'Correct opening balance (Rs.)' : 'Amount (Rs.)'}</label>
+                <input type="number" inputMode="numeric" min="0" value={fixAmount} onChange={e => setFixAmount(e.target.value)}
+                  className="w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-sm font-mono font-bold focus:outline-none focus:border-orange-400" placeholder="0" />
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">{fixCash.kind === 'accept' ? 'Reason *' : 'Note'}</label>
+              <input value={fixNote} onChange={e => setFixNote(e.target.value)}
+                className="w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400"
+                placeholder={fixCash.kind === 'accept' ? 'e.g. genuine shortage — investigated with staff' : 'what it was for'} />
+            </div>
+            <button onClick={submitFix} disabled={fixSaving}
+              className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-black disabled:opacity-50">
+              {fixSaving ? 'Saving…' : '✓ Apply and recheck'}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* ── LATE CLOSE MODAL (past day's drawer left open) ───────────────────── */}
