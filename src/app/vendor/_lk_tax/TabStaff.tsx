@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
 import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
+import { createClient } from '@/lib/supabase/client'
 
 type PayItem = {
   id?: string; kind: string; label: string; amount: number | string
@@ -76,7 +77,18 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
   useEffect(() => { load() }, [load])
 
   const post = async (body: any) => {
-    const r = await fetch('/api/vendor/staff-hr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    let r = await fetch('/api/vendor/staff-hr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (r.status === 401) {
+      // Session token expired while the form was open — refresh it client-side
+      // and retry once, so the typed entry isn't lost to a "Not authenticated"
+      try { await createClient().auth.refreshSession() } catch {}
+      r = await fetch('/api/vendor/staff-hr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (r.status === 401) {
+        tt('⚠️ Session expired — reloading, please sign in and re-enter')
+        setTimeout(() => window.location.reload(), 2000)
+        throw new Error('Session expired')
+      }
+    }
     const j = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(j.error || 'Failed')
     return j
