@@ -118,13 +118,36 @@ export async function GET(req: NextRequest) {
     }))
 
     const { data: cashSess } = await admin.from('cash_sessions')
-      .select('status, expected_cash, opening_balance').eq('vendor_id', vendor.id).eq('session_date', colToday).maybeSingle()
+      .select('status, expected_cash, opening_balance, opened_at').eq('vendor_id', vendor.id).eq('session_date', colToday).maybeSingle()
+
+    // A drawer left open from a PREVIOUS day — reconciliation is unknown until
+    // someone closes it, so the dashboard flags it loudly
+    const { data: staleOpen } = await admin.from('cash_sessions')
+      .select('session_date').eq('vendor_id', vendor.id).eq('status', 'open').lt('session_date', colToday)
+      .order('session_date', { ascending: false }).limit(1)
+
+    // Staff attendance progress for today (drives the daily-flow strip)
+    const { data: empRows } = await admin.from('employees')
+      .select('id').eq('vendor_id', vendor.id).eq('active', true)
+    const empIds = (empRows || []).map((e: any) => e.id)
+    let attMarked = 0
+    if (empIds.length > 0) {
+      const { count } = await admin.from('staff_attendance')
+        .select('id', { count: 'exact', head: true }).eq('date', colToday).in('employee_id', empIds)
+      attMarked = count || 0
+    }
 
     const { data: creditRows } = await admin.from('sales')
-      .select('balance_due, customer_id').eq('vendor_id', vendor.id)
+      .select('balance_due, customer_id, created_at, customer_name').eq('vendor_id', vendor.id)
       .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0)
     const creditOwed = (creditRows || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
     const creditCustomers = new Set((creditRows || []).map((r: any) => r.customer_id).filter(Boolean)).size
+    // Oldest unpaid credit invoice → aging signal for the attention queue
+    let creditOldestDays = 0, creditOldestName = ''
+    for (const r of (creditRows || [])) {
+      const days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000)
+      if (days > creditOldestDays) { creditOldestDays = days; creditOldestName = r.customer_name || '' }
+    }
 
     let payablesDue = 0, payOverdueCount = 0, payOldestDays = 0
     const { data: payRows } = await admin.from('supplier_invoices')
@@ -143,8 +166,10 @@ export async function GET(req: NextRequest) {
 
     dashboard = {
       todaySales, todayCount: (todaySalesRows || []).length,
-      cashSession: cashSess ? { status: cashSess.status, expected: parseInt(cashSess.expected_cash ?? cashSess.opening_balance ?? 0) } : null,
-      creditOwed, creditCustomers,
+      cashSession: cashSess ? { status: cashSess.status, expected: parseInt(cashSess.expected_cash ?? cashSess.opening_balance ?? 0), openedAt: cashSess.opened_at || null } : null,
+      staleOpenSessionDate: staleOpen?.[0]?.session_date || null,
+      attendance: { marked: attMarked, total: empIds.length },
+      creditOwed, creditCustomers, creditOldestDays, creditOldestName,
       payables: { due: payablesDue, overdueCount: payOverdueCount, oldestDays: payOldestDays },
       grnDrafts: grnDrafts || 0,
       recentActivity,

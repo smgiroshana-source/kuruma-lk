@@ -30,9 +30,12 @@ const PAY_PRESETS: Omit<PayItem, 'visible_to_office'>[] = [
   { kind: 'epf', label: 'EPF deduction (manual)', amount: '', unit: 'rs', period: 'monthly', half_day_policy: 'half' },
 ]
 
-export default function TabStaff({ staffRole }: { staffRole: string }) {
+export default function TabStaff({ staffRole, initialView, onInitialViewConsumed }: { staffRole: string; initialView?: string | null; onInitialViewConsumed?: () => void }) {
   const isOwner = staffRole === 'owner'
-  const [view, setView] = useState<'people' | 'attendance' | 'advances'>('people')
+  const [view, setView] = useState<'people' | 'attendance' | 'advances'>(
+    initialView === 'attendance' || initialView === 'advances' ? initialView : 'people'
+  )
+  useEffect(() => { if (initialView && onInitialViewConsumed) onInitialViewConsumed() }, [initialView, onInitialViewConsumed])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [advances, setAdvances] = useState<any[]>([])
   const [loading, setLoading] = useState(true)

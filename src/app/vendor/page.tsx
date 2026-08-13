@@ -2133,7 +2133,11 @@ ${customerRows.map(c => `<tr>
             staffRole={staffRole}
             products={products}
             vendorSettings={vendorSettings}
-            onNavigate={(t, sub) => startTransition(() => { setTab(t as VendorTab); setStockInitialView(sub ?? null) })}
+            onNavigate={(t, sub) => startTransition(() => {
+              // Dashboard deep-links: sub targets a view inside the tab
+              if (t === 'products' && sub === 'missing-cost') { setShowMissingCost(true); setTab('products'); return }
+              setTab(t as VendorTab); setStockInitialView(sub ?? null)
+            })}
             showToast={showToast}
           />
         )}
@@ -2194,7 +2198,7 @@ ${customerRows.map(c => `<tr>
 
         {/* STAFF / HR — WHEEL MART only; owner + manager (server re-checks role) */}
         {tab === 'staff' && isLkTax && (staffRole === 'owner' || staffRole === 'manager') && (
-          <TabStaff staffRole={staffRole} />
+          <TabStaff staffRole={staffRole} initialView={stockInitialView} onInitialViewConsumed={() => setStockInitialView(null)} />
         )}
 
         {/* PRODUCTS */}
