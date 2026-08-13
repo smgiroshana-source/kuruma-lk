@@ -248,7 +248,11 @@ export default function TabStaff({ staffRole }: { staffRole: string }) {
                 ))}</div></div>
               <div><label className="block text-xs font-bold text-slate-500 mb-1">Pay type</label>
                 <div className="flex gap-2">{(['monthly', 'daily', 'contract'] as const).map(p => (
-                  <button key={p} onClick={() => setEditing({ ...editing, pay_type: p })} className={`flex-1 py-2 rounded-lg text-xs font-bold border-2 capitalize ${editing.pay_type === p ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-200 text-slate-500'}`}>{p}</button>
+                  <button key={p} onClick={() => setEditing({
+                    ...editing, pay_type: p,
+                    // Base pay follows the pay type: daily worker → per-day rate
+                    pay_items: (editing.pay_items || []).map((it: PayItem) => it.kind === 'base' ? { ...it, period: p === 'daily' ? 'daily' : 'monthly' } : it),
+                  })} className={`flex-1 py-2 rounded-lg text-xs font-bold border-2 capitalize ${editing.pay_type === p ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-200 text-slate-500'}`}>{p}</button>
                 ))}</div></div>
             </div>
             <div className="mt-3"><label className="block text-xs font-bold text-slate-500 mb-1">Address</label>
@@ -281,7 +285,13 @@ export default function TabStaff({ staffRole }: { staffRole: string }) {
                       <button onClick={() => setEditing({ ...editing, pay_items: editing.pay_items.filter((_: any, i: number) => i !== idx) })} className="text-red-400 font-bold px-1">✕</button>
                     </div>
                     <div className="flex gap-2 mt-2 text-[11px] items-center flex-wrap">
-                      <span className="text-slate-400">{it.kind.replace('_', ' ')} · {it.unit === 'percent' ? 'percent' : 'rupees'} · {it.period.replace('_', ' ')}</span>
+                      <span className="text-slate-400">{it.kind.replace('_', ' ')} · {it.unit === 'percent' ? 'percent' : 'rupees'} ·</span>
+                      <span className="flex items-center gap-1 text-slate-500">
+                        {(['monthly', 'daily', 'per_event'] as const).map(p => (
+                          <button key={p} onClick={() => { const items = [...editing.pay_items]; items[idx] = { ...it, period: p }; setEditing({ ...editing, pay_items: items }) }}
+                            className={`px-1.5 py-0.5 rounded font-bold ${it.period === p ? 'bg-slate-800 text-white' : 'bg-slate-100'}`}>{p === 'per_event' ? 'per job' : p}</button>
+                        ))}
+                      </span>
                       {it.kind === 'allowance' && (
                         <span className="flex items-center gap-1 text-slate-500">Half-day:
                           {(['half', 'none', 'full'] as const).map(p => (
@@ -295,7 +305,7 @@ export default function TabStaff({ staffRole }: { staffRole: string }) {
                 ))}
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {PAY_PRESETS.filter(p => !(editing.pay_items || []).some((i: PayItem) => i.label === p.label)).map(p => (
-                    <button key={p.label} onClick={() => setEditing({ ...editing, pay_items: [...(editing.pay_items || []), { ...p, visible_to_office: false }] })}
+                    <button key={p.label} onClick={() => setEditing({ ...editing, pay_items: [...(editing.pay_items || []), { ...p, period: p.kind === 'base' && editing.pay_type === 'daily' ? 'daily' : p.period, visible_to_office: false }] })}
                       className="text-[11px] px-2.5 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-orange-400 hover:text-orange-500">+ {p.label}</button>
                   ))}
                   <button onClick={() => setEditing({ ...editing, pay_items: [...(editing.pay_items || []), { kind: 'other', label: '', amount: '', unit: 'rs', period: 'monthly', half_day_policy: 'half', visible_to_office: false }] })}
