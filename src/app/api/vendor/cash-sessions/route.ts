@@ -9,9 +9,9 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { vendor, userId: user.id }
+  if (vendor) return { vendor, userId: user.id, role: 'owner', email: user.email || '' }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id }
+  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id, role: staffLink.role || 'cashier', email: user.email || '' }
   return null
 }
 
@@ -51,7 +51,40 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ session: sessionWithCount })
+    // Carry-forward check: yesterday's counted cash IS today's opening float.
+    // Reported, never auto-applied — money figures must not shift on their own,
+    // and a silent re-write would also erase the trail of a real discrepancy.
+    let carryForward: any = null
+    if (session) {
+      const { data: prev } = await admin
+        .from('cash_sessions')
+        .select('session_date, closing_balance')
+        .eq('vendor_id', vendor.id)
+        .eq('status', 'closed')
+        .lt('session_date', session.session_date)
+        .not('closing_balance', 'is', null)
+        .order('session_date', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (prev && parseInt(prev.closing_balance) !== parseInt(session.opening_balance || 0)) {
+        carryForward = {
+          prev_date: prev.session_date,
+          prev_closing: parseInt(prev.closing_balance),
+          opening: parseInt(session.opening_balance || 0),
+          difference: parseInt(prev.closing_balance) - parseInt(session.opening_balance || 0),
+        }
+      }
+    }
+
+    // Corrections made to this day after closing — shown in the daily report
+    const { data: corrections } = await admin
+      .from('cash_corrections')
+      .select('action, actor, detail, created_at')
+      .eq('vendor_id', vendor.id)
+      .eq('session_date', date)
+      .order('created_at')
+
+    return NextResponse.json({ session: sessionWithCount, carry_forward_mismatch: carryForward, corrections: corrections || [] })
   }
 
   // No date param → last 60 sessions
@@ -150,6 +183,14 @@ export async function POST(req: NextRequest) {
     const { sessionId } = body
     if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
 
+    // Separation of duties: whoever counts the drawer must NOT be able to
+    // adjust their own difference away. Cashiers count and close; only a
+    // supervisor corrects afterwards. (recompute is a pure recalculation from
+    // existing records — it changes no figures by hand, so it stays open.)
+    if (action !== 'recompute' && auth.role !== 'owner' && auth.role !== 'manager') {
+      return NextResponse.json({ error: 'Only the owner or a manager can correct a closed session' }, { status: 403 })
+    }
+
     const { data: session } = await admin
       .from('cash_sessions').select('*').eq('id', sessionId).eq('vendor_id', vendor.id).single()
     if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 })
@@ -193,6 +234,29 @@ export async function POST(req: NextRequest) {
 
     const { error } = await admin.from('cash_sessions').update(patch).eq('id', sessionId).eq('vendor_id', vendor.id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+    // Audit every hand-made correction — a post-close adjustment is exactly how
+    // a cash shortage could be papered over, so who/when/what is recorded and
+    // surfaced in the daily report. 'recompute' is arithmetic only, not logged.
+    if (action !== 'recompute') {
+      await admin.from('cash_corrections').insert({
+        vendor_id: vendor.id,
+        session_id: sessionId,
+        session_date: session.session_date,
+        actor: auth.email || auth.userId,
+        action,
+        detail: {
+          amount: body.amount ?? body.opening_balance ?? null,
+          kind: body.kind ?? null,
+          note: body.note ?? body.reason ?? null,
+          variance_before: session.variance ?? null,
+          variance_after: patch.variance ?? null,
+          opening_before: session.opening_balance ?? null,
+          opening_after: patch.opening_balance ?? session.opening_balance ?? null,
+        },
+      }).then(() => {}, () => {})
+    }
+
     return NextResponse.json({ ok: true, expected_cash: expectedCash, cash_expenses: cashExpenses, variance: patch.variance })
   }
 
@@ -320,6 +384,10 @@ export async function POST(req: NextRequest) {
     const { sessionId } = body
 
     if (!sessionId) return NextResponse.json({ error: 'sessionId required' }, { status: 400 })
+    // Re-opening clears a counted result — same separation of duties as corrections
+    if (auth.role !== 'owner' && auth.role !== 'manager') {
+      return NextResponse.json({ error: 'Only the owner or a manager can re-open a closed session' }, { status: 403 })
+    }
 
     const { data: session } = await admin
       .from('cash_sessions')

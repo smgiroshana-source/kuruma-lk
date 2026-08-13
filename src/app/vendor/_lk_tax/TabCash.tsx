@@ -157,6 +157,9 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   const [expForm, setExpForm] = useState(blankExpenseForm())
   const [savingExp, setSavingExp] = useState(false)
 
+  // Opening ≠ previous day's closing (reported, fixed only on confirmation)
+  const [carryMismatch, setCarryMismatch] = useState<any>(null)
+
   // Post-close variance correction: {session, kind: 'in'|'out'|'opening'|'accept'}
   const [fixCash, setFixCash] = useState<any>(null)
   const [fixAmount, setFixAmount] = useState('')
@@ -264,6 +267,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       if (!res.ok) throw new Error('Failed to load today\'s session')
       const data = await res.json()
       setTodaySession(data.session ?? null)
+      setCarryMismatch(data.carry_forward_mismatch ?? null)
       if (data.session) {
         fetchTodayExpenses()
       } else {
@@ -931,6 +935,22 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
               {todaySession.notes && (
                 <div className="px-5 pb-4">
                   <p className="text-xs text-slate-500 italic">&ldquo;{todaySession.notes}&rdquo;</p>
+                </div>
+              )}
+
+              {/* Yesterday's counted cash IS today's opening float. Shown, not
+                  auto-applied: money figures shouldn't move on their own. */}
+              {carryMismatch && (
+                <div className="mx-5 mb-4 rounded-xl border-2 border-sky-300 bg-sky-50 p-3.5">
+                  <p className="text-xs font-black text-sky-900">
+                    Opening balance doesn&apos;t match {formatDate(carryMismatch.prev_date)}&apos;s counted cash
+                    ({formatRs(carryMismatch.prev_closing)} vs {formatRs(carryMismatch.opening)} — {formatRs(Math.abs(carryMismatch.difference))} difference)
+                  </p>
+                  <p className="text-[11px] text-sky-700 mt-1">Cash left in the drawer overnight carries into today. If nothing was removed after the count, match it.</p>
+                  <button onClick={() => { setFixCash({ session: todaySession, kind: 'opening' }); setFixAmount(String(carryMismatch.prev_closing)); setFixNote(`Matched to ${carryMismatch.prev_date} closing`) }}
+                    className="mt-2 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold">
+                    Set opening to {formatRs(carryMismatch.prev_closing)}
+                  </button>
                 </div>
               )}
 

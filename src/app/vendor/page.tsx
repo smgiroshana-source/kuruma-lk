@@ -1441,7 +1441,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1548,7 +1548,25 @@ ${(() => {
             ? '<div class="method-box"><div class="val green">Rs.' + counted.toLocaleString() + '</div><div class="lbl">Counted</div></div>' +
               (variance != null ? '<div class="method-box"><div class="val ' + (variance === 0 ? 'green' : (variance < 0 ? 'red' : 'orange')) + '">' + (variance > 0 ? '+' : variance < 0 ? '−' : '') + 'Rs.' + Math.abs(variance).toLocaleString() + '</div><div class="lbl">' + (variance === 0 ? 'Balanced' : (variance < 0 ? 'Short' : 'Over')) + '</div></div>' : '')
             : '<div class="method-box"><div class="val" style="color:#94a3b8">OPEN</div><div class="lbl">Not yet closed</div></div>') +
-        '</div>'
+        '</div>' +
+        // Post-close corrections are an audit matter: a hand adjustment is how a
+        // real shortage could be papered over, so the owner sees every one here.
+        ((corrections && corrections.length > 0)
+          ? '<div style="margin-top:10px;border:1.5px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:10px 12px">' +
+            '<div style="font-size:12px;font-weight:800;color:#92400e;margin-bottom:6px">\u26a0\ufe0f Cash corrections made after closing (' + corrections.length + ')</div>' +
+            corrections.map((c: any) => {
+              const d = c.detail || {}
+              const what = c.action === 'adjust' ? (d.kind === 'in' ? 'Cash in recorded late' : 'Cash out recorded late')
+                : c.action === 'set_opening' ? 'Opening balance changed'
+                : c.action === 'accept_variance' ? 'Difference accepted as real'
+                : c.action
+              const amt = d.amount != null ? ' Rs.' + parseInt(d.amount).toLocaleString() : ''
+              const varTxt = (d.variance_before != null && d.variance_after != null)
+                ? ' \u00b7 variance ' + parseInt(d.variance_before).toLocaleString() + ' \u2192 ' + parseInt(d.variance_after).toLocaleString() : ''
+              return '<div style="font-size:11px;color:#78350f;padding:2px 0">\u2022 ' + escapeHtml(what) + escapeHtml(amt) + ' \u2014 by ' + escapeHtml(c.actor || 'unknown') + escapeHtml(varTxt) + (d.note ? ' \u2014 "' + escapeHtml(String(d.note)) + '"' : '') + '</div>'
+            }).join('') +
+            '</div>'
+          : '')
     })()}
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Transactions (${filtered.length})</h3>
@@ -1803,8 +1821,9 @@ ${customerRows.map(c => `<tr>
         // undefined = couldn't check (omit the reconciliation section entirely);
         // null = checked, genuinely no session that day ("No cash session" note).
         let cashSession: any = undefined
-        try { if (cs.ok) cashSession = (await cs.json()).session || null } catch {}
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession)
+        let corrections: any[] = []
+        try { if (cs.ok) { const cj = await cs.json(); cashSession = cj.session || null; corrections = cj.corrections || [] } } catch {}
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections)
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)
