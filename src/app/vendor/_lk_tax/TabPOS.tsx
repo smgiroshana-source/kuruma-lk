@@ -704,6 +704,13 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       return
     }
     setPosErrors({})
+    // Below-cost warning — ONLY for items that have a cost (real or rough).
+    // Items without any cost sell silently (owner rule): no errors, no noise.
+    const belowCost = posCart.filter(it => Number(it.cost) > 0 && isBelowCost(posMarginBase(it.unitPrice), it.cost))
+    if (belowCost.length > 0) {
+      const lines = belowCost.map(it => `• ${it.productName}: Rs.${posMarginBase(it.unitPrice).toLocaleString()}${posIsVatEntity ? ' excl. VAT' : ''} vs cost Rs.${Number(it.cost).toLocaleString()}`).join('\n')
+      if (!confirm(`⚠️ SELLING BELOW COST:\n\n${lines}\n\nContinue with this sale?`)) return
+    }
     setPosPreview(true)
   }
 
