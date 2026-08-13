@@ -131,7 +131,12 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
       // otherwise every retry registers another duplicate.
       if (!editing.id && j.employee?.id) setEditing((e: any) => ({ ...e, id: j.employee.id }))
       if (isOwner) {
-        await post({ action: 'set_pay_items', employee_id: j.employee.id, items: (editing.pay_items || []).filter((i: PayItem) => i.label.trim() && Number(i.amount) > 0) })
+        const payItems = (editing.pay_items || []).filter((i: PayItem) => i.label.trim() && Number(i.amount) > 0)
+        await post({
+          action: 'set_pay_items', employee_id: j.employee.id, items: payItems,
+          // deliberate clear = the record HAD items and the owner removed them here
+          clear_all: payItems.length === 0 && (editing._origItemCount || 0) > 0,
+        })
       }
       tt('✅ Saved')
       setEditing(null)
@@ -191,7 +196,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
                     <div className="font-bold text-slate-800 flex items-center gap-2">{e.name} {branchChip(e.branch)}{!e.active && <span className="text-[10px] text-slate-400">INACTIVE</span>}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{e.pay_type} · {e.phone || 'no phone'}{e.nic ? ` · ${e.nic}` : ''}</div>
                   </div>
-                  <button onClick={() => setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })), id_photos: Array.isArray((e as any).id_photos) ? [...(e as any).id_photos] : [] })}
+                  <button onClick={() => setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })), _origItemCount: (e.pay_items || []).length, id_photos: Array.isArray((e as any).id_photos) ? [...(e as any).id_photos] : [] })}
                     className="text-xs font-bold text-orange-500 hover:text-orange-600">Edit</button>
                 </div>
                 {(e.pay_items || []).length > 0 && (
