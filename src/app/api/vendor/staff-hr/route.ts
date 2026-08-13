@@ -162,7 +162,10 @@ export async function POST(req: NextRequest) {
     const rows = items
       .filter((it: any) => it.label?.trim() && Number.isFinite(Number(it.amount)))
       .map((it: any) => ({
-        id: it.id || undefined,
+        // Only send `id` for rows that already exist — an `id: undefined` key
+        // serializes to null and Postgres rejects it instead of using the
+        // column default (this is what broke saving new pay items).
+        ...(it.id ? { id: it.id } : {}),
         employee_id,
         kind: ['base', 'allowance', 'commission_rate', 'profit_rate', 'epf', 'other'].includes(it.kind) ? it.kind : 'other',
         label: String(it.label).trim(),
