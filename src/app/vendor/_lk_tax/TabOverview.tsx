@@ -192,6 +192,8 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
     ? [
         { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
         { icon: '🧾', label: 'Add Expense', tab: 'cash', sub: 'add-expense' },
+        { icon: '📥', label: 'GRN — Receive Stock', tab: 'stocktake', sub: 'receive' },
+        { icon: '🏭', label: 'Pay Supplier', tab: 'suppliers' },
         { icon: '💵', label: 'Cash Reconcile', tab: 'cash' },
       ]
     : [

@@ -221,6 +221,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Payment control (owner rule): cheque and bank-transfer payments get an
+    // 8-digit system confirmation number. Cheques: the operator writes it on
+    // the cheque book slip — the owner signs only numbered slips. Bank
+    // transfers: the operator types it into the transfer's remarks field, so
+    // the bank statement itself carries the traceable number.
+    const methodNorm = String(method).toLowerCase()
+    const isCheque = methodNorm.includes('cheque')
+    const isBank = methodNorm.includes('bank')
+    if (isCheque && !reference?.trim()) {
+      return NextResponse.json({ error: 'Cheque number is required for cheque payments' }, { status: 400 })
+    }
+    const paymentConfirmNo = (isCheque || isBank)
+      ? String(Math.floor(10000000 + Math.random() * 90000000))
+      : null
+
     // Insert the payment record
     const { error: payErr } = await admin.from('supplier_payments').insert({
       vendor_id: vendor.id,
@@ -231,6 +246,7 @@ export async function POST(req: NextRequest) {
       method,
       reference: reference ?? null,
       notes: notes ?? null,
+      payment_confirm_no: paymentConfirmNo,
       created_by: userId,
     })
 
@@ -248,7 +264,7 @@ export async function POST(req: NextRequest) {
       .eq('vendor_id', vendor.id)
 
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true, confirm_no: paymentConfirmNo, confirm_kind: isCheque ? 'cheque' : isBank ? 'bank' : null })
   }
 
   // ── DELETE INVOICE ───────────────────────────────────────────────────────────

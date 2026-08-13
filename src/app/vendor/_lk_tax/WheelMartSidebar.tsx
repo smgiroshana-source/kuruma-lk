@@ -102,12 +102,14 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
 
   const roleLabel = staffRole === 'owner' ? 'Owner' : staffRole === 'manager' ? 'Manager' : staffRole === 'cashier' ? 'Cashier' : staffRole
 
-  // Role gating: cashier → POS, receivables, dashboard, and the cash drawer
-  // (opening/closing the drawer and petty expenses ARE the cashier's job);
-  // manager → everything except Settings; owner → all.
+  // Role gating: cashier → the operational day (POS, receivables, drawer,
+  // suppliers & payables, stock/GRN, dashboard) — payment controls (8-digit
+  // confirmation numbers) keep cheques/transfers owner-verifiable; manager →
+  // everything except Settings; owner → all.
+  const CASHIER_TABS = ['pos', 'receivables', 'cash', 'overview', 'suppliers', 'stocktake']
   const canSee = (item: NavItem) => {
     if (item.id === '_signout') return true
-    if (staffRole === 'cashier') return item.id === 'pos' || item.id === 'receivables' || item.id === 'cash' || item.id === 'overview'
+    if (staffRole === 'cashier') return CASHIER_TABS.includes(item.id)
     if (staffRole === 'manager') return item.id !== 'settings'
     return true
   }

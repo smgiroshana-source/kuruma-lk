@@ -87,6 +87,8 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
   const [newSupplier, setNewSupplier] = useState({ ...BLANK_SUPPLIER })
   const [newInvoice, setNewInvoice] = useState({ ...BLANK_INVOICE })
   const [newPayment, setNewPayment] = useState({ ...BLANK_PAYMENT })
+  // 8-digit payment confirmation overlay: {no, kind: 'cheque'|'bank', supplier, amount, reference, date}
+  const [paySlip, setPaySlip] = useState<any>(null)
   const [saving, setSaving] = useState(false)
 
   // ── effects ───────────────────────────────────────────────────────────────
@@ -186,6 +188,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
     const amt = Math.round(Number(newPayment.amount))
     if (!amt || amt <= 0) { showToast('Payment amount must be > 0'); return }
     if (amt > balance) { showToast(`Amount exceeds balance of ${formatRs(balance)}`); return }
+    if (newPayment.method === 'Cheque' && !newPayment.reference.trim()) { showToast('⚠️ Enter the cheque number first'); return }
     setSaving(true)
     try {
       const res = await fetch('/api/vendor/supplier-invoices', {
@@ -199,8 +202,15 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           amount: amt,
         }),
       })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? 'Failed to record payment') }
-      showToast('Payment recorded')
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? 'Failed to record payment')
+      // Cheque/bank payments come back with the 8-digit confirmation number —
+      // show it full-screen for the operator to copy (slip or transfer remarks)
+      if (d.confirm_no) {
+        setPaySlip({ no: d.confirm_no, kind: d.confirm_kind, supplier: selectedSupplier?.name || invoice.supplier_name || '', amount: amt, reference: newPayment.reference, date: newPayment.payment_date })
+      } else {
+        showToast('Payment recorded')
+      }
       setShowRecordPayment(null)
       setNewPayment({ ...BLANK_PAYMENT })
       await fetchInvoices(selectedSupplier.id)
@@ -467,6 +477,33 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       )}
 
       {/* ── RECORD PAYMENT MODAL ───────────────────────────────────────────── */}
+      {/* 8-digit payment confirmation — the operator copies this before the money moves */}
+      {paySlip && (
+        <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full text-center">
+            <p className="text-sm font-black text-emerald-600">✓ Payment recorded</p>
+            <p className="text-xs text-slate-400 mt-3 font-bold uppercase tracking-widest">Payment Confirmation Number</p>
+            <p className="font-mono text-4xl font-black tracking-[0.2em] text-slate-900 my-3">{paySlip.no}</p>
+            {paySlip.kind === 'cheque' ? (
+              <div className="text-left text-sm text-slate-600 bg-slate-50 rounded-xl p-3.5 leading-relaxed">
+                ✍️ Write this number on the <b>cheque book slip</b> for cheque <b>{paySlip.reference || '—'}</b>, with:<br />
+                • Supplier: <b>{paySlip.supplier}</b><br />
+                • Amount: <b>{formatRs(paySlip.amount)}</b><br />
+                • Date: <b>{paySlip.date}</b>
+              </div>
+            ) : (
+              <div className="text-left text-sm text-slate-600 bg-slate-50 rounded-xl p-3.5 leading-relaxed">
+                🏦 Type this number into the <b>remarks / reference field</b> of the online bank transfer <b>before sending</b> — the bank statement will then carry it.<br />
+                • Supplier: <b>{paySlip.supplier}</b><br />
+                • Amount: <b>{formatRs(paySlip.amount)}</b>
+              </div>
+            )}
+            <p className="text-[11px] text-red-600 font-bold mt-3">{paySlip.kind === 'cheque' ? 'The owner signs ONLY cheques whose slip carries a confirmation number.' : 'Transfers without this number in remarks are treated as unauthorised.'}</p>
+            <button onClick={() => setPaySlip(null)} className="mt-4 w-full py-3 rounded-xl bg-slate-800 text-white text-sm font-black hover:bg-slate-700">Done — number copied</button>
+          </div>
+        </div>
+      )}
+
       {showRecordPayment && (
         <Modal title="Record Payment" onClose={() => setShowRecordPayment(null)}>
           {(() => {
