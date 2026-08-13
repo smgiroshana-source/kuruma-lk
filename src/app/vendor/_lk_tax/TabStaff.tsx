@@ -116,6 +116,11 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
 
   const saveEmployee = async () => {
     if (!editing?.name?.trim()) { tt('⚠️ Name required'); return }
+    // NIC is the identity key — required, and never registered twice
+    const nicNorm = String(editing.nic || '').trim().toUpperCase().replace(/\s+/g, '')
+    if (!nicNorm) { tt('⚠️ NIC / ID number is required'); return }
+    const clash = employees.find(e => e.id !== editing.id && String(e.nic || '').trim().toUpperCase().replace(/\s+/g, '') === nicNorm)
+    if (clash) { tt(`⚠️ That NIC is already registered to ${clash.name}`); return }
     if (editing.phone?.trim() && !isValidSLPhone(editing.phone)) { tt('⚠️ ' + PHONE_FORMAT_MSG); return }
     if ((editing.id_photos || []).length === 0) { tt('⚠️ Add at least one ID copy photo'); return }
     setSaving(true)
@@ -278,7 +283,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
             <div className="grid sm:grid-cols-2 gap-3">
               <div><label className="block text-xs font-bold text-slate-500 mb-1">Name *</label>
                 <input value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
-              <div><label className="block text-xs font-bold text-slate-500 mb-1">NIC</label>
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">NIC / ID number *</label>
                 <input value={editing.nic} onChange={e => setEditing({ ...editing, nic: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
               <div><label className="block text-xs font-bold text-slate-500 mb-1">Phone</label>
                 <input value={editing.phone} onChange={e => setEditing({ ...editing, phone: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>

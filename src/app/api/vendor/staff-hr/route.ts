@@ -113,13 +113,28 @@ export async function POST(req: NextRequest) {
   if (action === 'upsert_employee') {
     const { id, name, nic, phone, address, branch, join_date, pay_type, active, id_photos } = body
     if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
+
+    // NIC identifies the person — required, and unique per vendor so the same
+    // employee can never be registered twice (names repeat; ID numbers don't).
+    const nicNorm = String(nic || '').trim().toUpperCase().replace(/\s+/g, '')
+    if (!nicNorm) return NextResponse.json({ error: 'NIC / ID number is required' }, { status: 400 })
+    const { data: clash } = await admin.from('employees')
+      .select('id, name, active')
+      .eq('vendor_id', vendor.id)
+      .ilike('nic', nicNorm)
+      .maybeSingle()
+    if (clash && clash.id !== id) {
+      return NextResponse.json({
+        error: `That NIC is already registered to ${clash.name}${clash.active ? '' : ' (inactive)'} — open that record instead of creating a new one.`,
+      }, { status: 409 })
+    }
     // ID copies are COMPULSORY (owner rule): every employee record must carry
     // at least one NIC/ID photo (plain URLs in the staff-docs bucket)
     const photoPaths = Array.isArray(id_photos)
       ? id_photos.filter((p: any) => typeof p === 'string' && p.includes('/staff-docs/'))
       : undefined
     const rec: any = {
-      name: name.trim(), nic: nic?.trim() || null, phone: phone?.trim() || null,
+      name: name.trim(), nic: nicNorm, phone: phone?.trim() || null,
       address: address?.trim() || null,
       branch: branch === 'workshop' ? 'workshop' : 'shop',
       join_date: join_date || null,
