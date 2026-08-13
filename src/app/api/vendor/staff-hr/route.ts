@@ -41,6 +41,7 @@ export async function GET(req: NextRequest) {
   const { data: employees } = await admin.from('employees')
     .select('*').eq('vendor_id', vendor.id).order('branch').order('name')
 
+
   // Pay items: owner sees all; manager only office-visible ones
   let itemsQuery = admin.from('employee_pay_items').select('*').eq('active', true)
   if (role !== 'owner') itemsQuery = itemsQuery.eq('visible_to_office', true)
@@ -84,13 +85,39 @@ export async function POST(req: NextRequest) {
   if (role !== 'owner' && role !== 'manager') return NextResponse.json({ error: 'No access' }, { status: 403 })
 
   const admin = createAdminClient()
+
+  // ── ID copy upload (multipart) → staff-docs bucket, plain public URL
+  //    (SL office practice: ID copies live in an ordinary office file) ──
+  const contentType = req.headers.get('content-type') || ''
+  if (contentType.includes('multipart/form-data')) {
+    try {
+      const formData = await req.formData()
+      const file = formData.get('file') as File | null
+      if (!file || !file.size) return NextResponse.json({ error: 'No file' }, { status: 400 })
+      if (file.size > 5 * 1024 * 1024) return NextResponse.json({ error: 'File too large (max 5MB)' }, { status: 400 })
+      const path = `staff-ids/${vendor.id}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`
+      const buf = Buffer.from(await file.arrayBuffer())
+      const { error: upErr } = await admin.storage.from('staff-docs').upload(path, buf, { contentType: file.type || 'image/jpeg', upsert: false })
+      if (upErr) return NextResponse.json({ error: 'Upload failed: ' + upErr.message }, { status: 500 })
+      const { data: pub } = admin.storage.from('staff-docs').getPublicUrl(path)
+      return NextResponse.json({ url: pub.publicUrl })
+    } catch (e: any) {
+      return NextResponse.json({ error: 'Upload failed: ' + (e?.message || 'unknown') }, { status: 500 })
+    }
+  }
+
   const body = await req.json()
   const { action } = body
 
   // ── Create / edit employee profile (owner + manager/office) ──
   if (action === 'upsert_employee') {
-    const { id, name, nic, phone, address, branch, join_date, pay_type, active } = body
+    const { id, name, nic, phone, address, branch, join_date, pay_type, active, id_photos } = body
     if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
+    // ID copies are COMPULSORY (owner rule): every employee record must carry
+    // at least one NIC/ID photo (plain URLs in the staff-docs bucket)
+    const photoPaths = Array.isArray(id_photos)
+      ? id_photos.filter((p: any) => typeof p === 'string' && p.includes('/staff-docs/'))
+      : undefined
     const rec: any = {
       name: name.trim(), nic: nic?.trim() || null, phone: phone?.trim() || null,
       address: address?.trim() || null,
@@ -99,6 +126,13 @@ export async function POST(req: NextRequest) {
       pay_type: ['monthly', 'daily', 'contract'].includes(pay_type) ? pay_type : 'monthly',
       active: active !== false,
       updated_at: new Date().toISOString(),
+    }
+    if (photoPaths !== undefined) rec.id_photos = photoPaths
+    if (!id && (!photoPaths || photoPaths.length === 0)) {
+      return NextResponse.json({ error: 'At least one ID copy photo is required' }, { status: 400 })
+    }
+    if (id && photoPaths !== undefined && photoPaths.length === 0) {
+      return NextResponse.json({ error: 'An employee must keep at least one ID copy photo' }, { status: 400 })
     }
     if (id) {
       const { data: existing } = await admin.from('employees').select('id').eq('id', id).eq('vendor_id', vendor.id).single()

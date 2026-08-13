@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
 import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { createClient } from '@/lib/supabase/client'
+import { compressImage } from '@/lib/compressImage'
 
 type PayItem = {
   id?: string; kind: string; label: string; amount: number | string
@@ -50,8 +51,27 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
   const [attSaving, setAttSaving] = useState(false)
 
   // Employee editor
-  const [editing, setEditing] = useState<any>(null) // null | {employee fields + pay_items}
+  const [editing, setEditing] = useState<any>(null) // null | {employee fields + pay_items + id_photos}
   const [saving, setSaving] = useState(false)
+  const [uploadingId, setUploadingId] = useState(false)
+
+  const handleIdUpload = async (ev: React.ChangeEvent<HTMLInputElement>) => {
+    const file = ev.target.files?.[0]
+    ev.target.value = ''
+    if (!file) return
+    setUploadingId(true)
+    try {
+      const compressed = await compressImage(file, 250)
+      const fd = new FormData()
+      fd.append('file', compressed)
+      const r = await fetch('/api/vendor/staff-hr', { method: 'POST', body: fd })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j.url) throw new Error(j.error || 'Upload failed')
+      setEditing((e: any) => ({ ...e, id_photos: [...(e.id_photos || []), j.url] }))
+      tt('📷 ID copy added')
+    } catch (e: any) { tt('❌ ' + e.message) }
+    setUploadingId(false)
+  }
 
   // Advance form
   const [advEmp, setAdvEmp] = useState('')
@@ -97,6 +117,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
   const saveEmployee = async () => {
     if (!editing?.name?.trim()) { tt('⚠️ Name required'); return }
     if (editing.phone?.trim() && !isValidSLPhone(editing.phone)) { tt('⚠️ ' + PHONE_FORMAT_MSG); return }
+    if ((editing.id_photos || []).length === 0) { tt('⚠️ Add at least one ID copy photo'); return }
     setSaving(true)
     try {
       const j = await post({ action: 'upsert_employee', ...editing })
@@ -150,7 +171,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
       {/* ── PEOPLE ── */}
       {view === 'people' && (
         <>
-          <button onClick={() => setEditing({ name: '', nic: '', phone: '', address: '', branch: 'shop', join_date: '', pay_type: 'monthly', active: true, pay_items: [] })}
+          <button onClick={() => setEditing({ name: '', nic: '', phone: '', address: '', branch: 'shop', join_date: '', pay_type: 'monthly', active: true, pay_items: [], id_photos: [] })}
             className="mb-3 px-4 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-bold hover:bg-orange-600">+ Register Staff Member</button>
           {employees.length === 0 && <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-400">No staff registered yet</div>}
           <div className="grid sm:grid-cols-2 gap-3">
@@ -161,7 +182,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
                     <div className="font-bold text-slate-800 flex items-center gap-2">{e.name} {branchChip(e.branch)}{!e.active && <span className="text-[10px] text-slate-400">INACTIVE</span>}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{e.pay_type} · {e.phone || 'no phone'}{e.nic ? ` · ${e.nic}` : ''}</div>
                   </div>
-                  <button onClick={() => setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })) })}
+                  <button onClick={() => setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })), id_photos: Array.isArray((e as any).id_photos) ? [...(e as any).id_photos] : [] })}
                     className="text-xs font-bold text-orange-500 hover:text-orange-600">Edit</button>
                 </div>
                 {(e.pay_items || []).length > 0 && (
@@ -274,6 +295,26 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
             </div>
             <div className="mt-3"><label className="block text-xs font-bold text-slate-500 mb-1">Address</label>
               <input value={editing.address} onChange={e => setEditing({ ...editing, address: e.target.value })} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
+
+            {/* ID copies — compulsory */}
+            <div className="mt-3">
+              <label className="block text-xs font-bold text-slate-500 mb-1">NIC / ID copies * <span className="font-normal text-slate-400">(photo of the ID — at least one)</span></label>
+              <div className="flex gap-2 flex-wrap items-center">
+                {(editing.id_photos || []).map((u: string, i: number) => (
+                  <div key={i} className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={u} alt="ID copy" className="w-24 h-16 object-cover rounded-lg border border-slate-200 cursor-pointer" onClick={() => window.open(u, '_blank')} />
+                    <button onClick={() => setEditing({ ...editing, id_photos: editing.id_photos.filter((_: any, x: number) => x !== i) })}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">✕</button>
+                  </div>
+                ))}
+                <label className={`w-24 h-16 rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer ${uploadingId ? 'opacity-50' : ''} ${(editing.id_photos || []).length === 0 ? 'border-red-300 bg-red-50' : 'border-slate-300'}`}>
+                  <span className="text-lg leading-none">{uploadingId ? '⏳' : '📷'}</span>
+                  <span className={`text-[9px] font-bold mt-0.5 ${(editing.id_photos || []).length === 0 ? 'text-red-400' : 'text-slate-400'}`}>{uploadingId ? 'Uploading…' : 'Add photo'}</span>
+                  <input type="file" accept="image/*" className="hidden" disabled={uploadingId} onChange={handleIdUpload} />
+                </label>
+              </div>
+            </div>
             {editing.id && (
               <label className="flex items-center gap-2 mt-3 cursor-pointer">
                 <input type="checkbox" checked={editing.active} onChange={e => setEditing({ ...editing, active: e.target.checked })} className="rounded" />
