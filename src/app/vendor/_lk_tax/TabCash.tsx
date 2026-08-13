@@ -157,6 +157,31 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   const [expForm, setExpForm] = useState(blankExpenseForm())
   const [savingExp, setSavingExp] = useState(false)
 
+  // Late-close for a past day's still-open session
+  const [lateClose, setLateClose] = useState<CashSession | null>(null)
+  const [lateCount, setLateCount] = useState('')
+  const [lateNotes, setLateNotes] = useState('')
+  const [lateSaving, setLateSaving] = useState(false)
+
+  async function handleLateClose() {
+    if (!lateClose) return
+    const amt = Math.round(Number(lateCount))
+    if (!Number.isFinite(amt) || amt < 0) { showToast('Enter the counted cash (0 is allowed)'); return }
+    setLateSaving(true)
+    try {
+      const res = await fetch('/api/vendor/cash-sessions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'close', sessionId: lateClose.id, closing_balance: amt, notes: `LATE CLOSE (${todayStr()})${lateNotes.trim() ? ' — ' + lateNotes.trim() : ''}` }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error || 'Failed to close session')
+      showToast(`✓ ${lateClose.session_date} closed`)
+      setLateClose(null)
+      await fetchTodaySession(); await fetchRecentSessions()
+    } catch (e: any) { showToast(e.message) }
+    setLateSaving(false)
+  }
+
   // Honour the dashboard deep-link once: land with the Add Expense modal open
   useEffect(() => {
     if (initialView === 'add-expense') { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }
@@ -911,7 +936,16 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                           </td>
                           <td className="px-4 py-3 text-center">
                             {s.status === 'open' ? (
-                              <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">OPEN</span>
+                              s.session_date !== todayStr() ? (
+                                // A drawer left open on a PAST day — variance is unknown
+                                // until someone counts and closes it late
+                                <button onClick={() => { setLateClose(s); setLateCount(''); setLateNotes('') }}
+                                  className="inline-block text-[11px] font-black px-2.5 py-1 rounded-full bg-red-100 text-red-700 border border-red-300 hover:bg-red-200 animate-pulse">
+                                  ⚠ STILL OPEN — Close now
+                                </button>
+                              ) : (
+                                <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">OPEN</span>
+                              )
                             ) : (
                               <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">CLOSED</span>
                             )}
@@ -1050,6 +1084,32 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             </div>
           )}
         </div>
+      )}
+
+      {/* ── LATE CLOSE MODAL (past day's drawer left open) ───────────────────── */}
+      {lateClose && (
+        <Modal title={`Close ${formatDate(lateClose.session_date)} (late)`} onClose={() => !lateSaving && setLateClose(null)}>
+          <div className="flex flex-col gap-3">
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-xs text-red-700 font-semibold">
+              This drawer was never closed on the day. Count what the cash SHOULD have been carried over as (or what was physically set aside), enter it, and the session closes with a late-close note for the record.
+            </div>
+            <div className="text-xs text-slate-500">Opening balance was <b>{formatRs(lateClose.opening_balance)}</b>{lateClose.expected_cash != null ? <> · expected <b>{formatRs(lateClose.expected_cash)}</b></> : null}</div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Counted cash (Rs.) *</label>
+              <input type="number" inputMode="numeric" min="0" value={lateCount} onChange={e => setLateCount(e.target.value)}
+                className="w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-sm font-mono font-bold focus:outline-none focus:border-orange-400" placeholder="0" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Note (why it was left open)</label>
+              <input value={lateNotes} onChange={e => setLateNotes(e.target.value)}
+                className="w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400" placeholder="e.g. forgot to close before leaving" />
+            </div>
+            <button onClick={handleLateClose} disabled={lateSaving}
+              className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-black disabled:opacity-50">
+              {lateSaving ? 'Closing…' : `✓ Close ${lateClose.session_date} now`}
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* ── ADD EXPENSE MODAL ────────────────────────────────────────────────── */}
