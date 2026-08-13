@@ -2,7 +2,7 @@
 // ── WHEEL MART ONLY — never import this from _standard/ ──────────────────────
 import { useState } from 'react'
 
-type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'settings'
+type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings'
 
 type NavItem = {
   id: LkTaxTab | '_signout' | '_coming'
@@ -68,6 +68,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { id: 'cash',    icon: '💵', label: 'Cash & Expenses' },
       { id: 'reports',  icon: '📊', label: 'Reports' },
+      { id: 'staff',   icon: '🧑‍🔧', label: 'Staff' },
     ],
   },
 ]

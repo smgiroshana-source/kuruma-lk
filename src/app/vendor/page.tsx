@@ -29,10 +29,11 @@ import TabSuppliers from './_lk_tax/TabSuppliers'
 import TabSupplierReturns from './_lk_tax/TabSupplierReturns'
 import TabWriteoffs from './_lk_tax/TabWriteoffs'
 import TabFleet from './_lk_tax/TabFleet'
+import TabStaff from './_lk_tax/TabStaff'
 import TabCash from './_lk_tax/TabCash'
 import TabReports from './_lk_tax/TabReports'
 
-type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'settings'
+type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
 const TYRE_WIDTHS  = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
@@ -2180,6 +2181,11 @@ ${customerRows.map(c => `<tr>
         {/* REPORTS — WHEEL MART only */}
         {tab === 'reports' && isLkTax && (
           <TabReports vendor={vendor} showToast={showToast} reportTools={{ runDailyReport, runWhatsAppDaily, openPeriodReport, dailyReportLoading, periodReportLoading }} />
+        )}
+
+        {/* STAFF / HR — WHEEL MART only; owner + manager (server re-checks role) */}
+        {tab === 'staff' && isLkTax && (staffRole === 'owner' || staffRole === 'manager') && (
+          <TabStaff staffRole={staffRole} />
         )}
 
         {/* PRODUCTS */}
