@@ -592,6 +592,8 @@ export default function VendorDashboard() {
   const [salesFilterVehicle, setSalesFilterVehicle] = useState('')
   const [showSalesFilter, setShowSalesFilter] = useState(false)
   const [salesView, setSalesView] = useState('overview')
+  // Sidebar 'Customers' opens the Credit & Customers tab as the full registry
+  const [receivablesShowAll, setReceivablesShowAll] = useState(false)
   const [reportDate, setReportDate] = useState(colomboToday())
   const [reportFrom, setReportFrom] = useState(new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10))
   const [reportTo, setReportTo] = useState(colomboToday())
@@ -2078,8 +2080,11 @@ ${customerRows.map(c => `<tr>
         <WheelMartSidebar
           tab={tab}
           onTabChange={t => startTransition(() => {
-            // 'customers' is an alias for the Sales tab's Customers sub-view
-            if (t === 'customers') { setSalesView('customers'); setTab('sales') }
+            // 'customers' opens the customer REGISTRY (Credit & Customers tab
+            // with Show All Customers on); 'receivables' opens the same tab in
+            // its credit-focused view
+            if (t === 'customers') { setReceivablesShowAll(true); setTab('receivables') }
+            else if (t === 'receivables') { setReceivablesShowAll(false); setTab('receivables') }
             else setTab(t as VendorTab)
           })}
           vendorName={vendor.name}
@@ -4049,11 +4054,13 @@ ${customerRows.map(c => `<tr>
         {/* RECEIVABLES — WHEEL MART only: collect customer credit & advances */}
         {tab === 'receivables' && isLkTax && (
           <TabCredit
+            key={receivablesShowAll ? 'all-customers' : 'credit'}
             vendor={vendor}
             products={data?.products || []}
             vendorSettings={vendorSettings}
             showToast={showToast}
             onDataChanged={fetchData}
+            initialShowAll={receivablesShowAll}
           />
         )}
 

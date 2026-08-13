@@ -25,10 +25,12 @@ export interface CommonTabProps {
   onDataChanged: () => void
 }
 
-export default function TabCredit({ vendor, vendorSettings, showToast, onDataChanged }: CommonTabProps) {
+export default function TabCredit({ vendor, vendorSettings, showToast, onDataChanged, initialShowAll }: CommonTabProps & { initialShowAll?: boolean }) {
   const [creditCustomers, setCreditCustomers] = useState<any[]>([])
   const [creditLoading, setCreditLoading] = useState(false)
-  const [showAllCustomers, setShowAllCustomers] = useState(false)
+  // initialShowAll: WHEEL MART's sidebar "Customers" opens this tab as the full
+  // customer registry rather than the credit-focused view (optional; default off)
+  const [showAllCustomers, setShowAllCustomers] = useState(!!initialShowAll)
   const [customerSearch, setCustomerSearch] = useState('')
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<any>(null)
   const [outstandingSales, setOutstandingSales] = useState<any[]>([])
