@@ -2,7 +2,9 @@
 // ── WHEEL MART ONLY — never import this from _standard/ ──────────────────────
 import { useState } from 'react'
 
-type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings'
+// 'customers' is a navigation alias: page.tsx maps it to the Sales tab's
+// Customers sub-view (there is no standalone customers tab).
+type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings' | 'customers'
 
 type NavItem = {
   id: LkTaxTab | '_signout' | '_coming'
@@ -59,7 +61,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'CUSTOMERS',
     items: [
       { id: 'receivables', icon: '💰', label: 'Receivables' },
-      { id: '_coming',     icon: '👥', label: 'Customers',       comingSoon: true },
+      { id: 'customers',   icon: '👥', label: 'Customers' },
       { id: 'fleet',       icon: '🚗', label: 'Fleet & Vehicles' },
     ],
   },

@@ -2077,7 +2077,11 @@ ${customerRows.map(c => `<tr>
       {isLkTax && (
         <WheelMartSidebar
           tab={tab}
-          onTabChange={t => startTransition(() => setTab(t))}
+          onTabChange={t => startTransition(() => {
+            // 'customers' is an alias for the Sales tab's Customers sub-view
+            if (t === 'customers') { setSalesView('customers'); setTab('sales') }
+            else setTab(t as VendorTab)
+          })}
           vendorName={vendor.name}
           staffRole={staffRole}
           onSignOut={handleSignOut}
