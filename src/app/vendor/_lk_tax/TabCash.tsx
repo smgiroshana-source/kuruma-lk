@@ -118,8 +118,12 @@ function blankExpenseForm() {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TabCash({ vendor, showToast }: Props) {
-  const [activeTab, setActiveTab] = useState<'reconciliation' | 'expenses'>('reconciliation')
+export default function TabCash({ vendor, showToast, initialView, onInitialViewConsumed }: Props & { initialView?: string | null; onInitialViewConsumed?: () => void }) {
+  // Dashboard deep-links: 'expenses' opens the expenses view; 'add-expense'
+  // additionally opens the Add Expense modal ready to type.
+  const [activeTab, setActiveTab] = useState<'reconciliation' | 'expenses'>(
+    initialView === 'expenses' || initialView === 'add-expense' ? 'expenses' : 'reconciliation'
+  )
 
   // ── Cash Reconciliation state ──────────────────────────────────────────────
   const [todaySession, setTodaySession] = useState<CashSession | null | undefined>(undefined) // undefined = loading
@@ -152,6 +156,13 @@ export default function TabCash({ vendor, showToast }: Props) {
   const [showAddExpModal, setShowAddExpModal] = useState(false)
   const [expForm, setExpForm] = useState(blankExpenseForm())
   const [savingExp, setSavingExp] = useState(false)
+
+  // Honour the dashboard deep-link once: land with the Add Expense modal open
+  useEffect(() => {
+    if (initialView === 'add-expense') { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }
+    if (initialView && onInitialViewConsumed) onInitialViewConsumed()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── On mount ───────────────────────────────────────────────────────────────
   useEffect(() => {

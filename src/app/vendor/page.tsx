@@ -2191,7 +2191,7 @@ ${customerRows.map(c => `<tr>
 
         {/* CASH RECONCILIATION + EXPENSES — WHEEL MART only */}
         {tab === 'cash' && isLkTax && (
-          <TabCash vendor={vendor} showToast={showToast} />
+          <TabCash vendor={vendor} showToast={showToast} initialView={stockInitialView} onInitialViewConsumed={() => setStockInitialView(null)} />
         )}
 
         {/* REPORTS — WHEEL MART only */}

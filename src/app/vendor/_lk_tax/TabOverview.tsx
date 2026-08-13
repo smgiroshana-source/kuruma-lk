@@ -194,6 +194,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       ]
     : [
         { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
+        { icon: '🧾', label: 'Add Expense', tab: 'cash', sub: 'add-expense' },
         { icon: '📥', label: 'GRN — Receive Stock', tab: 'stocktake', sub: 'receive' },
         { icon: '🧑‍🔧', label: 'Attendance', tab: 'staff', sub: 'attendance' },
         { icon: '💸', label: 'Staff Advance', tab: 'staff', sub: 'advances' },
@@ -309,7 +310,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       {/* ── Quick actions ───────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
         <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3">Quick actions</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
           {primaryActions.map((a) => (
             <button
               key={a.label}
