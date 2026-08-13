@@ -160,6 +160,22 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Opening ≠ previous day's closing (reported, fixed only on confirmation)
   const [carryMismatch, setCarryMismatch] = useState<any>(null)
 
+  // A PAST day opened for correction (same tools as today's card)
+  const [pastSession, setPastSession] = useState<CashSession | null>(null)
+  const [pastCarry, setPastCarry] = useState<any>(null)
+  const [pastCorrections, setPastCorrections] = useState<any[]>([])
+
+  async function openPastSession(date: string) {
+    try {
+      const res = await fetch(`/api/vendor/cash-sessions?date=${date}`)
+      if (!res.ok) throw new Error('Could not load that day')
+      const d = await res.json()
+      setPastSession(d.session ?? null)
+      setPastCarry(d.carry_forward_mismatch ?? null)
+      setPastCorrections(d.corrections ?? [])
+    } catch (e: any) { showToast(e.message) }
+  }
+
   // Post-close variance correction: {session, kind: 'in'|'out'|'opening'|'accept'}
   const [fixCash, setFixCash] = useState<any>(null)
   const [fixAmount, setFixAmount] = useState('')
@@ -188,8 +204,10 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       const d = await res.json()
       if (!res.ok) throw new Error(d.error || 'Failed')
       showToast(d.variance === 0 ? '✓ Balanced — variance cleared' : `Updated — variance now ${formatRs(Math.abs(d.variance || 0))}`)
+      const fixedDate = session.session_date
       setFixCash(null); setFixAmount(''); setFixNote('')
       await fetchTodaySession(); await fetchRecentSessions()
+      if (pastSession && pastSession.session_date === fixedDate) await openPastSession(fixedDate)
     } catch (e: any) { showToast(e.message) }
     setFixSaving(false)
   }
@@ -387,14 +405,15 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
     }
   }
 
-  async function handleReopenSession() {
-    if (!todaySession) return
+  async function handleReopenSession(target?: CashSession | null) {
+    const sess = target || todaySession
+    if (!sess) return
     if (!confirm('Re-open this session? The closing data will be cleared.')) return
     try {
       const res = await fetch('/api/vendor/cash-sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reopen', sessionId: todaySession.id }),
+        body: JSON.stringify({ action: 'reopen', sessionId: sess.id }),
       })
       if (!res.ok) {
         const d = await res.json()
@@ -403,6 +422,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       showToast('Session reopened')
       await fetchTodaySession()
       await fetchRecentSessions()
+      if (pastSession && pastSession.id === sess.id) await openPastSession(sess.session_date)
     } catch (e: any) {
       showToast(e.message)
     }
@@ -909,7 +929,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                   <span className="font-black text-slate-800 text-base">Session Closed — {formatDate(todaySession.session_date)}</span>
                 </div>
                 <button
-                  onClick={handleReopenSession}
+                  onClick={() => handleReopenSession()}
                   className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors"
                 >
                   Re-open
@@ -1029,9 +1049,13 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                     </thead>
                     <tbody>
                       {recentSessions.map(s => (
-                        <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                        <tr key={s.id}
+                          onClick={() => { if (s.status === 'closed' && s.session_date !== todayStr()) openPastSession(s.session_date) }}
+                          className={'border-t border-slate-100 transition-colors ' + (s.status === 'closed' && s.session_date !== todayStr() ? 'hover:bg-orange-50 cursor-pointer' : 'hover:bg-slate-50')}>
                           <td className="px-4 py-3">
                             <p className="text-sm font-semibold text-slate-700">{formatDate(s.session_date)}</p>
+                            {s.status === 'closed' && s.session_date !== todayStr() && (s.variance ?? 0) !== 0 && !(s as any).variance_accepted &&
+                              <p className="text-[10px] font-bold text-orange-500 mt-0.5">tap to correct →</p>}
                           </td>
                           <td className="px-4 py-3 text-right text-sm text-slate-600">{formatRs(s.opening_balance)}</td>
                           <td className="px-4 py-3 text-right text-sm text-slate-600">
@@ -1200,6 +1224,82 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             </div>
           )}
         </div>
+      )}
+
+      {/* ── PAST SESSION PANEL (correct any earlier day) ─────────────────────── */}
+      {pastSession && (
+        <Modal title={`${formatDate(pastSession.session_date)} — cash session`} onClose={() => setPastSession(null)}>
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <SummaryCell label="Opening Balance" value={formatRs(pastSession.opening_balance)} />
+              <SummaryCell label="Expected Cash" value={pastSession.expected_cash != null ? formatRs(pastSession.expected_cash) : '—'} />
+              <SummaryCell label="Counted Cash" value={pastSession.closing_balance != null ? formatRs(pastSession.closing_balance) : '—'} />
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-1">Variance</p>
+                {varianceBadge(pastSession.variance)}
+              </div>
+            </div>
+
+            {pastCarry && (
+              <div className="rounded-xl border-2 border-sky-300 bg-sky-50 p-3">
+                <p className="text-xs font-black text-sky-900">
+                  Opening doesn&apos;t match {formatDate(pastCarry.prev_date)}&apos;s counted cash ({formatRs(pastCarry.prev_closing)} vs {formatRs(pastCarry.opening)})
+                </p>
+                <button onClick={() => { setFixCash({ session: pastSession, kind: 'opening' }); setFixAmount(String(pastCarry.prev_closing)); setFixNote(`Matched to ${pastCarry.prev_date} closing`) }}
+                  className="mt-2 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold">
+                  Set opening to {formatRs(pastCarry.prev_closing)}
+                </button>
+              </div>
+            )}
+
+            {pastSession.variance != null && pastSession.variance !== 0 && !(pastSession as any).variance_accepted && (
+              <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-3">
+                <p className="text-xs font-black text-amber-800 mb-2">
+                  {pastSession.variance > 0 ? `Rs.${Math.abs(pastSession.variance).toLocaleString()} more than expected` : `Rs.${Math.abs(pastSession.variance).toLocaleString()} less than expected`} — was something not entered?
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {pastSession.variance < 0 && (
+                    <button onClick={() => { setExpForm({ ...blankExpenseForm(), expense_date: pastSession.session_date }); setPastSession(null); setActiveTab('expenses'); setShowAddExpModal(true) }}
+                      className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">🧾 Add the missed expense</button>
+                  )}
+                  {pastSession.variance > 0 && (
+                    <button onClick={() => setFixCash({ session: pastSession, kind: 'in' })}
+                      className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">💵 Cash received, not recorded</button>
+                  )}
+                  {pastSession.variance < 0 && (
+                    <button onClick={() => setFixCash({ session: pastSession, kind: 'out' })}
+                      className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">💸 Cash taken out</button>
+                  )}
+                  <button onClick={() => setFixCash({ session: pastSession, kind: 'opening' })}
+                    className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">↩ Fix opening balance</button>
+                  <button onClick={() => setFixCash({ session: pastSession, kind: 'accept' })}
+                    className="px-3 py-2 rounded-lg bg-white border-2 border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50">✓ It really is short/over</button>
+                </div>
+              </div>
+            )}
+            {(pastSession as any).variance_accepted && (
+              <p className="text-xs font-bold text-slate-500">Variance accepted: {(pastSession as any).variance_reason}</p>
+            )}
+
+            {pastCorrections.length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[11px] font-black text-slate-500 uppercase tracking-wide mb-1.5">Corrections after closing</p>
+                {pastCorrections.map((c, i) => (
+                  <p key={i} className="text-[11px] text-slate-600">
+                    • {c.action === 'adjust' ? (c.detail?.kind === 'in' ? 'Cash in' : 'Cash out') : c.action === 'set_opening' ? 'Opening changed' : 'Accepted'}
+                    {c.detail?.amount != null ? ` Rs.${Number(c.detail.amount).toLocaleString()}` : ''} — {c.actor} · {new Date(c.created_at).toLocaleDateString('en-LK')}
+                    {c.detail?.note ? ` — “${c.detail.note}”` : ''}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <button onClick={() => handleReopenSession(pastSession)}
+              className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50">
+              Re-open this day (clears the count so it can be re-counted)
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* ── VARIANCE CORRECTION MODAL ────────────────────────────────────────── */}
