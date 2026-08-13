@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows } from '@/lib/fetchAll'
+import { branchEntityIds, resolveBranch, applyBranchFilter } from '@/lib/branchScope'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -10,10 +11,11 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return vendor
+  // branchScope rides on the vendor object so existing callers keep working
+  if (vendor) return { ...vendor, branchScope: 'both' }
   // Check if staff member
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return staffLink.vendor
+  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop' }
   return null
 }
 
@@ -200,6 +202,8 @@ export async function GET(req: NextRequest) {
   // Support explicit from/to date range
   const fromDate = url.searchParams.get('from')
   const toDate = url.searchParams.get('to')
+  const branch = resolveBranch((vendor as any).branchScope, url.searchParams.get('branch'))
+  const branchIds = branch ? await branchEntityIds(vendor.id, branch) : []
 
   let dateFilter: string | null = null
   const now = new Date()
@@ -218,6 +222,9 @@ export async function GET(req: NextRequest) {
       .from('sales')
       .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
       .eq('vendor_id', vendor.id)
+    // Branch view: shop (PART/PROP) vs workshop (REPR/WPRO). A scoped login is
+    // pinned to its own side; owners choose with ?branch=
+    query = applyBranchFilter(query, branch, branchIds)
     if (fromDate) query = query.gte('created_at', new Date(fromDate).toISOString())
     if (toDate) { const end = new Date(toDate); end.setDate(end.getDate() + 1); query = query.lt('created_at', end.toISOString()) }
     if (!fromDate && dateFilter) query = query.gte('created_at', dateFilter)

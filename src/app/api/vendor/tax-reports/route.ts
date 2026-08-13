@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
+import { resolveBranch } from '@/lib/branchScope'
 
 // Month bucket in the Colombo calendar — slicing the raw UTC timestamp bins
 // late-night (pre-05:30) transactions into the previous month.
@@ -26,9 +27,9 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return vendor
+  if (vendor) return { ...vendor, branchScope: 'both' }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return staffLink.vendor
+  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop' }
   return null
 }
 
@@ -46,17 +47,28 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
 
   // Get lk_tax entity IDs for this vendor (Pvt Ltd = invoice_mode 'lk_tax')
-  const { data: lkTaxEntities } = await admin
+  const { data: lkTaxEntitiesRaw } = await admin
     .from('invoice_entities')
-    .select('id, name')
+    .select('id, name, branch, serial_qqqq')
     .eq('vendor_id', vendor.id)
     .eq('invoice_mode', 'lk_tax')
 
-  if (!lkTaxEntities || lkTaxEntities.length === 0) {
+  if (!lkTaxEntitiesRaw || lkTaxEntitiesRaw.length === 0) {
     return NextResponse.json({ error: 'No lk_tax entity found for this vendor' }, { status: 400 })
   }
 
+  // Branch view: shop entities (PART) vs workshop (REPR). A scoped login is
+  // pinned to its side; the owner picks with ?branch=. No branch = both, which
+  // is what the consolidated VAT/SSCL return needs.
+  const branch = resolveBranch((vendor as any).branchScope, searchParams.get('branch'))
+  const isWorkshop = (e: any) => (e.branch ? e.branch === 'workshop' : ['REPR', 'WPRO'].includes(e.serial_qqqq))
+  const lkTaxEntities = branch
+    ? lkTaxEntitiesRaw.filter((e: any) => (branch === 'workshop' ? isWorkshop(e) : !isWorkshop(e)))
+    : lkTaxEntitiesRaw
   const entityIds = lkTaxEntities.map((e: any) => e.id)
+  if (entityIds.length === 0) {
+    return NextResponse.json({ error: `No ${branch} tax entity configured` }, { status: 400 })
+  }
   // Period boundaries are Colombo calendar days, NOT UTC. A CRN issued at
   // 00:29 Colombo on the 14th is 18:59 UTC on the 13th — UTC boundaries let it
   // leak into a register ending on the 13th while its original invoice

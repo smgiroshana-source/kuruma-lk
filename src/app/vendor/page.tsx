@@ -592,6 +592,8 @@ export default function VendorDashboard() {
   const [salesFilterVehicle, setSalesFilterVehicle] = useState('')
   const [showSalesFilter, setShowSalesFilter] = useState(false)
   const [salesView, setSalesView] = useState('overview')
+  // Branch view for sales & reports: '' = whole business, or one side of it
+  const [salesBranch, setSalesBranch] = useState<'' | 'shop' | 'workshop'>('')
   // Sidebar 'Customers' opens the Credit & Customers tab as the full registry
   const [receivablesShowAll, setReceivablesShowAll] = useState(false)
   // Inline rough-cost entry in the profit report (sku → typed value)
@@ -705,7 +707,7 @@ export default function VendorDashboard() {
     return () => { window.removeEventListener('pageshow', onPageShow); document.removeEventListener('visibilitychange', onVisible) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  useEffect(() => { if (tab === 'sales') fetchSales() }, [tab, salesPeriod])
+  useEffect(() => { if (tab === 'sales') fetchSales() }, [tab, salesPeriod, salesBranch])
   useEffect(() => {
     if (!customerHistoryId) { setCustomerHistory(null); return }
     const controller = new AbortController()
@@ -946,7 +948,7 @@ export default function VendorDashboard() {
   async function fetchSales() {
     setSalesLoading(true)
     try {
-      const r = await fetch(`/api/vendor/sales?period=${salesPeriod}`)
+      const r = await fetch(`/api/vendor/sales?period=${salesPeriod}${salesBranch ? `&branch=${salesBranch}` : ''}`)
       if (r.ok) setSalesData(await r.json())
       fetchAllDrafts()
       // Run cleanup once per session only (not on every fetchSales call — reduces DB write IO)
@@ -2943,6 +2945,14 @@ ${customerRows.map(c => `<tr>
             <h1 className="text-2xl font-black">📊 Sales & Analytics</h1>
             <div className="flex gap-2 items-center flex-wrap">
               <button onClick={() => { const today = colomboToday(); setExportFrom(today); setExportTo(today); setShowExportModal(true) }} className="text-xs font-bold px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100">⬇ Export CSV</button>
+            {isLkTax && (
+              <div className="flex gap-1 bg-white rounded-lg border border-slate-200 p-1">
+                {[{v:'',l:'All'},{v:'shop',l:'🏪 Shop'},{v:'workshop',l:'🔧 Workshop'}].map(b => (
+                  <button key={b.v} onClick={() => setSalesBranch(b.v as any)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${salesBranch === b.v ? 'bg-slate-800 text-white' : 'text-slate-500 active:bg-slate-100'}`}>{b.l}</button>
+                ))}
+              </div>
+            )}
             <div className="flex gap-1 bg-white rounded-lg border border-slate-200 p-1">
               {[{v:'today',l:'Today'},{v:'week',l:'Week'},{v:'month',l:'Month'},{v:'all',l:'All'}].map(p => (
                 <button key={p.v} onClick={() => setSalesPeriod(p.v)} className={`px-3 py-1.5 rounded-md text-xs font-bold transition ${salesPeriod === p.v ? 'bg-orange-500 text-white' : 'text-slate-500 active:bg-slate-100'}`}>{p.l}</button>
@@ -3587,7 +3597,7 @@ ${customerRows.map(c => `<tr>
                     setTaxReportLoading(true)
                     setTaxReportData(null)
                     try {
-                      const r = await fetch(`/api/vendor/tax-reports?type=${taxReportType}&from=${taxReportFrom}&to=${taxReportTo}`)
+                      const r = await fetch(`/api/vendor/tax-reports?type=${taxReportType}&from=${taxReportFrom}&to=${taxReportTo}${salesBranch ? `&branch=${salesBranch}` : ''}`)
                       const j = await r.json()
                       if (!r.ok) { showToast('⚠️ ' + (j.error || 'Failed')); return }
                       setTaxReportData(j)
