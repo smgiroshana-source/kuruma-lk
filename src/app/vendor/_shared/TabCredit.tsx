@@ -25,12 +25,15 @@ export interface CommonTabProps {
   onDataChanged: () => void
 }
 
-export default function TabCredit({ vendor, vendorSettings, showToast, onDataChanged, initialShowAll }: CommonTabProps & { initialShowAll?: boolean }) {
+// mode (optional): 'credit' = Receivables view (who owes; no registration),
+// 'registry' = Customers view (register/edit/search everyone; all customers).
+// Omitted (Sakura) = the original combined screen with the Show All checkbox.
+export default function TabCredit({ vendor, vendorSettings, showToast, onDataChanged, mode }: CommonTabProps & { mode?: 'credit' | 'registry' }) {
+  const registry = mode === 'registry'
+  const creditOnly = mode === 'credit'
   const [creditCustomers, setCreditCustomers] = useState<any[]>([])
   const [creditLoading, setCreditLoading] = useState(false)
-  // initialShowAll: WHEEL MART's sidebar "Customers" opens this tab as the full
-  // customer registry rather than the credit-focused view (optional; default off)
-  const [showAllCustomers, setShowAllCustomers] = useState(!!initialShowAll)
+  const [showAllCustomers, setShowAllCustomers] = useState(registry)
   const [customerSearch, setCustomerSearch] = useState('')
   const [selectedCreditCustomer, setSelectedCreditCustomer] = useState<any>(null)
   const [outstandingSales, setOutstandingSales] = useState<any[]>([])
@@ -331,8 +334,8 @@ ${advanceBalance > 0 ? `
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-black text-slate-900">💳 Credit & Customers</h1>
-        <button onClick={() => setShowAddCustomer(!showAddCustomer)} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">{showAddCustomer ? 'Cancel' : '+ Add Customer'}</button>
+        <h1 className="text-2xl font-black text-slate-900">{registry ? '👥 Customers' : creditOnly ? '💰 Receivables' : '💳 Credit & Customers'}</h1>
+        {!creditOnly && <button onClick={() => setShowAddCustomer(!showAddCustomer)} className="bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold px-4 py-2 rounded-lg">{showAddCustomer ? 'Cancel' : '+ Add Customer'}</button>}
       </div>
 
       {/* Register Customer Form */}
@@ -374,10 +377,12 @@ ${advanceBalance > 0 ? `
             className="w-full pl-8 pr-4 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
           {customerSearch && <button onClick={() => setCustomerSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">✕</button>}
         </div>
-        <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-slate-200">
-          <input type="checkbox" checked={showAllCustomers} onChange={e => setShowAllCustomers(e.target.checked)} className="w-4 h-4 accent-orange-500" />
-          <span className="text-xs font-semibold text-slate-600">Show All Customers</span>
-        </label>
+        {!registry && !creditOnly && (
+          <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-2 rounded-lg border border-slate-200">
+            <input type="checkbox" checked={showAllCustomers} onChange={e => setShowAllCustomers(e.target.checked)} className="w-4 h-4 accent-orange-500" />
+            <span className="text-xs font-semibold text-slate-600">Show All Customers</span>
+          </label>
+        )}
       </div>
 
       {/* Settle modal */}
@@ -458,7 +463,7 @@ ${advanceBalance > 0 ? `
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Customer list */}
           <div className="space-y-2">
-            <h3 className="font-bold text-slate-800 text-sm mb-2">Customers with Credit ({creditCustomers.length})</h3>
+            <h3 className="font-bold text-slate-800 text-sm mb-2">{showAllCustomers ? 'All Customers' : 'Customers with Credit'} ({creditCustomers.length})</h3>
             {(() => { const filtered = creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }); return filtered.length === 0 })() ? <div className="bg-white rounded-xl border border-slate-200 p-6 text-center"><p className="text-2xl opacity-30">✅</p><p className="text-slate-400 text-sm font-semibold mt-2">No outstanding credit or advances</p></div> : creditCustomers.filter((c: any) => { if (!customerSearch) return true; const s = customerSearch.toLowerCase(); return c.name?.toLowerCase().includes(s) || c.phone?.toLowerCase().includes(s) || c.email?.toLowerCase().includes(s) }).map((c: any) => (
               <button key={c.id} onClick={() => loadOutstanding(c)} className={'w-full text-left bg-white rounded-xl border px-4 py-3 hover:shadow-md transition ' + (selectedCreditCustomer?.id === c.id ? 'border-orange-500 bg-orange-50' : 'border-slate-200')}>
                 <div className="flex items-center justify-between">

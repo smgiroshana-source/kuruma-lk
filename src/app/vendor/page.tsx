@@ -4054,13 +4054,13 @@ ${customerRows.map(c => `<tr>
         {/* RECEIVABLES — WHEEL MART only: collect customer credit & advances */}
         {tab === 'receivables' && isLkTax && (
           <TabCredit
-            key={receivablesShowAll ? 'all-customers' : 'credit'}
+            key={receivablesShowAll ? 'registry' : 'credit'}
             vendor={vendor}
             products={data?.products || []}
             vendorSettings={vendorSettings}
             showToast={showToast}
             onDataChanged={fetchData}
-            initialShowAll={receivablesShowAll}
+            mode={receivablesShowAll ? 'registry' : 'credit'}
           />
         )}
 
