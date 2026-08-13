@@ -3597,7 +3597,7 @@ ${customerRows.map(c => `<tr>
                     setTaxReportLoading(true)
                     setTaxReportData(null)
                     try {
-                      const r = await fetch(`/api/vendor/tax-reports?type=${taxReportType}&from=${taxReportFrom}&to=${taxReportTo}${salesBranch ? `&branch=${salesBranch}` : ''}`)
+                      const r = await fetch(`/api/vendor/tax-reports?type=${taxReportType}&from=${taxReportFrom}&to=${taxReportTo}`)
                       const j = await r.json()
                       if (!r.ok) { showToast('⚠️ ' + (j.error || 'Failed')); return }
                       setTaxReportData(j)
@@ -3714,6 +3714,9 @@ ${customerRows.map(c => `<tr>
                       <style>body{font-family:Arial,sans-serif;margin:20px}h2{font-size:14px}h3{font-size:12px;color:#555}@media print{@page{size:A4 landscape;margin:10mm}}</style>
                       </head><body>
                       <h2>${title}</h2><h3>${entityName}</h3>
+                      ${taxReportData.filing_valid === false
+                        ? `<p style="border:2px solid #dc2626;background:#fef2f2;color:#b91c1c;font-size:11px;font-weight:bold;padding:8px 10px;margin:8px 0">PARTIAL VIEW — ${escapeHtml(String(taxReportData.branch || ''))} branch only. NOT VALID FOR IRD SUBMISSION. The Pvt Ltd files one consolidated return covering all streams.</p>`
+                        : `<p style="font-size:10px;color:#666;margin:4px 0 10px">Consolidated for the whole company — all invoice streams (PART parts shop + REPR workshop) under one TIN, as required for a single VAT/SSCL return.</p>`}
                       ${body}
                       <p style="font-size:10px;color:#999;margin-top:16px">Generated ${new Date().toLocaleString('en-LK')}</p>
                       <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}</script>
@@ -3726,7 +3729,18 @@ ${customerRows.map(c => `<tr>
                     <div className="space-y-4">
                       {/* Report selector + date range */}
                       <div className="bg-white rounded-xl border border-slate-200 p-5">
-                        <h3 className="font-bold text-sm text-slate-800 mb-3">🧾 Tax Compliance Reports</h3>
+                        <h3 className="font-bold text-sm text-slate-800 mb-1">🧾 Tax Compliance Reports</h3>
+                        {/* One TIN = one return. These reports always cover the
+                            WHOLE Pvt Ltd — parts shop and workshop together —
+                            regardless of the branch view used elsewhere. */}
+                        {taxReportData?.filing_valid === false ? (
+                          <div className="mb-3 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2">
+                            <p className="text-[11px] font-black text-red-700">⚠️ PARTIAL VIEW — {taxReportData.branch} only. NOT valid for IRD submission.</p>
+                            <p className="text-[11px] text-red-600 mt-0.5">Your access is limited to one branch. The VAT/SSCL return must be filed by the owner for the whole company.</p>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-slate-400 mb-3">Covers the <strong>whole Pvt Ltd</strong> — parts shop (PART) and workshop (REPR) together, as one taxpayer under TIN {vendorSettings?.tax_id || '101969738'}. The Shop/Workshop view in Sales does not apply here.</p>
+                        )}
                         <div className="flex flex-wrap gap-3 items-end">
                           <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Report Type</label>

@@ -57,10 +57,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'No lk_tax entity found for this vendor' }, { status: 400 })
   }
 
-  // Branch view: shop entities (PART) vs workshop (REPR). A scoped login is
-  // pinned to its side; the owner picks with ?branch=. No branch = both, which
-  // is what the consolidated VAT/SSCL return needs.
-  const branch = resolveBranch((vendor as any).branchScope, searchParams.get('branch'))
+  // ⚠️ FILING RULE: the Pvt Ltd is ONE taxpayer (TIN 101969738) and files ONE
+  // consolidated VAT/SSCL return covering every stream — PART (shop) and REPR
+  // (workshop) together. So the branch filter is deliberately NOT honoured for
+  // owners: tax reports are always whole-company. A branch-scoped staff login
+  // still only sees its own side (privacy), and that partial view is flagged
+  // `filing_valid: false` so the UI can warn it must never go to IRD.
+  const scope = (vendor as any).branchScope
+  const branch = resolveBranch(scope, null)
   const isWorkshop = (e: any) => (e.branch ? e.branch === 'workshop' : ['REPR', 'WPRO'].includes(e.serial_qqqq))
   const lkTaxEntities = branch
     ? lkTaxEntitiesRaw.filter((e: any) => (branch === 'workshop' ? isWorkshop(e) : !isWorkshop(e)))
@@ -164,7 +168,7 @@ export async function GET(req: NextRequest) {
       crnExcludedCount: cnRows.length - countedCns.length,
     }
 
-    return NextResponse.json({ register, totals, entity: lkTaxEntities[0].name })
+    return NextResponse.json({ register, totals, entity: lkTaxEntities[0].name, filing_valid: !branch, branch })
   }
 
   // ── SSCL Liability Report ───────────────────────────────────────────────────
@@ -278,6 +282,7 @@ export async function GET(req: NextRequest) {
       months, totals,
       config: { ssclRate: ssclRate * 100, liableBasePart: liableBasePart * 100, liableBaseSvc: liableBaseSvc * 100 },
       entity: lkTaxEntities[0].name,
+      filing_valid: !branch, branch,
     })
   }
 
@@ -341,7 +346,7 @@ export async function GET(req: NextRequest) {
       nonClaimableVat:    nonClaimableRows.reduce((s, r) => s + r.inputVat, 0),
     }
 
-    return NextResponse.json({ rows, months, totals, entity: lkTaxEntities[0].name })
+    return NextResponse.json({ rows, months, totals, entity: lkTaxEntities[0].name, filing_valid: !branch, branch })
   }
 
   // ── VAT Summary (Output − Input = Net Payable) ─────────────────────────────
@@ -417,6 +422,7 @@ export async function GET(req: NextRequest) {
       crnCount:     (creditNotes || []).length,
       period:       { from, to },
       entity:       lkTaxEntities[0].name,
+      filing_valid: !branch, branch,
     })
   }
 
