@@ -172,31 +172,45 @@ export async function POST(req: NextRequest) {
     const { data: emp } = await admin.from('employees').select('id').eq('id', employee_id).eq('vendor_id', vendor.id).single()
     if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
 
-    // Replace-set semantics: existing items are deactivated, submitted ones (re)written
+    const shape = (it: any) => ({
+      employee_id,
+      kind: ['base', 'allowance', 'commission_rate', 'profit_rate', 'epf', 'other'].includes(it.kind) ? it.kind : 'other',
+      label: String(it.label).trim(),
+      amount: Math.max(0, Number(it.amount)),
+      unit: it.unit === 'percent' ? 'percent' : 'rs',
+      period: ['monthly', 'daily', 'per_event'].includes(it.period) ? it.period : 'monthly',
+      half_day_policy: ['half', 'none', 'full'].includes(it.half_day_policy) ? it.half_day_policy : 'half',
+      visible_to_office: it.visible_to_office === true,
+      active: true,
+      updated_at: new Date().toISOString(),
+    })
+    const valid = items.filter((it: any) => it.label?.trim() && Number.isFinite(Number(it.amount)))
+    const existingRows = valid.filter((it: any) => it.id).map((it: any) => ({ id: it.id, ...shape(it) }))
+    const newRows = valid.filter((it: any) => !it.id).map(shape)
+
+    // Refuse to silently wipe a configured pay setup. An empty submission is
+    // only honoured when the client says the owner deliberately removed every
+    // item in this editing session — otherwise a stale form would erase salaries.
+    const { data: currentActive } = await admin
+      .from('employee_pay_items').select('id').eq('employee_id', employee_id).eq('active', true)
+    if (valid.length === 0 && (currentActive || []).length > 0 && body.clear_all !== true) {
+      return NextResponse.json({ error: 'Pay items were not sent — nothing changed. Reopen the record and try again.' }, { status: 409 })
+    }
+
+    // Replace-set: deactivate everything, then (re)activate what was submitted.
+    // INSERT and UPSERT run separately — a bulk write mixing rows with and
+    // without `id` makes PostgREST send id:null for the new ones, which the
+    // not-null primary key rejects.
     await admin.from('employee_pay_items').update({ active: false, updated_at: new Date().toISOString() }).eq('employee_id', employee_id)
-    const rows = items
-      .filter((it: any) => it.label?.trim() && Number.isFinite(Number(it.amount)))
-      .map((it: any) => ({
-        // Only send `id` for rows that already exist — an `id: undefined` key
-        // serializes to null and Postgres rejects it instead of using the
-        // column default (this is what broke saving new pay items).
-        ...(it.id ? { id: it.id } : {}),
-        employee_id,
-        kind: ['base', 'allowance', 'commission_rate', 'profit_rate', 'epf', 'other'].includes(it.kind) ? it.kind : 'other',
-        label: String(it.label).trim(),
-        amount: Math.max(0, Number(it.amount)),
-        unit: it.unit === 'percent' ? 'percent' : 'rs',
-        period: ['monthly', 'daily', 'per_event'].includes(it.period) ? it.period : 'monthly',
-        half_day_policy: ['half', 'none', 'full'].includes(it.half_day_policy) ? it.half_day_policy : 'half',
-        visible_to_office: it.visible_to_office === true,
-        active: true,
-        updated_at: new Date().toISOString(),
-      }))
-    if (rows.length > 0) {
-      const { error } = await admin.from('employee_pay_items').upsert(rows)
+    if (existingRows.length > 0) {
+      const { error } = await admin.from('employee_pay_items').upsert(existingRows)
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     }
-    audit(admin, vendor.id, email, 'pay_items_set', employee_id, { count: rows.length, labels: rows.map(r => r.label) })
+    if (newRows.length > 0) {
+      const { error } = await admin.from('employee_pay_items').insert(newRows)
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    audit(admin, vendor.id, email, 'pay_items_set', employee_id, { count: valid.length, labels: valid.map((r: any) => r.label) })
     return NextResponse.json({ ok: true })
   }
 
