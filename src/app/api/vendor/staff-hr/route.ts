@@ -220,7 +220,17 @@ export async function POST(req: NextRequest) {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(marks)) {
       return NextResponse.json({ error: 'date and marks required' }, { status: 400 })
     }
-    const { data: emps } = await admin.from('employees').select('id').eq('vendor_id', vendor.id)
+    const { data: emps } = await admin.from('employees').select('id, name, join_date').eq('vendor_id', vendor.id)
+    // Nobody can be marked before the day they joined
+    const joinById = new Map((emps || []).map((e: any) => [e.id, e.join_date]))
+    const tooEarly = marks.filter((m: any) => {
+      const jd = joinById.get(m.employee_id)
+      return jd && date < jd
+    })
+    if (tooEarly.length > 0) {
+      const names = (emps || []).filter((e: any) => tooEarly.some((m: any) => m.employee_id === e.id)).map((e: any) => `${e.name} (joined ${e.join_date})`)
+      return NextResponse.json({ error: `Not employed on ${date}: ${names.join(', ')}` }, { status: 400 })
+    }
     const valid = new Set((emps || []).map((e: any) => e.id))
     const rows = marks
       .filter((m: any) => valid.has(m.employee_id) && ['present', 'half', 'absent'].includes(m.status))

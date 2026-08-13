@@ -10,6 +10,7 @@ import { colomboToday } from '@/lib/dates'
 import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { createClient } from '@/lib/supabase/client'
 import { compressImage } from '@/lib/compressImage'
+import { escapeHtml } from '@/lib/escapeHtml'
 
 type PayItem = {
   id?: string; kind: string; label: string; amount: number | string
@@ -145,8 +146,81 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
     setSaving(false)
   }
 
+  // ── Period attendance report (PDF for the owner) ──
+  const [repFrom, setRepFrom] = useState(() => colomboToday().slice(0, 8) + '01')
+  const [repTo, setRepTo] = useState(colomboToday())
+  const [repBusy, setRepBusy] = useState(false)
+
+  const generateAttendanceReport = async () => {
+    if (repFrom > repTo) { tt('⚠️ Start date is after the end date'); return }
+    setRepBusy(true)
+    try {
+      const r = await fetch(`/api/vendor/staff-hr?from=${repFrom}&to=${repTo}`)
+      if (!r.ok) throw new Error('Could not load attendance')
+      const j = await r.json()
+      const emps: Employee[] = j.employees || []
+      const marks: any[] = j.attendance || []
+
+      // Every date in the range (Colombo dates, no timezone drift)
+      const days: string[] = []
+      for (let d = new Date(repFrom + 'T00:00:00'); d <= new Date(repTo + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+        days.push(d.toLocaleDateString('en-CA'))
+      }
+      const byEmpDate = new Map(marks.map((m: any) => [m.employee_id + '|' + m.date, m.status]))
+      const LETTER: Record<string, string> = { present: 'P', half: '½', absent: 'A' }
+      const COLOR: Record<string, string> = { present: '#16a34a', half: '#d97706', absent: '#dc2626' }
+
+      const people = emps.filter(e => !(e.join_date && e.join_date > repTo))
+      const rows = people.map(e => {
+        let p = 0, h = 0, a = 0, unmarked = 0
+        const cells = days.map(d => {
+          if (e.join_date && d < e.join_date) return '<td style="background:#f8fafc;color:#cbd5e1">·</td>'
+          const st = byEmpDate.get(e.id + '|' + d)
+          if (st === 'present') p++; else if (st === 'half') h++; else if (st === 'absent') a++; else unmarked++
+          return st
+            ? `<td style="color:${COLOR[st]};font-weight:700">${LETTER[st]}</td>`
+            : '<td style="color:#e2e8f0">—</td>'
+        }).join('')
+        const payable = p + h * 0.5
+        return { html: `<tr><td class="nm">${escapeHtml(e.name)}<div class="br">${escapeHtml(e.branch)}</div></td>${cells}<td class="tot">${p}</td><td class="tot">${h}</td><td class="tot" style="color:#dc2626">${a}</td><td class="tot" style="color:#94a3b8">${unmarked}</td><td class="tot" style="background:#f1f5f9">${payable}</td></tr>` }
+      }).map(r => r.html).join('')
+
+      const dayHead = days.map(d => `<th class="dh">${d.slice(8)}</th>`).join('')
+      const html = `<!DOCTYPE html><html><head><title>Attendance ${repFrom} to ${repTo}</title><style>
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:24px;color:#0f172a}
+        h1{font-size:20px;margin:0}
+        .sub{color:#64748b;font-size:13px;margin:2px 0 16px}
+        table{border-collapse:collapse;width:100%;font-size:11px}
+        th,td{border:1px solid #e2e8f0;padding:4px 3px;text-align:center}
+        th{background:#f8fafc;font-size:10px;color:#475569}
+        .dh{width:18px}
+        .nm{text-align:left;font-weight:700;font-size:12px;white-space:nowrap;padding-right:8px}
+        .br{font-weight:400;font-size:9px;color:#94a3b8;text-transform:uppercase}
+        .tot{font-weight:700;background:#fafafa}
+        .legend{margin-top:12px;font-size:11px;color:#64748b}
+        .print-btn{position:fixed;top:12px;right:12px;padding:10px 18px;background:#f97316;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer}
+        @media print{.print-btn{display:none}body{padding:0}}
+      </style></head><body>
+        <button class="print-btn" onclick="window.print()">Print / Save PDF</button>
+        <h1>Staff Attendance</h1>
+        <div class="sub">MacForce Auto Engineering · ${repFrom} to ${repTo} · ${people.length} staff</div>
+        <table><thead><tr><th class="nm">Name</th>${dayHead}<th class="tot">P</th><th class="tot">½</th><th class="tot">A</th><th class="tot">—</th><th class="tot">Payable days</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="99" style="padding:20px;color:#94a3b8">No staff in this period</td></tr>'}</tbody></table>
+        <div class="legend">P = present · ½ = half day · A = absent · — = not marked · · = before joining. Payable days = present + half×0.5.</div>
+      </body></html>`
+
+      const w = window.open('', '_blank')
+      if (!w) { tt('⚠️ Pop-ups blocked — allow pop-ups and try again'); setRepBusy(false); return }
+      w.document.write(html)
+      w.document.close()
+    } catch (e: any) { tt('❌ ' + e.message) }
+    setRepBusy(false)
+  }
+
   const saveAttendance = async () => {
-    const marks = employees.filter(e => e.active && attMarks[e.id]).map(e => ({ employee_id: e.id, status: attMarks[e.id] }))
+    const marks = employees
+      .filter(e => e.active && attMarks[e.id] && !(e.join_date && attDate < e.join_date))
+      .map(e => ({ employee_id: e.id, status: attMarks[e.id] }))
     if (marks.length === 0) { tt('⚠️ Mark at least one person'); return }
     setAttSaving(true)
     try { await post({ action: 'mark_attendance', date: attDate, marks }); tt(`✅ Attendance saved (${marks.length})`) } catch (e: any) { tt('❌ ' + e.message) }
@@ -221,7 +295,10 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
             <input type="date" value={attDate} max={colomboToday()} onChange={e => { setAttDate(e.target.value) }} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-semibold outline-none focus:border-orange-400" />
             <span className="text-xs text-slate-400">Present / Half day / Absent — allowances follow these marks</span>
           </div>
-          {employees.filter(e => e.active).map(e => (
+          {employees.filter(e => e.active && !(e.join_date && attDate < e.join_date)).length === 0 && (
+            <p className="text-sm text-slate-400 py-4 text-center">Nobody was employed on this date.</p>
+          )}
+          {employees.filter(e => e.active && !(e.join_date && attDate < e.join_date)).map(e => (
             <div key={e.id} className="flex items-center justify-between py-2.5 border-b border-slate-100">
               <div className="text-sm font-semibold text-slate-700 flex items-center gap-2">{e.name} {branchChip(e.branch)}</div>
               <div className="flex gap-1.5">
@@ -234,6 +311,23 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
           ))}
           <button onClick={saveAttendance} disabled={attSaving}
             className="mt-4 w-full py-3 rounded-xl bg-green-500 text-white text-sm font-black hover:bg-green-600 disabled:opacity-50">{attSaving ? 'Saving…' : `✓ Save Attendance — ${attDate}`}</button>
+
+          {/* Period report for the owner */}
+          <div className="mt-5 pt-4 border-t border-slate-100">
+            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-2">Attendance report</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="date" value={repFrom} max={colomboToday()} onChange={e => setRepFrom(e.target.value)}
+                className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-semibold outline-none focus:border-orange-400" />
+              <span className="text-xs text-slate-400">to</span>
+              <input type="date" value={repTo} max={colomboToday()} onChange={e => setRepTo(e.target.value)}
+                className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-semibold outline-none focus:border-orange-400" />
+              <button onClick={generateAttendanceReport} disabled={repBusy}
+                className="px-4 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold disabled:opacity-50">
+                {repBusy ? 'Building…' : '📄 PDF report'}
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1.5">Day-by-day grid per person with present / half / absent totals and payable days — save as PDF and send to the owner.</p>
+          </div>
         </div>
       )}
 
