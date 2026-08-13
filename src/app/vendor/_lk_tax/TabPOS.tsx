@@ -2,6 +2,7 @@
 import { toWhatsAppNumber } from '@/lib/constants'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { gpPercent, isBelowCost, netOfVat } from '@/lib/margin'
 import { useState, useEffect, useMemo } from 'react'
 
@@ -682,7 +683,8 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     if (posCart.length === 0) { showToast('Add items to cart'); return }
     const errors: { name?: boolean; phone?: boolean; vehicle?: boolean; address?: boolean; tin?: boolean } = {}
     if (!posCustomer.name.trim()) errors.name = true
-    if (!posCustomer.phone.trim()) errors.phone = true
+    // Phone must be a valid SL number: 10 digits starting with 0
+    if (!isValidSLPhone(posCustomer.phone)) errors.phone = true
     // Insurance bills are per-vehicle claims — vehicle number is compulsory
     // unless the operator explicitly ticked "vehicle number not available".
     if ((posCustomer.require_vehicle_no || posCustomerIsInsurance) && !posVehicleNo.trim() && !posNoVehicle) errors.vehicle = true
@@ -694,6 +696,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     }
     if (errors.name || errors.phone || errors.vehicle || errors.tin || errors.address) {
       setPosErrors(errors)
+      if (errors.phone) showToast('⚠️ ' + PHONE_FORMAT_MSG)
       if (errors.tin) showToast('⚠️ 9-digit customer TIN required (VAT-registered purchaser)')
       if (errors.address) showToast('⚠️ Customer address required (VAT-registered purchaser)')
       if (errors.vehicle) showToast(posCustomerIsInsurance ? '⚠️ Vehicle number required for insurance bills — or tick "not available"' : '⚠️ Vehicle number required for this customer')

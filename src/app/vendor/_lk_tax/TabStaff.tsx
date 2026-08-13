@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
+import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 
 type PayItem = {
   id?: string; kind: string; label: string; amount: number | string
@@ -83,6 +84,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
 
   const saveEmployee = async () => {
     if (!editing?.name?.trim()) { tt('⚠️ Name required'); return }
+    if (editing.phone?.trim() && !isValidSLPhone(editing.phone)) { tt('⚠️ ' + PHONE_FORMAT_MSG); return }
     setSaving(true)
     try {
       const j = await post({ action: 'upsert_employee', ...editing })

@@ -1,6 +1,7 @@
 'use client'
 import { toWhatsAppNumber } from '@/lib/constants'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { useState, useEffect } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
@@ -75,6 +76,8 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
 
   async function registerCustomer() {
     if (!newCustomer.name.trim()) { showToast('Customer name required'); return }
+    if (!isValidSLPhone(newCustomer.phone)) { showToast('⚠️ ' + PHONE_FORMAT_MSG); return }
+    if (newCustomer.whatsapp.trim() && !isValidSLPhone(newCustomer.whatsapp)) { showToast('⚠️ WhatsApp: ' + PHONE_FORMAT_MSG); return }
     setAddCustomerLoading(true)
     try {
       const r = await fetch('/api/vendor/customers', {
@@ -168,6 +171,8 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
 
   async function handleEditCustomer() {
     if (!editingCustomer) return
+    if (editingCustomer.phone?.trim() && !isValidSLPhone(editingCustomer.phone)) { showToast('⚠️ ' + PHONE_FORMAT_MSG); return }
+    if (editingCustomer.whatsapp?.trim() && !isValidSLPhone(editingCustomer.whatsapp)) { showToast('⚠️ WhatsApp: ' + PHONE_FORMAT_MSG); return }
     setEditCustomerLoading(true)
     try {
       const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({

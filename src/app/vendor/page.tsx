@@ -2078,7 +2078,7 @@ ${customerRows.map(c => `<tr>
       {/* ── WHEEL MART: fixed left sidebar ───────────────────────────────────── */}
       {isLkTax && (
         <WheelMartSidebar
-          tab={tab}
+          tab={tab === 'receivables' && receivablesShowAll ? ('customers' as VendorTab) : tab}
           onTabChange={t => startTransition(() => {
             // 'customers' opens the customer REGISTRY (Credit & Customers tab
             // with Show All Customers on); 'receivables' opens the same tab in
@@ -2100,7 +2100,7 @@ ${customerRows.map(c => `<tr>
             <div className="flex items-center gap-2 text-sm">
               <span className="font-black text-orange-500 text-sm">WHEEL MART</span>
               <span className="text-slate-300 mx-0.5">/</span>
-              <span className="text-slate-700 font-semibold">{({'overview':'Dashboard','products':'Products','add':'Add Product','bulk':'Bulk Upload','pos':'POS','sales':'Sales & Invoices','credit':'Credit Notes','stocktake':'📦 Stock','settings':'Settings'} as Record<string,string>)[tab] ?? tab}</span>
+              <span className="text-slate-700 font-semibold">{({'overview':'Dashboard','products':'Products','add':'Add Product','bulk':'Bulk Upload','pos':'POS','sales':'Sales & Invoices','credit':'Credit Notes','stocktake':'📦 Stock','receivables':receivablesShowAll ? 'Customers' : 'Receivables','staff':'Staff','cash':'Cash & Expenses','reports':'Reports','suppliers':'Suppliers','fleet':'Fleet & Vehicles','writeoffs':'Write-offs','supplier-returns':'Supplier Returns','settings':'Settings'} as Record<string,string>)[tab] ?? tab}</span>
             </div>
             <div className="flex items-center gap-2">
               <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors text-base">🔔</button>
