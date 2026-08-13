@@ -2965,7 +2965,9 @@ ${customerRows.map(c => `<tr>
                 {/* ─── OVERVIEW ─── */}
                 {salesSubTab === 'overview' && (<div>
                   {/* Stats cards — 2 cols mobile, 3 cols desktop */}
-                  {(() => {
+                  {/* WHEEL MART ONLY: Sakura is cost-less by choice — sales tracking only,
+                      no profit calculations anywhere in its view (owner rule). */}
+                  {isLkTax && (() => {
                     // ── Three-way profit split (owner rule, Aug 2026) ──
                     // real cost (sale-time FIFO snapshot, or product cost entered later)
                     //   → normal profit; rough cost (product cost flagged ~estimate)
