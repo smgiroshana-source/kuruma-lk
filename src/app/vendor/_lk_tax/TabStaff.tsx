@@ -121,6 +121,10 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
     setSaving(true)
     try {
       const j = await post({ action: 'upsert_employee', ...editing })
+      // Remember the new id immediately: if the pay-items step below fails and
+      // the user hits Save again, this must UPDATE the person just created —
+      // otherwise every retry registers another duplicate.
+      if (!editing.id && j.employee?.id) setEditing((e: any) => ({ ...e, id: j.employee.id }))
       if (isOwner) {
         await post({ action: 'set_pay_items', employee_id: j.employee.id, items: (editing.pay_items || []).filter((i: PayItem) => i.label.trim() && Number(i.amount) > 0) })
       }
