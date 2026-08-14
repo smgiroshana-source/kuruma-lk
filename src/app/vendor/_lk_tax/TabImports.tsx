@@ -40,6 +40,7 @@ export default function TabImports({ showToast }: { showToast: (m: string) => vo
   const [form, setForm] = useState(blank())
   const [saving, setSaving] = useState(false)
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
+  const [exportMonth, setExportMonth] = useState(colomboToday().slice(0, 7))
 
   const load = useCallback(async () => {
     try {
@@ -96,19 +97,25 @@ export default function TabImports({ showToast }: { showToast: (m: string) => vo
     await post({ action: 'add', entries: rows }, `✅ ${rows.length} declaration(s) imported`)
   }
 
+  // Builds the Schedule 03 file to SUBMIT to IRD, for one taxable period:
+  // only declarations being claimed in that period, serials renumbered 1..N,
+  // dates back in IRD's M/D/YYYY format.
+  const periodEntries = entries.filter(e => e.claimPeriod === exportMonth)
   const exportCsv = () => {
+    if (periodEntries.length === 0) { showToast(`No declarations claimed in ${exportMonth}`); return }
     const head = 'Serial No,Cusdec Date,Cusdec No,Cusdec Serial ID,Cusdec Reg Date,Cusdec Office ID,VAT Deferred,VAT Upfront,Disallowed VAT'
     const mdy = (d: string) => { const p = String(d || '').split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}/${p[0]}` : d }
-    const body = entries.map((r, i) => [
+    const body = periodEntries.map((r, i) => [
       i + 1, mdy(r.cusdec_date), r.cusdec_no, r.cusdec_serial_id || '', mdy(r.cusdec_reg_date || r.cusdec_date),
       r.cusdec_office_id || '', Number(r.vat_deferred).toFixed(2), r.vat_upfront, Number(r.disallowed_vat).toFixed(2),
     ].join(',')).join('\n')
     const blob = new Blob([head + '\n' + body + '\n'], { type: 'text/csv' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `VAT_SCHEDULE03_${colomboToday()}.csv`
+    a.download = `VAT_SCHEDULE03_${exportMonth.replace('-', '')}.csv`
     a.click()
     URL.revokeObjectURL(a.href)
+    showToast(`Schedule 03 for ${exportMonth} — ${periodEntries.length} declaration(s)`)
   }
 
   if (loading) return <div className="p-8 text-center text-slate-400 text-sm">Loading shipments…</div>
@@ -120,20 +127,36 @@ export default function TabImports({ showToast }: { showToast: (m: string) => vo
           <h1 className="text-2xl font-black text-slate-900">🚢 Import Shipments</h1>
           <p className="text-sm text-slate-400 mt-0.5">Customs declarations and the import VAT paid on them</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <label className="text-xs font-bold px-3.5 py-2.5 rounded-lg border-2 border-sky-300 bg-white text-sky-700 hover:bg-sky-50 cursor-pointer">
-            ⬆ Upload IRD Schedule 03
-            <input type="file" accept=".csv,text/csv" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadCsv(f) }} />
-          </label>
-          {entries.length > 0 && (
-            <button onClick={exportCsv} className="text-xs font-bold px-3.5 py-2.5 rounded-lg border-2 border-slate-200 bg-white text-slate-600 hover:bg-slate-50">⬇ Export CSV</button>
-          )}
-          <button onClick={() => { setForm(blank()); setShowForm(!showForm) }}
-            className="text-xs font-bold px-4 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white">
-            {showForm ? 'Cancel' : '+ Add Declaration'}
-          </button>
+        <button onClick={() => { setForm(blank()); setShowForm(!showForm) }}
+          className="text-sm font-bold px-5 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white">
+          {showForm ? 'Cancel' : '+ Add Declaration'}
+        </button>
+      </div>
+
+      {/* The point of this screen: build the file that goes TO IRD */}
+      <div className="bg-emerald-50 border-2 border-emerald-200 rounded-xl p-4 mb-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-black text-emerald-900">📤 Schedule 03 for your VAT return</p>
+            <p className="text-[11px] text-emerald-700 mt-0.5">
+              Generates the file to upload to IRD — only the declarations being claimed in the period you pick,
+              serials renumbered, in IRD&apos;s exact column format.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input type="month" value={exportMonth} onChange={e => setExportMonth(e.target.value)}
+              className="px-3 py-2 rounded-lg border-2 border-emerald-300 text-sm font-semibold outline-none focus:border-emerald-500 bg-white" />
+            <button onClick={exportCsv} disabled={periodEntries.length === 0}
+              className="text-sm font-black px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40">
+              ⬇ Generate ({periodEntries.length})
+            </button>
+          </div>
         </div>
+        {periodEntries.length > 0 && (
+          <p className="text-[11px] text-emerald-800 mt-2 font-semibold">
+            {exportMonth}: {periodEntries.length} declaration{periodEntries.length !== 1 ? 's' : ''} · import VAT {rs(periodEntries.reduce((s, e) => s + e.claimable, 0))}
+          </p>
+        )}
       </div>
 
       {/* How this fits together — the question everyone asks once */}
@@ -142,6 +165,13 @@ export default function TabImports({ showToast }: { showToast: (m: string) => vo
           <strong>Goods</strong> go in through <strong>Bulk Upload</strong> (cost optional — thousands of parts need no individual cost).
           <strong> Import VAT</strong> is claimed here, on the Customs declaration, so the two never depend on each other.
           Credits can be claimed up to <strong>24 months</strong> after the Cusdec.
+          {' '}
+          <label className="underline cursor-pointer font-semibold">
+            Load a past IRD Schedule 03 file
+            <input type="file" accept=".csv,text/csv" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadCsv(f) }} />
+          </label>
+          {' '}if you want previously submitted periods on record too.
         </p>
       </div>
 
