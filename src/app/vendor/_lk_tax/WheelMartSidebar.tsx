@@ -4,7 +4,7 @@ import { useState } from 'react'
 
 // 'customers' is a navigation alias: page.tsx maps it to the Sales tab's
 // Customers sub-view (there is no standalone customers tab).
-type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings' | 'customers'
+type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings' | 'customers' | 'imports'
 
 type NavItem = {
   id: LkTaxTab | '_signout' | '_coming'
@@ -47,6 +47,7 @@ const NAV_SECTIONS: NavSection[] = [
       { id: 'add',        icon: '➕', label: 'Add Product' },
       { id: 'bulk',       icon: '📤', label: 'Bulk Upload' },
       { id: 'stocktake',  icon: '📥', label: 'Stock / GRN / Transfer' },
+      { id: 'imports',    icon: '🚢', label: 'Import Shipments' },
       { id: 'writeoffs',  icon: '✏️', label: 'Write-offs' },
     ],
   },
@@ -106,7 +107,7 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
   // suppliers & payables, stock/GRN, dashboard) — payment controls (8-digit
   // confirmation numbers) keep cheques/transfers owner-verifiable; manager →
   // everything except Settings; owner → all.
-  const CASHIER_TABS = ['pos', 'receivables', 'cash', 'overview', 'suppliers', 'stocktake']
+  const CASHIER_TABS = ['pos', 'receivables', 'cash', 'overview', 'suppliers', 'stocktake', 'imports']
   const canSee = (item: NavItem) => {
     if (item.id === '_signout') return true
     if (staffRole === 'cashier') return CASHIER_TABS.includes(item.id)

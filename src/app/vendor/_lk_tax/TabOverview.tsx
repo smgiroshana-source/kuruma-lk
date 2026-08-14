@@ -208,6 +208,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const secondary: Action[] = isCashier ? [] : [
     { icon: '➕', label: 'Add Product', tab: 'add' },
     { icon: '📦', label: 'Stock Count', tab: 'stocktake' },
+    { icon: '🚢', label: 'Import Shipment', tab: 'imports' },
     { icon: '🔀', label: 'Transfer Stock', tab: 'stocktake', sub: 'transfer' },
     { icon: '📝', label: 'Credit Note', tab: 'credit' },
     { icon: '📄', label: 'Daily Report', tab: 'reports' },

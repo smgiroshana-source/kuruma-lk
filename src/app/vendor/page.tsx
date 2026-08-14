@@ -30,10 +30,11 @@ import TabSupplierReturns from './_lk_tax/TabSupplierReturns'
 import TabWriteoffs from './_lk_tax/TabWriteoffs'
 import TabFleet from './_lk_tax/TabFleet'
 import TabStaff from './_lk_tax/TabStaff'
+import TabImports from './_lk_tax/TabImports'
 import TabCash from './_lk_tax/TabCash'
 import TabReports from './_lk_tax/TabReports'
 
-type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings'
+type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'imports' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
 const TYRE_WIDTHS  = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
@@ -738,7 +739,7 @@ export default function VendorDashboard() {
   // Safety net behind the sidebar role-gating: a cashier can only ever be on POS,
   // and a manager can't sit on the owner-only Settings tab (even via stale state).
   useEffect(() => {
-    if (staffRole === 'cashier' && !['pos', 'receivables', 'cash', 'overview', 'suppliers', 'stocktake'].includes(tab)) setTab('pos')
+    if (staffRole === 'cashier' && !['pos', 'receivables', 'cash', 'overview', 'suppliers', 'stocktake', 'imports'].includes(tab)) setTab('pos')
     else if (staffRole === 'manager' && tab === 'settings') setTab('pos')
   }, [staffRole, tab])
 
@@ -2244,6 +2245,11 @@ ${customerRows.map(c => `<tr>
         {/* REPORTS — WHEEL MART only */}
         {tab === 'reports' && isLkTax && (
           <TabReports vendor={vendor} showToast={showToast} reportTools={{ runDailyReport, runWhatsAppDaily, openPeriodReport, dailyReportLoading, periodReportLoading }} />
+        )}
+
+        {/* IMPORT SHIPMENTS — WHEEL MART only (Cusdec + import VAT) */}
+        {tab === 'imports' && isLkTax && (
+          <TabImports showToast={showToast} />
         )}
 
         {/* STAFF / HR — WHEEL MART only; owner + manager (server re-checks role) */}
