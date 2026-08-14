@@ -6,10 +6,13 @@
 -- issued to US (goods returned to a local supplier) with "Issued By Me = No".
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- Schedule 02: supplier invoice date + disallowed VAT on the GRN
+-- Schedule 02: supplier invoice date + disallowed VAT on the GRN.
+-- vat_claim_period parks a credit in a later month ('YYYY-MM'; null = claim in
+-- the month the goods were received) — the deferral workbench writes it.
 alter table public.grns
   add column if not exists supplier_invoice_date date,
-  add column if not exists disallowed_vat        integer not null default 0;
+  add column if not exists disallowed_vat        integer not null default 0,
+  add column if not exists vat_claim_period      text;
 
 -- Schedule 04 (Issued By Me = No): the credit note the supplier sent back
 alter table public.supplier_returns
