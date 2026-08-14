@@ -294,36 +294,77 @@ export async function GET(req: NextRequest) {
     // supplier_vat_registered is snapshotted at GRN creation time.
     // Older GRNs without the column are included (no filter) so historical data isn't lost —
     // they are flagged with a warning in the response.
+    //
+    // DEFERRAL (standard SL practice): a credit doesn't have to be claimed in
+    // the month of purchase. Claiming more input than output puts the company
+    // in a refund position, which is slow to recover, so businesses carry
+    // credits forward and claim them against a later month's output — within
+    // 12 months (local purchases) or 24 months (imports). Each GRN therefore
+    // carries the period it is CLAIMED in (vat_claim_period), defaulting to its
+    // own month. We fetch a wide window and bucket by that claim period.
+    const windowStart = new Date(new Date(fromTs).getTime() - 800 * 86400000).toISOString() // ~26 months back
     const { data: grns, error: grnsError } = await admin
       .from('grns')
-      .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, net_cost, input_vat, total_cost')
+      .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, net_cost, input_vat, total_cost, vat_claim_period, is_import')
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
-      .gte('received_at', fromTs)
+      .gte('received_at', windowStart)
       .lte('received_at', toTs)
       .order('received_at', { ascending: true })
       .order('created_at', { ascending: true })
 
     if (grnsError) return NextResponse.json({ error: grnsError.message }, { status: 500 })
 
-    const rows = (grns || []).map((g: any) => ({
-      grnNumber:             g.grn_number,
-      receivedAt:            g.received_at,
-      supplierName:          g.supplier_name || '—',
-      supplierTin:           g.supplier_tin  || null,
-      supplierVatRegistered: g.supplier_vat_registered ?? null,  // null = legacy GRN (pre-fix)
-      supplierInvoiceNo:     g.supplier_invoice_no || null,
-      netCost:               parseInt(g.net_cost   || 0),
-      inputVat:              parseInt(g.input_vat  || 0),
-      totalCost:             parseInt(g.total_cost || 0),
-      claimable:             g.supplier_vat_registered !== false,  // true for legacy + VAT-reg
-    }))
+    const fromMonth = from.slice(0, 7)
+    const toMonth = to.slice(0, 7)
+    const addMonths = (ym: string, n: number) => {
+      const [y, m] = ym.split('-').map(Number)
+      const d = new Date(y, m - 1 + n, 1)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    }
+    const nowMonth = colomboMonth(new Date().toISOString())
+    const shape = (g: any) => {
+      const originMonth = colomboMonth(g.received_at)
+      const claimPeriod = g.vat_claim_period || originMonth
+      // Deadline: 12 months for local purchases, 24 for imports
+      const expiryMonth = addMonths(originMonth, g.is_import ? 24 : 12)
+      const monthsLeft = (() => {
+        const [ey, em] = expiryMonth.split('-').map(Number)
+        const [ny, nm] = nowMonth.split('-').map(Number)
+        return (ey - ny) * 12 + (em - nm)
+      })()
+      return {
+        id: g.id,
+        grnNumber: g.grn_number,
+        receivedAt: g.received_at,
+        originMonth, claimPeriod, expiryMonth, monthsLeft,
+        isImport: g.is_import === true,
+        deferred: claimPeriod !== originMonth,
+        supplierName: g.supplier_name || '—',
+        supplierTin: g.supplier_tin || null,
+        supplierVatRegistered: g.supplier_vat_registered ?? null,  // null = legacy GRN (pre-fix)
+        supplierInvoiceNo: g.supplier_invoice_no || null,
+        netCost: parseInt(g.net_cost || 0),
+        inputVat: parseInt(g.input_vat || 0),
+        totalCost: parseInt(g.total_cost || 0),
+        claimable: g.supplier_vat_registered !== false,  // true for legacy + VAT-reg
+      }
+    }
+    const all = (grns || []).map(shape)
+    // Claimed in this period = assigned claim period falls inside it
+    const rows = all.filter(r => r.claimPeriod >= fromMonth && r.claimPeriod <= toMonth)
+    // Still unclaimed = pushed past this period (carried forward pool)
+    const carriedForward = all
+      .filter(r => r.claimable && r.claimPeriod > toMonth)
+      .sort((a, b) => a.monthsLeft - b.monthsLeft)
+    const carriedTotal = carriedForward.reduce((s, r) => s + r.inputVat, 0)
+    const expiringSoon = carriedForward.filter(r => r.monthsLeft <= 3)
 
     // Aggregate by month
     const monthMap: Record<string, { netCost: number; inputVat: number; totalCost: number; count: number }> = {}
     for (const r of rows) {
-      const monthKey = colomboMonth(r.receivedAt)
+      const monthKey = r.claimPeriod
       if (!monthMap[monthKey]) monthMap[monthKey] = { netCost: 0, inputVat: 0, totalCost: 0, count: 0 }
       monthMap[monthKey].netCost   += r.netCost
       monthMap[monthKey].inputVat  += r.inputVat
@@ -348,7 +389,10 @@ export async function GET(req: NextRequest) {
       nonClaimableVat:    nonClaimableRows.reduce((s, r) => s + r.inputVat, 0),
     }
 
-    return NextResponse.json({ rows, months, totals, entity: lkTaxEntities[0].name, filing_valid: !branch, branch })
+    return NextResponse.json({
+      rows, months, totals, entity: lkTaxEntities[0].name, filing_valid: !branch, branch,
+      carriedForward, carriedTotal, expiringSoonCount: expiringSoon.length,
+    })
   }
 
   // ── VAT Summary (Output − Input = Net Payable) ─────────────────────────────
@@ -396,20 +440,36 @@ export async function GET(req: NextRequest) {
     // valid tax invoices and the IRD will disallow the claim.
     // supplier_vat_registered=null means legacy GRN (created before the column existed) —
     // included with a conservative assumption; accountant should verify those manually.
+    // Input VAT is counted by the period it is CLAIMED in, not the purchase
+    // month — credits can be carried forward (12 months local / 24 imports) to
+    // avoid a refund position. Wide window, then bucket by claim period.
+    const sumWindowStart = new Date(new Date(fromTs).getTime() - 800 * 86400000).toISOString()
     const { data: grns } = await admin
       .from('grns')
-      .select('input_vat, supplier_vat_registered')
+      .select('input_vat, supplier_vat_registered, received_at, vat_claim_period, is_import')
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
-      .gte('received_at', fromTs)
+      .gte('received_at', sumWindowStart)
       .lte('received_at', toTs)
 
+    const sumFromMonth = from.slice(0, 7)
+    const sumToMonth = to.slice(0, 7)
+    const claimMonthOf = (g: any) => g.vat_claim_period || colomboMonth(g.received_at)
     const claimableGrns = (grns || []).filter((g: any) => g.supplier_vat_registered !== false)   // exclude known non-VAT suppliers
-    const inputVat = claimableGrns.reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+    const claimedThisPeriod = claimableGrns.filter((g: any) => {
+      const cm = claimMonthOf(g)
+      return cm >= sumFromMonth && cm <= sumToMonth
+    })
+    const inputVat = claimedThisPeriod.reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+    // Credits deliberately held back for a future month — shown so the figure
+    // can be topped up when output VAT is high enough to absorb them
+    const availableCarryForward = claimableGrns
+      .filter((g: any) => claimMonthOf(g) > sumToMonth)
+      .reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
     // Legacy GRNs (created before the VAT-registered snapshot existed) are included
     // in inputVat but flagged so the accountant can verify them manually.
-    const legacyCount = claimableGrns.filter((g: any) => g.supplier_vat_registered == null).length
+    const legacyCount = claimedThisPeriod.filter((g: any) => g.supplier_vat_registered == null).length
 
     const netPayable = outputVat - inputVat
 
@@ -418,6 +478,7 @@ export async function GET(req: NextRequest) {
       outputNetSales,
       outputTotal,
       inputVat,
+      availableCarryForward,
       legacyCount,
       netPayable,
       invoiceCount: validInvoices.length,
@@ -429,4 +490,63 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({ error: 'Unknown report type' }, { status: 400 })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST — move input VAT credits between periods (the deferral practice).
+// { action: 'set_claim_period', grnIds: string[], period: 'YYYY-MM' | null }
+// null restores a GRN to its own purchase month. Rejects a period beyond the
+// legal window (12 months local / 24 imports) so a credit can't be parked
+// until it expires.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  const vendor = await getVendor()
+  if (!vendor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!(vendor as any).canFileTax) {
+    return NextResponse.json({ error: 'Only the owner or a login with tax-filing access can move VAT credits' }, { status: 403 })
+  }
+
+  const body = await req.json().catch(() => ({}))
+  if (body.action !== 'set_claim_period') return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
+  const { grnIds, period } = body
+  if (!Array.isArray(grnIds) || grnIds.length === 0) return NextResponse.json({ error: 'grnIds required' }, { status: 400 })
+  if (period !== null && !/^\d{4}-\d{2}$/.test(String(period || ''))) {
+    return NextResponse.json({ error: 'period must be YYYY-MM or null' }, { status: 400 })
+  }
+
+  const admin = createAdminClient()
+  const { data: grns } = await admin
+    .from('grns')
+    .select('id, received_at, is_import, grn_number')
+    .eq('vendor_id', vendor.id)
+    .in('id', grnIds)
+  if (!grns || grns.length === 0) return NextResponse.json({ error: 'No matching GRNs' }, { status: 404 })
+
+  if (period) {
+    const addMonths = (ym: string, n: number) => {
+      const [y, m] = ym.split('-').map(Number)
+      const d = new Date(y, m - 1 + n, 1)
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    }
+    for (const g of grns) {
+      const originMonth = colomboMonth(g.received_at)
+      if (period < originMonth) {
+        return NextResponse.json({ error: `${g.grn_number}: a credit cannot be claimed before the purchase month (${originMonth})` }, { status: 400 })
+      }
+      const limit = addMonths(originMonth, g.is_import ? 24 : 12)
+      if (period > limit) {
+        return NextResponse.json({
+          error: `${g.grn_number}: ${period} is past the claim deadline (${limit}) — ${g.is_import ? 'imports: 24 months' : 'local purchases: 12 months'}`,
+        }, { status: 400 })
+      }
+    }
+  }
+
+  const { error } = await admin
+    .from('grns')
+    .update({ vat_claim_period: period })
+    .eq('vendor_id', vendor.id)
+    .in('id', grnIds)
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  return NextResponse.json({ ok: true, updated: grns.length, period })
 }

@@ -3884,7 +3884,27 @@ ${customerRows.map(c => `<tr>
 
                       {/* ── Input VAT Register results ── */}
                       {taxReportData && taxReportType === 'input_vat' && (() => {
-                        const { rows, months, totals, entity } = taxReportData
+                        const { rows, months, totals, entity, carriedForward = [], carriedTotal = 0, expiringSoonCount = 0 } = taxReportData
+                        // Move a credit to a later month (or back to its own month).
+                        // Standard SL practice: don't claim more input than output —
+                        // carry the excess forward (12 months local / 24 imports).
+                        const moveCredit = async (grnId: string, period: string | null) => {
+                          try {
+                            const r = await fetch('/api/vendor/tax-reports', {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ action: 'set_claim_period', grnIds: [grnId], period }),
+                            })
+                            const j = await r.json()
+                            if (!r.ok) throw new Error(j.error || 'Failed')
+                            showToast(period ? `Credit moved to ${period}` : 'Credit restored to its purchase month')
+                            runTaxReport()
+                          } catch (e: any) { showToast('⚠️ ' + e.message) }
+                        }
+                        const nextMonthOf = (ym: string) => {
+                          const [y, m] = ym.split('-').map(Number)
+                          const d = new Date(y, m, 1)
+                          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                        }
                         return (
                           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                             <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
@@ -3922,9 +3942,43 @@ ${customerRows.map(c => `<tr>
                                 </div>
                               </div>
                             )}
+                            {/* Credits held back for a later month */}
+                            {carriedForward.length > 0 && (
+                              <div className="px-5 py-3 border-b border-slate-100 bg-purple-50/50">
+                                <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                                  <p className="text-[11px] font-black text-purple-700 uppercase tracking-wide">
+                                    Carried forward — not claimed yet: Rs.{carriedTotal.toLocaleString()}
+                                  </p>
+                                  {expiringSoonCount > 0 && (
+                                    <span className="text-[10px] font-black text-red-600 bg-red-100 px-2 py-0.5 rounded-full">
+                                      ⚠️ {expiringSoonCount} expiring within 3 months
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                  {carriedForward.map((r: any) => (
+                                    <div key={r.id} className="flex items-center gap-2 text-xs bg-white rounded-lg px-3 py-1.5 border border-purple-100">
+                                      <span className="font-mono text-[10px] text-slate-500">{r.grnNumber}</span>
+                                      <span className="flex-1 truncate text-slate-600">{r.supplierName}{r.isImport && <span className="ml-1 text-[9px] font-black text-sky-600">IMPORT</span>}</span>
+                                      <span className="text-[10px] text-slate-400">bought {r.originMonth} · held for {r.claimPeriod}</span>
+                                      <span className={`text-[10px] font-bold ${r.monthsLeft <= 3 ? 'text-red-600' : 'text-slate-400'}`}>
+                                        {r.monthsLeft <= 0 ? 'EXPIRED' : `${r.monthsLeft}mo left`}
+                                      </span>
+                                      <span className="font-bold text-orange-600">Rs.{r.inputVat.toLocaleString()}</span>
+                                      <button onClick={() => moveCredit(r.id, taxReportTo.slice(0, 7))}
+                                        className="text-[10px] font-bold px-2 py-1 rounded bg-purple-600 text-white hover:bg-purple-700">
+                                        claim in {taxReportTo.slice(0, 7)}
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="text-[10px] text-purple-600 mt-2">Claim these against a month with enough output VAT. Deadline: 12 months from purchase for local, 24 for imports.</p>
+                              </div>
+                            )}
+
                             {/* Table */}
                             {rows.length === 0 ? (
-                              <div className="text-center py-10 text-slate-400 text-sm">No posted GRNs with input VAT for this period</div>
+                              <div className="text-center py-10 text-slate-400 text-sm">No input VAT claimed in this period{carriedForward.length > 0 ? ' — everything is carried forward' : ''}</div>
                             ) : (
                               <div className="overflow-x-auto">
                                 <table className="w-full text-xs">
@@ -3936,17 +3990,26 @@ ${customerRows.map(c => `<tr>
                                     <th className="px-3 py-2 text-right">Net Cost</th>
                                     <th className="px-3 py-2 text-right">Input VAT</th>
                                     <th className="px-3 py-2 text-right">Total Cost</th>
+                                    <th className="px-3 py-2 text-center">Claim</th>
                                   </tr></thead>
                                   <tbody>
                                     {rows.map((r: any, i: number) => (
                                       <tr key={i} className="border-t border-slate-100">
                                         <td className="px-3 py-2 font-mono text-[10px] text-slate-600">{r.grnNumber}</td>
                                         <td className="px-3 py-2 text-slate-500">{r.receivedAt}</td>
-                                        <td className="px-3 py-2 font-semibold">{r.supplierName}</td>
+                                        <td className="px-3 py-2 font-semibold">{r.supplierName}{r.isImport && <span className="ml-1 text-[9px] font-black text-sky-600">IMPORT</span>}</td>
                                         <td className="px-3 py-2 font-mono text-[10px] text-slate-400">{r.supplierInvoiceNo || '—'}</td>
                                         <td className="px-3 py-2 text-right text-slate-600">Rs.{r.netCost.toLocaleString()}</td>
                                         <td className="px-3 py-2 text-right font-semibold text-orange-600">Rs.{r.inputVat.toLocaleString()}</td>
                                         <td className="px-3 py-2 text-right font-bold">Rs.{r.totalCost.toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-center whitespace-nowrap">
+                                          {r.deferred && <span className="text-[9px] font-black text-purple-600 mr-1" title={`Purchased ${r.originMonth}`}>↷{r.originMonth}</span>}
+                                          <button onClick={() => moveCredit(r.id, nextMonthOf(r.claimPeriod))}
+                                            title={`Move this credit to ${nextMonthOf(r.claimPeriod)} — claimable until ${r.expiryMonth}`}
+                                            className="text-[10px] font-bold px-2 py-1 rounded border border-slate-200 text-slate-500 hover:border-purple-400 hover:text-purple-600">
+                                            defer →
+                                          </button>
+                                        </td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -3998,9 +4061,15 @@ ${customerRows.map(c => `<tr>
                               <div className="bg-slate-50 rounded-xl p-4">
                                 <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Input VAT (from posted GRNs)</p>
                                 <div className="flex justify-between text-sm">
-                                  <span className="text-slate-500">Input VAT paid on purchases</span>
+                                  <span className="text-slate-500">Input VAT claimed this period</span>
                                   <span className="font-bold text-green-700">Rs.{d.inputVat.toLocaleString()}</span>
                                 </div>
+                                {(d.availableCarryForward || 0) > 0 && (
+                                  <div className="flex justify-between text-xs mt-1.5 pt-1.5 border-t border-slate-200">
+                                    <span className="text-purple-600">Held back for later months</span>
+                                    <span className="font-bold text-purple-600">Rs.{d.availableCarryForward.toLocaleString()}</span>
+                                  </div>
+                                )}
                               </div>
                               {/* Net payable */}
                               <div className={`rounded-xl p-5 border-2 ${netPositive ? 'bg-red-50 border-red-200' : 'bg-blue-50 border-blue-200'}`}>
@@ -4009,6 +4078,19 @@ ${customerRows.map(c => `<tr>
                                   Rs.{Math.abs(d.netPayable).toLocaleString()}
                                 </p>
                                 <p className="text-[10px] text-slate-400 mt-1">Output Rs.{d.outputVat.toLocaleString()} − Input Rs.{d.inputVat.toLocaleString()}</p>
+                                {/* Refund positions are slow to recover in SL — the usual
+                                    practice is to carry the excess credit forward instead */}
+                                {!netPositive && (
+                                  <p className="text-[11px] text-blue-800 bg-blue-100 rounded-lg px-2.5 py-1.5 mt-2">
+                                    A credit position is hard to recover. Consider deferring Rs.{Math.abs(d.netPayable).toLocaleString()} of input VAT to a later month —
+                                    <button onClick={() => { setTaxReportType('input_vat'); setTaxReportData(null) }} className="font-bold underline ml-1">open the Input VAT register</button>
+                                  </p>
+                                )}
+                                {netPositive && (d.availableCarryForward || 0) > 0 && (
+                                  <p className="text-[11px] text-purple-800 bg-purple-100 rounded-lg px-2.5 py-1.5 mt-2">
+                                    Rs.{d.availableCarryForward.toLocaleString()} of held-back credit is available — claiming up to Rs.{Math.min(d.availableCarryForward, d.netPayable).toLocaleString()} of it would reduce this payment to zero.
+                                  </p>
+                                )}
                               </div>
                             </div>
                           </div>
