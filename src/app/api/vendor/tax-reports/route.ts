@@ -351,6 +351,51 @@ export async function GET(req: NextRequest) {
         claimable: g.supplier_vat_registered !== false,  // true for legacy + VAT-reg
       }
     }
+    // ── Import VAT (Schedule 03) — one row per Customs declaration ──
+    // Claimed by cusdec, never by item: a container holds thousands of parts
+    // and the VAT is levied on the declaration. 24-month claim window.
+    const { data: imports } = await admin
+      .from('import_vat_entries')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .gte('cusdec_date', windowStart.slice(0, 10))
+      .lte('cusdec_date', to)
+      .order('cusdec_date', { ascending: true })
+
+    const shapeImport = (im: any) => {
+      const originMonth = String(im.cusdec_date).slice(0, 7)
+      const claimPeriod = im.vat_claim_period || originMonth
+      const expiryMonth = addMonths(originMonth, 24)
+      const [ey, em] = expiryMonth.split('-').map(Number)
+      const [ny, nm] = nowMonth.split('-').map(Number)
+      const claimable = parseInt(im.vat_upfront || 0) + parseInt(im.vat_deferred || 0) - parseInt(im.disallowed_vat || 0)
+      return {
+        id: im.id, kind: 'import' as const,
+        cusdecNo: im.cusdec_no, cusdecDate: im.cusdec_date,
+        cusdecSerialId: im.cusdec_serial_id, cusdecRegDate: im.cusdec_reg_date,
+        cusdecOfficeId: im.cusdec_office_id,
+        vatDeferred: parseInt(im.vat_deferred || 0),
+        vatUpfront: parseInt(im.vat_upfront || 0),
+        disallowedVat: parseInt(im.disallowed_vat || 0),
+        inputVat: claimable,
+        supplier: im.supplier || null, reference: im.reference || null,
+        originMonth, claimPeriod, expiryMonth,
+        monthsLeft: (ey - ny) * 12 + (em - nm),
+        deferred: claimPeriod !== originMonth,
+      }
+    }
+    const allImports = (imports || []).map(shapeImport)
+    const importRows = allImports.filter(r => r.claimPeriod >= fromMonth && r.claimPeriod <= toMonth)
+    const importCarried = allImports.filter(r => r.claimPeriod > toMonth).sort((a, b) => a.monthsLeft - b.monthsLeft)
+    const importTotals = {
+      vatUpfront: importRows.reduce((s, r) => s + r.vatUpfront, 0),
+      vatDeferred: importRows.reduce((s, r) => s + r.vatDeferred, 0),
+      disallowed: importRows.reduce((s, r) => s + r.disallowedVat, 0),
+      claimable: importRows.reduce((s, r) => s + r.inputVat, 0),
+      count: importRows.length,
+      carried: importCarried.reduce((s, r) => s + r.inputVat, 0),
+    }
+
     const all = (grns || []).map(shape)
     // Claimed in this period = assigned claim period falls inside it
     const rows = all.filter(r => r.claimPeriod >= fromMonth && r.claimPeriod <= toMonth)
@@ -392,6 +437,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       rows, months, totals, entity: lkTaxEntities[0].name, filing_valid: !branch, branch,
       carriedForward, carriedTotal, expiringSoonCount: expiringSoon.length,
+      importRows, importCarried, importTotals,
+      grandTotalInputVat: totals.inputVat + importTotals.claimable,
     })
   }
 
@@ -461,12 +508,30 @@ export async function GET(req: NextRequest) {
       const cm = claimMonthOf(g)
       return cm >= sumFromMonth && cm <= sumToMonth
     })
-    const inputVat = claimedThisPeriod.reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+    const inputVatLocal = claimedThisPeriod.reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+
+    // Import VAT (Schedule 03) claimed in this period
+    const { data: sumImports } = await admin
+      .from('import_vat_entries')
+      .select('vat_upfront, vat_deferred, disallowed_vat, cusdec_date, vat_claim_period')
+      .eq('vendor_id', vendor.id)
+      .gte('cusdec_date', sumWindowStart.slice(0, 10))
+      .lte('cusdec_date', to)
+    const importClaimMonth = (im: any) => im.vat_claim_period || String(im.cusdec_date).slice(0, 7)
+    const importClaimable = (im: any) => parseInt(im.vat_upfront || 0) + parseInt(im.vat_deferred || 0) - parseInt(im.disallowed_vat || 0)
+    const inputVatImport = (sumImports || [])
+      .filter((im: any) => { const cm = importClaimMonth(im); return cm >= sumFromMonth && cm <= sumToMonth })
+      .reduce((s: number, im: any) => s + importClaimable(im), 0)
+    const importCarryForward = (sumImports || [])
+      .filter((im: any) => importClaimMonth(im) > sumToMonth)
+      .reduce((s: number, im: any) => s + importClaimable(im), 0)
+
+    const inputVat = inputVatLocal + inputVatImport
     // Credits deliberately held back for a future month — shown so the figure
     // can be topped up when output VAT is high enough to absorb them
     const availableCarryForward = claimableGrns
       .filter((g: any) => claimMonthOf(g) > sumToMonth)
-      .reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+      .reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0) + importCarryForward
     // Legacy GRNs (created before the VAT-registered snapshot existed) are included
     // in inputVat but flagged so the accountant can verify them manually.
     const legacyCount = claimedThisPeriod.filter((g: any) => g.supplier_vat_registered == null).length
@@ -478,6 +543,8 @@ export async function GET(req: NextRequest) {
       outputNetSales,
       outputTotal,
       inputVat,
+      inputVatLocal,
+      inputVatImport,
       availableCarryForward,
       legacyCount,
       netPayable,
@@ -507,6 +574,63 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}))
+  const admin0 = createAdminClient()
+
+  // ── Import VAT (Schedule 03) entries ──────────────────────────────────────
+  if (body.action === 'add_import_vat') {
+    // Accepts one entry or many (the IRD Schedule 03 CSV parsed client-side)
+    const entries = Array.isArray(body.entries) ? body.entries : [body.entry]
+    const rows = entries.filter(Boolean).map((e: any) => ({
+      vendor_id: vendor.id,
+      cusdec_no: String(e.cusdecNo || '').trim(),
+      cusdec_date: e.cusdecDate,
+      cusdec_serial_id: e.cusdecSerialId || null,
+      cusdec_reg_date: e.cusdecRegDate || null,
+      cusdec_office_id: e.cusdecOfficeId || null,
+      vat_deferred: Math.round(Number(e.vatDeferred) || 0),
+      vat_upfront: Math.round(Number(e.vatUpfront) || 0),
+      disallowed_vat: Math.round(Number(e.disallowedVat) || 0),
+      supplier: e.supplier?.trim() || null,
+      reference: e.reference?.trim() || null,
+      notes: e.notes?.trim() || null,
+      created_by: (vendor as any).email || null,
+    }))
+    const bad = rows.find((r: any) => !r.cusdec_no || !/^\d{4}-\d{2}-\d{2}$/.test(String(r.cusdec_date || '')))
+    if (bad) return NextResponse.json({ error: 'Every row needs a Cusdec number and a valid date' }, { status: 400 })
+    // Re-uploading the same schedule updates rather than duplicates
+    const { error } = await admin0.from('import_vat_entries').upsert(rows, { onConflict: 'vendor_id,cusdec_no,cusdec_date' })
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ ok: true, saved: rows.length })
+  }
+
+  if (body.action === 'delete_import_vat') {
+    if (!body.id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+    const { error } = await admin0.from('import_vat_entries').delete().eq('id', body.id).eq('vendor_id', vendor.id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ ok: true })
+  }
+
+  if (body.action === 'set_import_claim_period') {
+    const { id, period } = body
+    if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+    if (period !== null && !/^\d{4}-\d{2}$/.test(String(period || ''))) {
+      return NextResponse.json({ error: 'period must be YYYY-MM or null' }, { status: 400 })
+    }
+    const { data: im } = await admin0.from('import_vat_entries').select('cusdec_date, cusdec_no').eq('id', id).eq('vendor_id', vendor.id).single()
+    if (!im) return NextResponse.json({ error: 'Entry not found' }, { status: 404 })
+    if (period) {
+      const originMonth = String(im.cusdec_date).slice(0, 7)
+      const [y, m] = originMonth.split('-').map(Number)
+      const lim = new Date(y, m - 1 + 24, 1)
+      const limit = `${lim.getFullYear()}-${String(lim.getMonth() + 1).padStart(2, '0')}`
+      if (period < originMonth) return NextResponse.json({ error: `Cannot claim before the Cusdec month (${originMonth})` }, { status: 400 })
+      if (period > limit) return NextResponse.json({ error: `${im.cusdec_no}: past the 24-month import deadline (${limit})` }, { status: 400 })
+    }
+    const { error } = await admin0.from('import_vat_entries').update({ vat_claim_period: period }).eq('id', id).eq('vendor_id', vendor.id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ ok: true })
+  }
+
   if (body.action !== 'set_claim_period') return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
   const { grnIds, period } = body
   if (!Array.isArray(grnIds) || grnIds.length === 0) return NextResponse.json({ error: 'grnIds required' }, { status: 400 })

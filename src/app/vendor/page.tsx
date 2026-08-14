@@ -3905,6 +3905,56 @@ ${customerRows.map(c => `<tr>
                           const d = new Date(y, m, 1)
                           return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
                         }
+                        const importRows = taxReportData.importRows || []
+                        const importCarried = taxReportData.importCarried || []
+                        const importTotals = taxReportData.importTotals || { vatUpfront: 0, vatDeferred: 0, disallowed: 0, claimable: 0, count: 0, carried: 0 }
+                        const taxPost = async (payload: any, okMsg: string) => {
+                          try {
+                            const r = await fetch('/api/vendor/tax-reports', {
+                              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+                            })
+                            const j = await r.json()
+                            if (!r.ok) throw new Error(j.error || 'Failed')
+                            showToast(okMsg)
+                            runTaxReport()
+                          } catch (e: any) { showToast('WARN ' + e.message) }
+                        }
+                        const uploadSchedule03 = async (file: File) => {
+                          const text = await file.text()
+                          const lines = text.split(/\r?\n/).filter(l => l.trim())
+                          if (lines.length < 2) { showToast('That file has no rows'); return }
+                          const toIso = (d: string) => {
+                            const p = d.trim().split('/')
+                            if (p.length === 3) return `${p[2]}-${p[0].padStart(2, '0')}-${p[1].padStart(2, '0')}`
+                            return d.trim()
+                          }
+                          const num = (v: string) => Math.round(Number(String(v || '').replace(/[",\s]/g, '')) || 0)
+                          const entries = lines.slice(1).map(line => {
+                            const c = line.split(',')
+                            return {
+                              cusdecDate: toIso(c[1] || ''), cusdecNo: (c[2] || '').trim(),
+                              cusdecSerialId: (c[3] || '').trim(), cusdecRegDate: toIso(c[4] || ''),
+                              cusdecOfficeId: (c[5] || '').trim(),
+                              vatDeferred: num(c[6]), vatUpfront: num(c[7]), disallowedVat: num(c[8]),
+                            }
+                          }).filter(e => e.cusdecNo)
+                          if (entries.length === 0) { showToast('No Cusdec rows found - is this a Schedule 03 file?'); return }
+                          await taxPost({ action: 'add_import_vat', entries }, `${entries.length} Cusdec row(s) imported`)
+                        }
+                        const exportSchedule03 = () => {
+                          const head = 'Serial No,Cusdec Date,Cusdec No,Cusdec Serial ID,Cusdec Reg Date,Cusdec Office ID,VAT Deferred,VAT Upfront,Disallowed VAT'
+                          const mdy = (d: string) => { const p = String(d).split('-'); return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}/${p[0]}` : d }
+                          const body = importRows.map((r: any, i: number) => [
+                            i + 1, mdy(r.cusdecDate), r.cusdecNo, r.cusdecSerialId || '', mdy(r.cusdecRegDate || r.cusdecDate),
+                            r.cusdecOfficeId || '', r.vatDeferred.toFixed(2), r.vatUpfront, r.disallowedVat.toFixed(2),
+                          ].join(',')).join('\n')
+                          const blob = new Blob([head + '\n' + body + '\n'], { type: 'text/csv' })
+                          const a = document.createElement('a')
+                          a.href = URL.createObjectURL(blob)
+                          a.download = `VAT_SCHEDULE03_${taxReportFrom}_to_${taxReportTo}.csv`
+                          a.click()
+                          URL.revokeObjectURL(a.href)
+                        }
                         return (
                           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                             <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
@@ -3914,12 +3964,86 @@ ${customerRows.map(c => `<tr>
                               </div>
                               <span className="text-xs text-slate-400">{totals.count} GRN{totals.count !== 1 ? 's' : ''}</span>
                             </div>
+                            {/* ── Import VAT — IRD Schedule 03 (per Customs declaration) ── */}
+                            <div className="px-5 py-4 border-b border-slate-100 bg-sky-50/40">
+                              <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                                <div>
+                                  <p className="text-xs font-black text-sky-900">🚢 Import VAT — Schedule 03</p>
+                                  <p className="text-[11px] text-sky-700">Claimed per Customs declaration, never per item — a container&apos;s VAT needs no product costs. 24-month claim window.</p>
+                                </div>
+                                <div className="flex gap-2">
+                                  <label className="text-[11px] font-bold px-3 py-1.5 rounded-lg border border-sky-300 bg-white text-sky-700 hover:bg-sky-100 cursor-pointer">
+                                    ⬆ Upload IRD CSV
+                                    <input type="file" accept=".csv,text/csv" className="hidden"
+                                      onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) uploadSchedule03(f) }} />
+                                  </label>
+                                  {importRows.length > 0 && (
+                                    <button onClick={exportSchedule03} className="text-[11px] font-bold px-3 py-1.5 rounded-lg border border-sky-300 bg-white text-sky-700 hover:bg-sky-100">⬇ Export Schedule 03</button>
+                                  )}
+                                </div>
+                              </div>
+                              {importRows.length === 0 && importCarried.length === 0 ? (
+                                <p className="text-[11px] text-slate-400">No Cusdec entries in this period. Upload the Schedule 03 CSV from the IRD portal, or add one manually below.</p>
+                              ) : (
+                                <>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-[11px]">
+                                      <thead><tr className="text-slate-400 text-left">
+                                        <th className="py-1">Cusdec</th><th>Date</th><th>Office</th>
+                                        <th className="text-right">Upfront</th><th className="text-right">Deferred</th>
+                                        <th className="text-right">Disallowed</th><th className="text-right">Claimable</th><th></th>
+                                      </tr></thead>
+                                      <tbody>
+                                        {importRows.map((r: any) => (
+                                          <tr key={r.id} className="border-t border-sky-100">
+                                            <td className="py-1.5 font-mono font-bold">{r.cusdecNo}{r.deferred && <span className="ml-1 text-[9px] text-amber-600 font-black">MOVED</span>}</td>
+                                            <td>{r.cusdecDate}</td>
+                                            <td className="text-slate-400">{r.cusdecOfficeId || '—'}</td>
+                                            <td className="text-right font-mono">{r.vatUpfront.toLocaleString()}</td>
+                                            <td className="text-right font-mono text-slate-400">{r.vatDeferred.toLocaleString()}</td>
+                                            <td className="text-right font-mono text-slate-400">{r.disallowedVat.toLocaleString()}</td>
+                                            <td className="text-right font-mono font-black text-sky-700">{r.inputVat.toLocaleString()}</td>
+                                            <td className="text-right">
+                                              <button onClick={() => taxPost({ action: 'set_import_claim_period', id: r.id, period: nextMonthOf(r.claimPeriod) }, 'Moved to the next month')}
+                                                className="text-[10px] font-bold text-amber-600 hover:text-amber-700 px-1.5">→ next month</button>
+                                              <button onClick={() => taxPost({ action: 'delete_import_vat', id: r.id }, 'Cusdec entry removed')}
+                                                className="text-[10px] font-bold text-red-400 hover:text-red-600 px-1">✕</button>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  <div className="flex flex-wrap gap-4 mt-2 pt-2 border-t border-sky-200 text-[11px]">
+                                    <span className="text-sky-900">Import VAT claimable this period: <strong className="font-mono">Rs.{importTotals.claimable.toLocaleString()}</strong> ({importTotals.count} cusdec{importTotals.count !== 1 ? 's' : ''})</span>
+                                    {importTotals.carried > 0 && <span className="text-amber-700">Moved to later months: <strong className="font-mono">Rs.{importTotals.carried.toLocaleString()}</strong></span>}
+                                  </div>
+                                  {importCarried.length > 0 && (
+                                    <div className="mt-2">
+                                      <p className="text-[10px] font-black text-amber-700 uppercase mb-1">Waiting in later months</p>
+                                      {importCarried.map((r: any) => (
+                                        <div key={r.id} className="flex items-center justify-between text-[11px] py-0.5">
+                                          <span className="font-mono">{r.cusdecNo} · {r.cusdecDate} · claim in {r.claimPeriod}</span>
+                                          <span className="flex items-center gap-2">
+                                            <span className={r.monthsLeft <= 3 ? 'text-red-600 font-bold' : 'text-slate-400'}>{r.monthsLeft} month{r.monthsLeft !== 1 ? 's' : ''} left</span>
+                                            <span className="font-mono font-bold">Rs.{r.inputVat.toLocaleString()}</span>
+                                            <button onClick={() => taxPost({ action: 'set_import_claim_period', id: r.id, period: null }, 'Restored to its own month')}
+                                              className="text-[10px] font-bold text-sky-600">claim now</button>
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+
                             {/* Totals */}
                             <div className="grid grid-cols-3 gap-px bg-slate-100">
                               {[
-                                {l:'Net Cost (excl. VAT)', v: totals.netCost},
-                                {l:'Input VAT Paid', v: totals.inputVat, hi: true},
-                                {l:'Total Cost (incl. VAT)', v: totals.totalCost},
+                                {l:'Local Input VAT (GRNs)', v: totals.inputVat},
+                                {l:'Import VAT (Schedule 03)', v: importTotals.claimable},
+                                {l:'Total Input VAT Claimed', v: taxReportData.grandTotalInputVat ?? (totals.inputVat + importTotals.claimable), hi: true},
                               ].map(s => (
                                 <div key={s.l} className="bg-white px-4 py-3 text-center">
                                   <p className="text-[10px] font-bold text-slate-400 uppercase mb-0.5">{s.l}</p>
