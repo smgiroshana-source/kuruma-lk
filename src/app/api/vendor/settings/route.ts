@@ -44,6 +44,9 @@ export async function GET(req: NextRequest) {
     settings: settings || {},
     vendor,
     role: staff ? staff.role : 'owner',
+    // Tax filing: always the owner; a staff member only when delegated
+    canFileTax: staff ? staff.can_file_tax === true : true,
+    branchScope: staff ? (staff.branch_scope || 'shop') : 'both',
   })
 }
 

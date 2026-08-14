@@ -19,6 +19,13 @@ type ReturnRecord = {
   total_amount: number
   status: 'draft' | 'confirmed'
   created_at: string
+  // Credit note the SUPPLIER issued back to us — goes on VAT Schedule 04 with
+  // "Issued By Me = No" and reduces our input VAT in the month it is dated.
+  supplier_credit_note_no?: string | null
+  supplier_credit_note_date?: string | null
+  supplier_invoice_no?: string | null
+  supplier_invoice_date?: string | null
+  credit_vat?: number | null
 }
 
 type Supplier = {
@@ -86,6 +93,7 @@ export default function TabSupplierReturns({ vendor, showToast }: Props) {
   const [returns, setReturns] = useState<ReturnRecord[]>([])
   const [loadingReturns, setLoadingReturns] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [crnFor, setCrnFor] = useState<ReturnRecord | null>(null)
 
   // ── shared data ──────────────────────────────────────────────────────────────
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -365,6 +373,15 @@ export default function TabSupplierReturns({ vendor, showToast }: Props) {
       onNew={() => setView('new')}
       onConfirm={handleConfirm}
       onDelete={handleDelete}
+      onCreditNote={setCrnFor}
+      creditNoteModal={crnFor && (
+        <CreditNoteModal
+          ret={crnFor}
+          onClose={() => setCrnFor(null)}
+          onSaved={() => { setCrnFor(null); fetchReturns() }}
+          showToast={showToast}
+        />
+      )}
     />
   )
 }
@@ -380,6 +397,8 @@ function ReturnListView({
   onNew,
   onConfirm,
   onDelete,
+  onCreditNote,
+  creditNoteModal,
 }: {
   returns: ReturnRecord[]
   loading: boolean
@@ -388,6 +407,8 @@ function ReturnListView({
   onNew: () => void
   onConfirm: (r: ReturnRecord) => void
   onDelete: (r: ReturnRecord) => void
+  onCreditNote: (r: ReturnRecord) => void
+  creditNoteModal?: React.ReactNode
 }) {
   const filters: { label: string; value: StatusFilter }[] = [
     { label: 'All', value: 'all' },
@@ -446,6 +467,7 @@ function ReturnListView({
                   <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wide">Reason</th>
                   <th className="px-4 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wide">Total Amount</th>
                   <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wide">Supplier Credit Note</th>
                   <th className="px-4 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wide">Actions</th>
                 </tr>
               </thead>
@@ -466,6 +488,25 @@ function ReturnListView({
                       <span className="text-sm font-bold text-slate-800">{formatRs(ret.total_amount)}</span>
                     </td>
                     <td className="px-4 py-3 text-center">{statusBadge(ret.status)}</td>
+                    <td className="px-4 py-3">
+                      {ret.status !== 'confirmed' ? (
+                        <span className="text-xs text-slate-300">—</span>
+                      ) : ret.supplier_credit_note_no ? (
+                        <button onClick={() => onCreditNote(ret)} className="text-left group">
+                          <span className="font-mono text-xs font-bold text-emerald-700 group-hover:underline">{ret.supplier_credit_note_no}</span>
+                          <span className="block text-[10px] text-slate-400">
+                            {ret.supplier_credit_note_date} · VAT {formatRs(ret.credit_vat || 0)}
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => onCreditNote(ret)}
+                          className="px-2.5 py-1 rounded-lg border border-amber-300 bg-amber-50 text-[11px] font-bold text-amber-700 hover:bg-amber-100 transition-colors"
+                        >
+                          + Record credit note
+                        </button>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       {ret.status === 'draft' && (
                         <div className="flex items-center justify-end gap-1.5">
@@ -494,6 +535,8 @@ function ReturnListView({
           </div>
         </div>
       )}
+
+      {creditNoteModal}
     </div>
   )
 }
@@ -786,6 +829,121 @@ function NewReturnView({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Supplier credit note — the note the SUPPLIER sends back for returned goods.
+// It belongs on VAT Schedule 04 as "Issued By Me = No" and reduces our input
+// VAT in the month the note is dated, so both number and date are required.
+// ─────────────────────────────────────────────────────────────────────────────
+function CreditNoteModal({
+  ret, onClose, onSaved, showToast,
+}: {
+  ret: ReturnRecord
+  onClose: () => void
+  onSaved: () => void
+  showToast: (m: string) => void
+}) {
+  const [noteNo, setNoteNo] = useState(ret.supplier_credit_note_no || '')
+  const [noteDate, setNoteDate] = useState(ret.supplier_credit_note_date || todayStr())
+  const [invNo, setInvNo] = useState(ret.supplier_invoice_no || '')
+  const [invDate, setInvDate] = useState(ret.supplier_invoice_date || '')
+  // Suggest the VAT on the returned value at the standard rate; the supplier's
+  // note is the authority, so it stays editable.
+  const suggested = Math.round(Number(ret.total_amount || 0) * 0.18)
+  const [vat, setVat] = useState(String(ret.credit_vat ?? suggested))
+  const [saving, setSaving] = useState(false)
+
+  async function save(clear = false) {
+    if (!clear) {
+      if (!noteNo.trim()) { showToast('⚠️ Credit note number required'); return }
+      if (!noteDate) { showToast('⚠️ Credit note date required'); return }
+    }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/vendor/supplier-returns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_credit_note',
+          returnId: ret.id,
+          credit_note_no: clear ? '' : noteNo.trim(),
+          credit_note_date: noteDate,
+          invoice_no: invNo.trim() || null,
+          invoice_date: invDate || null,
+          credit_vat: Math.round(Number(vat) || 0),
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error || 'Failed to save')
+      showToast(clear ? 'Credit note removed' : `✅ Credit note ${noteNo.trim()} recorded`)
+      onSaved()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-black text-slate-900">Supplier credit note</h3>
+        <p className="text-xs text-slate-500 mt-0.5 mb-4">
+          {ret.return_no} · {ret.supplier_name} · goods returned {formatRs(ret.total_amount)}
+        </p>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Credit note no. *</label>
+              <input value={noteNo} onChange={e => setNoteNo(e.target.value)} placeholder="Supplier's number"
+                className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Date on note *</label>
+              <input type="date" value={noteDate} onChange={e => setNoteDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">VAT credited (Rs.)</label>
+            <input type="number" value={vat} onChange={e => setVat(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono font-bold outline-none focus:border-orange-400" />
+            <p className="text-[10px] text-slate-400 mt-1">
+              18% of the returned value is {formatRs(suggested)} — change it to match the supplier&apos;s note exactly.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Original invoice no.</label>
+              <input value={invNo} onChange={e => setInvNo(e.target.value)} placeholder="Supplier's invoice"
+                className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">Original invoice date</label>
+              <input type="date" value={invDate} onChange={e => setInvDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+            </div>
+          </div>
+          <p className="text-[10px] text-slate-400">
+            Schedule 04 lists the invoice the credit note reverses — fill these in if the note names them.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
+          {ret.supplier_credit_note_no && (
+            <button onClick={() => save(true)} disabled={saving}
+              className="px-4 py-2 rounded-lg border-2 border-red-200 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">Remove</button>
+          )}
+          <button onClick={() => save(false)} disabled={saving}
+            className="flex-1 px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save credit note'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

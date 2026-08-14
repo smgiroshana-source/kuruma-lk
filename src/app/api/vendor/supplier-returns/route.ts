@@ -259,6 +259,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // ── RECORD SUPPLIER CREDIT NOTE ───────────────────────────────────────────
+  // When we return goods to a local VAT-registered supplier they send back a
+  // credit note. It has to appear on VAT Schedule 04 with "Issued By Me = No"
+  // and it reduces our input VAT in the month the note is dated.
+  if (action === 'set_credit_note') {
+    const { returnId, credit_note_no, credit_note_date, invoice_no, invoice_date, credit_vat } =
+      body as { returnId: string; credit_note_no: string; credit_note_date: string; invoice_no?: string; invoice_date?: string; credit_vat: number }
+    if (!returnId) return NextResponse.json({ error: 'returnId required' }, { status: 400 })
+
+    const { data: ret } = await admin
+      .from('supplier_returns')
+      .select('id, status, total_amount')
+      .eq('id', returnId).eq('vendor_id', vendor.id).single()
+    if (!ret) return NextResponse.json({ error: 'Supplier return not found' }, { status: 404 })
+
+    // Clearing the note (supplier never sent one / entered by mistake)
+    if (!credit_note_no) {
+      const { error } = await admin.from('supplier_returns')
+        .update({ supplier_credit_note_no: null, supplier_credit_note_date: null, credit_vat: 0 })
+        .eq('id', returnId).eq('vendor_id', vendor.id)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      return NextResponse.json({ ok: true, cleared: true })
+    }
+
+    if (ret.status !== 'confirmed') return NextResponse.json({ error: 'Confirm the return before recording the supplier credit note' }, { status: 400 })
+    if (!credit_note_date) return NextResponse.json({ error: 'Credit note date required' }, { status: 400 })
+    const vat = Math.round(Number(credit_vat) || 0)
+    if (vat < 0) return NextResponse.json({ error: 'VAT credited cannot be negative' }, { status: 400 })
+    // The VAT on a credit note can never exceed the VAT on what was returned
+    if (vat > Math.round(Number(ret.total_amount || 0))) {
+      return NextResponse.json({ error: 'VAT credited is larger than the value of the returned goods — check the note' }, { status: 400 })
+    }
+
+    const { error } = await admin.from('supplier_returns').update({
+      supplier_credit_note_no:   String(credit_note_no).trim(),
+      supplier_credit_note_date: credit_note_date,
+      supplier_invoice_no:       invoice_no ? String(invoice_no).trim() : null,
+      supplier_invoice_date:     invoice_date || null,
+      credit_vat:                vat,
+    }).eq('id', returnId).eq('vendor_id', vendor.id)
+    if (error) {
+      if (String(error.message).includes('supplier_returns_crn_uniq')) {
+        return NextResponse.json({ error: 'That credit note number is already recorded for this supplier' }, { status: 400 })
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    return NextResponse.json({ ok: true })
+  }
+
   // ── DELETE ────────────────────────────────────────────────────────────────
   if (action === 'delete') {
     const { returnId } = body as { returnId: string }

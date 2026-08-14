@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   // ── CREATE (or update draft) ──────────────────────────────────────────────
   if (action === 'create_grn') {
-    const { supplierId, supplierName, supplierInvoiceNo, receivedAt, notes, items } = body
+    const { supplierId, supplierName, supplierInvoiceNo, supplierInvoiceDate, receivedAt, notes, items } = body
     // items: [{ productId, productName, productSku, quantity, unitCost, vatRate }]
 
     // Snapshot supplier TIN + VAT status at the time of receiving
@@ -116,6 +116,8 @@ export async function POST(req: NextRequest) {
       supplier_vat_registered: supplierVatRegistered,
       grn_number:            grnNumber,
       supplier_invoice_no:   supplierInvoiceNo || null,
+      // VAT Schedule 02 lists the SUPPLIER's invoice date, not our receipt date
+      supplier_invoice_date: supplierInvoiceDate || null,
       received_at:         receivedAt || new Date().toISOString().slice(0, 10),
       notes:               notes || null,
       status:              'draft',

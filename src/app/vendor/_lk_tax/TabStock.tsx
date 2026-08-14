@@ -89,7 +89,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
   // GRN state
   const [suppliers, setSuppliers] = useState<any[]>([])
-  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', receivedAt: colomboToday(), notes: '' })
+  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '' })
   const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any }>>([])
   const [grnCsvPreview, setGrnCsvPreview] = useState<Array<{ matched: boolean; grnItem: any }> | null>(null)
   const [grnCsvFileName, setGrnCsvFileName] = useState('')
@@ -173,7 +173,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       const j = await r.json()
       if (r.ok) {
         showToast(`✅ ${j.grnNumber} saved as draft`)
-        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', receivedAt: colomboToday(), notes: '' })
+        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '' })
         setGrnProductSearch(''); setGrnCsvPreview(null); setGrnCsvFileName('')
         fetchGrnList(); onDataChanged(); setStockMainView('history')
       } else showToast('⚠️ ' + j.error)
@@ -825,6 +825,14 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier Invoice No.</label>
                   <input type="text" value={grnForm.supplierInvoiceNo} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceNo: e.target.value }))}
                     placeholder="e.g. INV-2026-1234" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                </div>
+                {/* Supplier invoice date — VAT Schedule 02 lists the supplier's
+                    invoice date, which isn't always the day we received goods */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier Invoice Date</label>
+                  <input type="date" value={grnForm.supplierInvoiceDate} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceDate: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                  <p className="text-[10px] text-slate-400 mt-1">Needed for the VAT input schedule — leave blank if same as received</p>
                 </div>
                 {/* Date */}
                 <div>

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "invoice-mock",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8931", "-d", "/private/tmp/claude-501/-Users-goshan-Desktop-MACFORCE-PVT-LTD-WHEEL-MART/4f40e6b2-fe34-4477-afd7-4e9f6711d5c5/scratchpad"],
+      "port": 8931
+    }
+  ]
+}

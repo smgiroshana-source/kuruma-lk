@@ -4,7 +4,7 @@ import { useState } from 'react'
 
 // 'customers' is a navigation alias: page.tsx maps it to the Sales tab's
 // Customers sub-view (there is no standalone customers tab).
-type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings' | 'customers' | 'imports'
+type LkTaxTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings' | 'customers' | 'imports' | 'tax'
 
 type NavItem = {
   id: LkTaxTab | '_signout' | '_coming'
@@ -74,6 +74,13 @@ const NAV_SECTIONS: NavSection[] = [
       { id: 'staff',   icon: '🧑‍🔧', label: 'Staff' },
     ],
   },
+  {
+    label: 'TAX',
+    items: [
+      // Owner-only unless the owner delegates filing (vendor_staff.can_file_tax)
+      { id: 'tax', icon: '🗂️', label: 'VAT Filing' },
+    ],
+  },
 ]
 
 const BOTTOM_ITEMS: NavItem[] = [
@@ -88,10 +95,11 @@ type Props = {
   onTabChange: (t: LkTaxTab) => void
   vendorName: string
   staffRole: string
+  canFileTax?: boolean
   onSignOut: () => void
 }
 
-export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRole, onSignOut }: Props) {
+export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRole, canFileTax, onSignOut }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const w = collapsed ? 56 : 220
 
@@ -110,6 +118,9 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
   const CASHIER_TABS = ['pos', 'receivables', 'cash', 'overview', 'suppliers', 'stocktake', 'imports']
   const canSee = (item: NavItem) => {
     if (item.id === '_signout') return true
+    // The IRD figures are the owner's — a manager/cashier sees VAT Filing only
+    // when the owner has switched on their filing authorisation.
+    if (item.id === 'tax') return staffRole === 'owner' || canFileTax === true
     if (staffRole === 'cashier') return CASHIER_TABS.includes(item.id)
     if (staffRole === 'manager') return item.id !== 'settings'
     return true

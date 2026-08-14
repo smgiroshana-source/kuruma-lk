@@ -31,10 +31,11 @@ import TabWriteoffs from './_lk_tax/TabWriteoffs'
 import TabFleet from './_lk_tax/TabFleet'
 import TabStaff from './_lk_tax/TabStaff'
 import TabImports from './_lk_tax/TabImports'
+import TabTax from './_lk_tax/TabTax'
 import TabCash from './_lk_tax/TabCash'
 import TabReports from './_lk_tax/TabReports'
 
-type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'imports' | 'settings'
+type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'imports' | 'tax' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
 const TYRE_WIDTHS  = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
@@ -735,13 +736,16 @@ export default function VendorDashboard() {
   }, [tab])
 
   const [staffRole, setStaffRole] = useState<string>('owner')
+  const [canFileTax, setCanFileTax] = useState(true)
 
   // Safety net behind the sidebar role-gating: a cashier can only ever be on POS,
   // and a manager can't sit on the owner-only Settings tab (even via stale state).
+  // VAT Filing is owner-only unless filing has been delegated.
   useEffect(() => {
+    if (tab === 'tax') { if (staffRole !== 'owner' && !canFileTax) setTab('pos'); return }
     if (staffRole === 'cashier' && !['pos', 'receivables', 'cash', 'overview', 'suppliers', 'stocktake', 'imports'].includes(tab)) setTab('pos')
     else if (staffRole === 'manager' && tab === 'settings') setTab('pos')
-  }, [staffRole, tab])
+  }, [staffRole, tab, canFileTax])
 
   async function fetchSettings() {
     try {
@@ -758,6 +762,7 @@ export default function VendorDashboard() {
           if (j.settings.invoice_mode === 'lk_tax') fetchInvoiceEntities()
         }
         if (j.role) { setStaffRole(j.role); if (j.role === 'cashier') setTab('pos') }
+        setCanFileTax(j.canFileTax === true)
       }
     } catch {}
   }
@@ -2140,6 +2145,7 @@ ${customerRows.map(c => `<tr>
           })}
           vendorName={vendor.name}
           staffRole={staffRole}
+          canFileTax={canFileTax}
           onSignOut={handleSignOut}
         />
       )}
@@ -2151,7 +2157,7 @@ ${customerRows.map(c => `<tr>
             <div className="flex items-center gap-2 text-sm">
               <span className="font-black text-orange-500 text-sm">WHEEL MART</span>
               <span className="text-slate-300 mx-0.5">/</span>
-              <span className="text-slate-700 font-semibold">{({'overview':'Dashboard','products':'Products','add':'Add Product','bulk':'Bulk Upload','pos':'POS','sales':'Sales & Invoices','credit':'Credit Notes','stocktake':'📦 Stock','receivables':receivablesShowAll ? 'Customers' : 'Receivables','staff':'Staff','cash':'Cash & Expenses','reports':'Reports','suppliers':'Suppliers','fleet':'Fleet & Vehicles','writeoffs':'Write-offs','supplier-returns':'Supplier Returns','settings':'Settings'} as Record<string,string>)[tab] ?? tab}</span>
+              <span className="text-slate-700 font-semibold">{({'overview':'Dashboard','products':'Products','add':'Add Product','bulk':'Bulk Upload','pos':'POS','sales':'Sales & Invoices','credit':'Credit Notes','stocktake':'📦 Stock','receivables':receivablesShowAll ? 'Customers' : 'Receivables','staff':'Staff','cash':'Cash & Expenses','reports':'Reports','suppliers':'Suppliers','fleet':'Fleet & Vehicles','writeoffs':'Write-offs','supplier-returns':'Supplier Returns','imports':'Import Shipments','tax':'VAT Filing','settings':'Settings'} as Record<string,string>)[tab] ?? tab}</span>
             </div>
             <div className="flex items-center gap-2">
               <button className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors text-base">🔔</button>
@@ -2250,6 +2256,15 @@ ${customerRows.map(c => `<tr>
         {/* IMPORT SHIPMENTS — WHEEL MART only (Cusdec + import VAT) */}
         {tab === 'imports' && isLkTax && (
           <TabImports showToast={showToast} />
+        )}
+
+        {/* VAT FILING CENTRE — WHEEL MART only; owner, or a delegated filer */}
+        {tab === 'tax' && isLkTax && (staffRole === 'owner' || canFileTax) && (
+          <TabTax
+            showToast={showToast}
+            vendorSettings={vendorSettings}
+            onOpenRegisters={() => { setSalesView('tax'); setTab('sales') }}
+          />
         )}
 
         {/* STAFF / HR — WHEEL MART only; owner + manager (server re-checks role) */}
