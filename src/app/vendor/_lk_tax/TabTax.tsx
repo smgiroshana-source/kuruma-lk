@@ -10,6 +10,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
+import TaxRegisters from './TaxRegisters'
 
 const rs = (n: number) => 'Rs.' + Math.round(n || 0).toLocaleString()
 const addMonths = (ym: string, n: number) => {
@@ -27,11 +28,13 @@ const csvCell = (v: any) => {
 // will confirm the wording; "Auto parts" is the working default.
 const DESCRIPTION = 'Auto parts'
 
-export default function TabTax({ showToast, vendorSettings, onOpenRegisters }: {
+export default function TabTax({ showToast, vendorSettings }: {
   showToast: (m: string) => void
   vendorSettings?: any
-  onOpenRegisters?: () => void
 }) {
+  // Two halves of the same job: close the period (Filing) and evidence it
+  // (Registers — VAT output/input registers, VAT summary, SSCL liability).
+  const [section, setSection] = useState<'filing' | 'registers'>('filing')
   const [period, setPeriod] = useState(colomboToday().slice(0, 7))
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -118,7 +121,38 @@ export default function TabTax({ showToast, vendorSettings, onOpenRegisters }: {
     (data?.schedule04 || []).map((r: any, i: number) =>
       [i + 1, r.tin, mdy(r.invoiceDate), r.invoiceNo, r.noteType, mdy(r.noteDate), r.noteNo, r.value, r.vatAmount, r.issuedByMe].join(',')))
 
-  if (loading) return <div className="p-8 text-center text-slate-400 text-sm">Loading period…</div>
+  const sectionTabs = (
+    <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1 w-fit">
+      {([{ v: 'filing', l: '🗂️ Filing' }, { v: 'registers', l: '📚 Registers & Reports' }] as const).map(t => (
+        <button key={t.v} onClick={() => setSection(t.v)}
+          className={`px-4 py-2 text-xs font-bold rounded-md transition ${section === t.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          {t.l}
+        </button>
+      ))}
+    </div>
+  )
+
+  if (section === 'registers') {
+    return (
+      <div>
+        <div className="mb-4">
+          <h1 className="text-2xl font-black text-slate-900">🗂️ Tax</h1>
+          <p className="text-sm text-slate-400 mt-0.5">
+            Whole company — parts shop and workshop together, one TIN {vendorSettings?.tax_id ? `(${vendorSettings.tax_id})` : ''}
+          </p>
+        </div>
+        {sectionTabs}
+        <TaxRegisters showToast={showToast} vendorSettings={vendorSettings} onGoToFiling={() => setSection('filing')} />
+      </div>
+    )
+  }
+
+  if (loading) return (
+    <div>
+      {sectionTabs}
+      <div className="p-8 text-center text-slate-400 text-sm">Loading period…</div>
+    </div>
+  )
 
   const row = (i: any, checkable: boolean) => (
     <div key={key(i)} className={`flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-xs ${selected.has(key(i)) ? 'bg-amber-50' : ''}`}>
@@ -149,6 +183,8 @@ export default function TabTax({ showToast, vendorSettings, onOpenRegisters }: {
         <input type="month" value={period} onChange={e => setPeriod(e.target.value)} max={colomboToday().slice(0, 7)}
           className="px-3 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold outline-none focus:border-orange-400" />
       </div>
+
+      {sectionTabs}
 
       {/* ── The number that matters ── */}
       <div className={`rounded-xl border-2 p-5 mb-4 ${inRefundPosition ? 'border-red-300 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
@@ -279,11 +315,9 @@ export default function TabTax({ showToast, vendorSettings, onOpenRegisters }: {
           ))}
         </div>
 
-        {onOpenRegisters && (
-          <button onClick={onOpenRegisters} className="mt-3 text-xs font-bold text-slate-500 hover:text-orange-600">
-            Registers &amp; printable reports (VAT register, input VAT, SSCL quarterly) →
-          </button>
-        )}
+        <button onClick={() => setSection('registers')} className="mt-3 text-xs font-bold text-slate-500 hover:text-orange-600">
+          Registers &amp; printable reports (VAT register, input VAT, SSCL liability) →
+        </button>
       </div>
     </div>
   )
