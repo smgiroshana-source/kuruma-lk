@@ -41,6 +41,7 @@ export default function TabImports({ showToast }: { showToast: (m: string) => vo
   const [saving, setSaving] = useState(false)
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const [exportMonth, setExportMonth] = useState(colomboToday().slice(0, 7))
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -204,15 +205,22 @@ export default function TabImports({ showToast }: { showToast: (m: string) => vo
             <div><label className="block text-[11px] font-bold text-slate-500 mb-1">Office ID</label>
               <input value={form.cusdecOfficeId} onChange={e => setForm({ ...form, cusdecOfficeId: e.target.value })} placeholder="HBIM1"
                 className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" /></div>
-            <div><label className="block text-[11px] font-bold text-slate-500 mb-1">VAT Upfront (Rs.) *</label>
-              <input type="number" inputMode="numeric" value={form.vatUpfront} onChange={e => setForm({ ...form, vatUpfront: e.target.value })} placeholder="2279395"
+            <div><label className="block text-[11px] font-bold text-slate-500 mb-1">Import VAT paid (Rs.) *</label>
+              <input type="number" inputMode="numeric" value={form.vatUpfront} onChange={e => setForm({ ...form, vatUpfront: e.target.value })} placeholder="0"
                 className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono font-bold outline-none focus:border-orange-400" /></div>
-            <div><label className="block text-[11px] font-bold text-slate-500 mb-1">VAT Deferred (Rs.)</label>
-              <input type="number" inputMode="numeric" value={form.vatDeferred} onChange={e => setForm({ ...form, vatDeferred: e.target.value })} placeholder="0"
-                className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" /></div>
-            <div><label className="block text-[11px] font-bold text-slate-500 mb-1">Disallowed VAT (Rs.)</label>
-              <input type="number" inputMode="numeric" value={form.disallowedVat} onChange={e => setForm({ ...form, disallowedVat: e.target.value })} placeholder="0"
-                className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" /></div>
+            {/* Deferment and disallowed VAT only apply to importers with a
+                deferment facility or exempt supplies — hidden by default so the
+                usual case is one amount in one box. */}
+            {showAdvanced && (
+              <>
+                <div><label className="block text-[11px] font-bold text-slate-500 mb-1">VAT Deferred (Rs.)</label>
+                  <input type="number" inputMode="numeric" value={form.vatDeferred} onChange={e => setForm({ ...form, vatDeferred: e.target.value })} placeholder="0"
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" /></div>
+                <div><label className="block text-[11px] font-bold text-slate-500 mb-1">Disallowed VAT (Rs.)</label>
+                  <input type="number" inputMode="numeric" value={form.disallowedVat} onChange={e => setForm({ ...form, disallowedVat: e.target.value })} placeholder="0"
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" /></div>
+              </>
+            )}
             <div><label className="block text-[11px] font-bold text-slate-500 mb-1">Supplier / shipper</label>
               <input value={form.supplier} onChange={e => setForm({ ...form, supplier: e.target.value })} placeholder="optional"
                 className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
@@ -223,8 +231,12 @@ export default function TabImports({ showToast }: { showToast: (m: string) => vo
               <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}
                 className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" /></div>
           </div>
+          <button onClick={() => setShowAdvanced(a => !a)}
+            className="mt-3 text-[11px] font-bold text-slate-400 hover:text-slate-600">
+            {showAdvanced ? '− Hide deferment / disallowed VAT' : '+ Deferment or disallowed VAT (rare)'}
+          </button>
           <button onClick={save} disabled={saving}
-            className="mt-4 px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black disabled:opacity-50">
+            className="mt-4 block px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black disabled:opacity-50">
             {saving ? 'Saving…' : '✓ Save Declaration'}
           </button>
         </div>
