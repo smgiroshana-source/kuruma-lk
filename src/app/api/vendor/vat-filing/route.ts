@@ -68,13 +68,14 @@ export async function GET(req: NextRequest) {
   if (entityIds.length === 0) return NextResponse.json({ error: 'No VAT entity configured' }, { status: 400 })
 
   // ── Schedule 01: output tax invoices issued in the period ──
-  const { data: salesRows } = await admin.from('sales')
+  const { data: salesRows, error: salesErr } = await admin.from('sales')
     .select('id, tax_serial, created_at, date_supply, customer_name, customer_tin, net_amount, vat_amount, total, payment_status, voided_at')
     .eq('vendor_id', caller.vendor.id)
     .eq('document_type', 'tax_invoice')
     .in('invoice_entity_id', entityIds)
     .gte('created_at', fromTs).lte('created_at', toTs)
     .order('tax_serial')
+  if (salesErr) return NextResponse.json({ error: 'Sales: ' + salesErr.message }, { status: 500 })
   const schedule01 = (salesRows || [])
     .filter((s: any) => !s.voided_at && s.payment_status !== 'voided' && s.tax_serial)
     .map((s: any) => ({
@@ -93,17 +94,19 @@ export async function GET(req: NextRequest) {
   // unless it was deliberately moved). Look back over the full claim window so
   // credits parked earlier still surface.
   const localWindowStart = addMonths(period, -12) + '-01'
-  const { data: grns } = await admin.from('grns')
+  const { data: grns, error: grnErr } = await admin.from('grns')
     .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, net_cost, input_vat, disallowed_vat, vat_claim_period')
     .eq('vendor_id', caller.vendor.id).eq('status', 'posted').gt('input_vat', 0)
     .gte('received_at', localWindowStart)
     .order('received_at')
+  if (grnErr) return NextResponse.json({ error: 'GRNs: ' + grnErr.message }, { status: 500 })
 
   const importWindowStart = addMonths(period, -24) + '-01'
-  const { data: imports } = await admin.from('import_vat_entries')
+  const { data: imports, error: impErr } = await admin.from('import_vat_entries')
     .select('*').eq('vendor_id', caller.vendor.id)
     .gte('cusdec_date', importWindowStart)
     .order('cusdec_date')
+  if (impErr) return NextResponse.json({ error: 'Import VAT: ' + impErr.message }, { status: 500 })
 
   const localItems = (grns || [])
     .filter((g: any) => g.supplier_vat_registered !== false)
@@ -150,11 +153,12 @@ export async function GET(req: NextRequest) {
   const inputVat = claimedNow.reduce((s, i) => s + i.vat, 0)
 
   // ── Schedule 04: credit notes issued to customers in the period ──
-  const { data: crns } = await admin.from('credit_notes')
-    .select('crn_no, created_at, original_serial, original_sale_id, customer_name, customer_tin, net_amount, vat_amount')
+  const { data: crns, error: crnErr } = await admin.from('credit_notes')
+    .select('credit_note_no, issued_at, original_serial, original_sale_id, customer_name, customer_tin, net_amount, vat_amount')
     .eq('vendor_id', caller.vendor.id)
-    .gte('created_at', fromTs).lte('created_at', toTs)
-    .order('crn_no')
+    .gte('issued_at', fromTs).lte('issued_at', toTs)
+    .order('credit_note_no')
+  if (crnErr) return NextResponse.json({ error: 'Credit notes: ' + crnErr.message }, { status: 500 })
   // The original invoice's date is needed for the schedule's "Invoice Date"
   const origIds = [...new Set((crns || []).map((c: any) => c.original_sale_id).filter(Boolean))]
   const origDates: Record<string, string> = {}
@@ -167,8 +171,8 @@ export async function GET(req: NextRequest) {
     invoiceDate: origDates[c.original_sale_id] || '',
     invoiceNo: c.original_serial || '',
     noteType: 'Credit',
-    noteDate: String(c.created_at).slice(0, 10),
-    noteNo: c.crn_no,
+    noteDate: String(c.issued_at).slice(0, 10),
+    noteNo: c.credit_note_no,
     value: parseInt(c.net_amount || 0),
     vatAmount: parseInt(c.vat_amount || 0),
     issuedByMe: 'Yes',
@@ -179,12 +183,13 @@ export async function GET(req: NextRequest) {
   // Same schedule, "Issued By Me = No" — they reduce input VAT, not output.
   // Only returns where the supplier's credit note has actually been received and
   // recorded belong on the return.
-  const { data: supRets } = await admin.from('supplier_returns')
+  const { data: supRets, error: supErr } = await admin.from('supplier_returns')
     .select('return_no, supplier_credit_note_no, supplier_credit_note_date, supplier_invoice_no, supplier_invoice_date, credit_vat, total_amount, supplier:suppliers(name, tin)')
     .eq('vendor_id', caller.vendor.id)
     .not('supplier_credit_note_no', 'is', null)
     .gte('supplier_credit_note_date', from).lte('supplier_credit_note_date', to)
     .order('supplier_credit_note_date')
+  if (supErr) return NextResponse.json({ error: 'Supplier credit notes: ' + supErr.message }, { status: 500 })
   const schedule04Supplier = (supRets || []).map((r: any) => ({
     tin: r.supplier?.tin || '',
     invoiceDate: r.supplier_invoice_date || '',
