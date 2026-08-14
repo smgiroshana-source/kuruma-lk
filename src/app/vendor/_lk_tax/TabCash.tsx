@@ -37,6 +37,11 @@ interface Expense {
   reference: string | null
   cash_session_id: string | null
   created_at: string
+  supplier_name?: string | null
+  supplier_tin?: string | null
+  supplier_invoice_no?: string | null
+  supplier_invoice_date?: string | null
+  input_vat?: number | null
 }
 
 type ExpenseCategory =
@@ -49,6 +54,11 @@ type ExpenseCategory =
   | 'bank_charges'
   | 'tax'
   | 'petty_cash'
+  | 'stationery'
+  | 'consumables'
+  | 'tools'
+  | 'insurance'
+  | 'advertising'
   | 'other'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,6 +91,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   bank_charges: 'Bank Charges',
   tax: 'Tax',
   petty_cash: 'Petty Cash',
+  stationery: 'Stationery',
+  consumables: 'Consumables',
+  tools: 'Tools & Equipment',
+  insurance: 'Insurance',
+  advertising: 'Advertising',
   other: 'Other',
 }
 
@@ -94,6 +109,11 @@ const CATEGORY_COLORS: Record<string, string> = {
   bank_charges: 'bg-slate-100 text-slate-700',
   tax: 'bg-red-100 text-red-700',
   petty_cash: 'bg-orange-100 text-orange-700',
+  stationery: 'bg-cyan-100 text-cyan-700',
+  consumables: 'bg-lime-100 text-lime-700',
+  tools: 'bg-fuchsia-100 text-fuchsia-700',
+  insurance: 'bg-sky-100 text-sky-700',
+  advertising: 'bg-pink-100 text-pink-700',
   other: 'bg-gray-100 text-gray-600',
 }
 
@@ -113,6 +133,13 @@ function blankExpenseForm() {
     amount: '' as number | '',
     payment_method: 'cash',
     reference: '',
+    // Input VAT on the bill — only claimable with a supplier tax invoice
+    claim_vat: false,
+    supplier_name: '',
+    supplier_tin: '',
+    supplier_invoice_no: '',
+    supplier_invoice_date: '',
+    input_vat: '' as number | '',
   }
 }
 
@@ -155,6 +182,9 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   const [loadingExp, setLoadingExp] = useState(false)
   const [showAddExpModal, setShowAddExpModal] = useState(false)
   const [expForm, setExpForm] = useState(blankExpenseForm())
+  // Attaching a tax invoice to an expense already recorded (the bill usually
+  // arrives after the money went out)
+  const [vatFor, setVatFor] = useState<Expense | null>(null)
   const [savingExp, setSavingExp] = useState(false)
 
   // Opening ≠ previous day's closing (reported, fixed only on confirmation)
@@ -518,6 +548,11 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           amount: Math.round(Number(expForm.amount)),
           payment_method: expForm.payment_method,
           reference: expForm.reference.trim() || null,
+          supplier_name:         expForm.claim_vat ? expForm.supplier_name.trim() : null,
+          supplier_tin:          expForm.claim_vat ? expForm.supplier_tin.trim() : null,
+          supplier_invoice_no:   expForm.claim_vat ? expForm.supplier_invoice_no.trim() : null,
+          supplier_invoice_date: expForm.claim_vat ? (expForm.supplier_invoice_date || expForm.expense_date) : null,
+          input_vat:             expForm.claim_vat ? Math.round(Number(expForm.input_vat) || 0) : 0,
           // A cash expense dated today belongs in the open till session so the
           // expected-cash count reconciles; non-cash / back-dated stay unlinked.
           cash_session_id:
@@ -1166,6 +1201,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wide">Description</th>
                       <th className="px-4 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wide">Amount</th>
                       <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wide">Method</th>
+                      <th className="px-4 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wide">Input VAT</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wide">Ref</th>
                       <th className="px-4 py-3"></th>
                     </tr>
@@ -1189,6 +1225,19 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                             <span className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full capitalize ${METHOD_BADGE[e.payment_method] ?? 'bg-gray-100 text-gray-600'}`}>
                               {e.payment_method}
                             </span>
+                          </td>
+                          <td className="px-4 py-3 text-right whitespace-nowrap">
+                            {e.input_vat ? (
+                              <button onClick={() => setVatFor(e)} className="group">
+                                <span className="text-xs font-bold text-violet-700 group-hover:underline">{formatRs(e.input_vat)}</span>
+                                <span className="block text-[10px] text-slate-400 font-mono">{e.supplier_invoice_no}</span>
+                              </button>
+                            ) : (
+                              <button onClick={() => setVatFor(e)}
+                                className="text-[10px] font-bold text-slate-400 hover:text-violet-600 border border-slate-200 hover:border-violet-300 rounded-lg px-2 py-1">
+                                + claim VAT
+                              </button>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-xs text-slate-400">
                             {e.reference ?? <span className="text-slate-200">—</span>}
@@ -1445,6 +1494,101 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                 onChange={e => setExpForm(p => ({ ...p, reference: e.target.value }))}
               />
             </div>
+
+            {/* ── Input VAT ──────────────────────────────────────────────────
+                Electricity, phone, rent, stationery, workshop consumables:
+                the VAT on these is claimable, but ONLY against a proper tax
+                invoice from a VAT-registered supplier. A till receipt is not
+                one, so this stays off until someone ticks it. */}
+            <div className={`rounded-xl border-2 p-3 ${expForm.claim_vat ? 'border-violet-300 bg-violet-50' : 'border-slate-200'}`}>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 mt-0.5 accent-violet-600"
+                  checked={expForm.claim_vat}
+                  onChange={e => setExpForm(p => ({
+                    ...p,
+                    claim_vat: e.target.checked,
+                    // Bills are quoted VAT-inclusive — pull the 18% back out
+                    input_vat: e.target.checked && p.amount !== ''
+                      ? Math.round(Number(p.amount) * 18 / 118)
+                      : '',
+                  }))}
+                />
+                <span>
+                  <span className="block text-xs font-bold text-slate-700">Claim input VAT on this</span>
+                  <span className="block text-[11px] text-slate-400">
+                    Only if you hold the supplier&apos;s tax invoice in the company&apos;s name
+                  </span>
+                </span>
+              </label>
+
+              {expForm.claim_vat && (
+                <div className="mt-3 grid grid-cols-2 gap-2.5">
+                  <div className="col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Supplier</label>
+                    <input
+                      type="text"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      placeholder="e.g. Ceylon Electricity Board"
+                      value={expForm.supplier_name}
+                      onChange={e => setExpForm(p => ({ ...p, supplier_name: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                      Supplier TIN <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={9}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      placeholder="9 digits"
+                      value={expForm.supplier_tin}
+                      onChange={e => setExpForm(p => ({ ...p, supplier_tin: e.target.value.replace(/\D/g, '') }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                      Tax invoice no. <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      placeholder="On the bill"
+                      value={expForm.supplier_invoice_no}
+                      onChange={e => setExpForm(p => ({ ...p, supplier_invoice_no: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Invoice date</label>
+                    <input
+                      type="date"
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      value={expForm.supplier_invoice_date}
+                      onChange={e => setExpForm(p => ({ ...p, supplier_invoice_date: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">VAT on the bill (Rs.)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-violet-400"
+                      value={expForm.input_vat}
+                      onChange={e => setExpForm(p => ({ ...p, input_vat: e.target.value === '' ? '' : Math.round(Number(e.target.value)) }))}
+                    />
+                  </div>
+                  <p className="col-span-2 text-[11px] text-violet-700">
+                    {expForm.amount !== '' && (
+                      <>Amount paid {formatRs(Number(expForm.amount))} — 18% of a VAT-inclusive bill is {formatRs(Math.round(Number(expForm.amount) * 18 / 118))}. </>
+                    )}
+                    Change it to match the invoice exactly; it goes on VAT Schedule 02.
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
@@ -1464,11 +1608,119 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           </div>
         </Modal>
       )}
+
+      {vatFor && (
+        <ExpenseVatModal
+          expense={vatFor}
+          onClose={() => setVatFor(null)}
+          onSaved={async () => { setVatFor(null); await fetchExpenses() }}
+          showToast={showToast}
+        />
+      )}
     </div>
   )
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
+
+// Attach the supplier's tax invoice to an expense already recorded, so its VAT
+// reaches Schedule 02. Kept separate from the Add Expense form because the bill
+// and the payment rarely happen on the same day.
+function ExpenseVatModal({
+  expense, onClose, onSaved, showToast,
+}: {
+  expense: Expense
+  onClose: () => void
+  onSaved: () => void
+  showToast: (m: string) => void
+}) {
+  const suggested = Math.round(expense.amount * 18 / 118)
+  const [name, setName] = useState(expense.supplier_name || '')
+  const [tin, setTin] = useState(expense.supplier_tin || '')
+  const [invNo, setInvNo] = useState(expense.supplier_invoice_no || '')
+  const [invDate, setInvDate] = useState(expense.supplier_invoice_date || expense.expense_date)
+  const [vat, setVat] = useState(String(expense.input_vat || suggested))
+  const [saving, setSaving] = useState(false)
+
+  async function save(clear = false) {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/vendor/expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_vat',
+          expenseId: expense.id,
+          supplier_name: clear ? null : name.trim(),
+          supplier_tin: clear ? null : tin.trim(),
+          supplier_invoice_no: clear ? null : invNo.trim(),
+          supplier_invoice_date: clear ? null : invDate,
+          input_vat: clear ? 0 : Math.round(Number(vat) || 0),
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Failed to save')
+      showToast(clear ? 'VAT claim removed' : 'Input VAT recorded')
+      onSaved()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setSaving(false)
+  }
+
+  return (
+    <Modal title="Input VAT on this expense" onClose={onClose}>
+      <p className="text-xs text-slate-500 -mt-2 mb-4">
+        {expense.description} · {formatRs(expense.amount)} paid on{' '}
+        {new Date(expense.expense_date + 'T00:00:00').toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })}
+      </p>
+
+      <div className="grid grid-cols-2 gap-2.5">
+        <div className="col-span-2">
+          <label className="block text-[11px] font-bold text-slate-500 mb-1">Supplier</label>
+          <input type="text" value={name} onChange={e => setName(e.target.value)}
+            placeholder="e.g. Sri Lanka Telecom"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 mb-1">Supplier TIN <span className="text-red-500">*</span></label>
+          <input type="text" inputMode="numeric" maxLength={9} value={tin}
+            onChange={e => setTin(e.target.value.replace(/\D/g, ''))} placeholder="9 digits"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 mb-1">Tax invoice no. <span className="text-red-500">*</span></label>
+          <input type="text" value={invNo} onChange={e => setInvNo(e.target.value)} placeholder="On the bill"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 mb-1">Invoice date</label>
+          <input type="date" value={invDate} onChange={e => setInvDate(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400" />
+        </div>
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 mb-1">VAT on the bill (Rs.)</label>
+          <input type="number" min={0} value={vat} onChange={e => setVat(e.target.value)}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-violet-400" />
+        </div>
+        <p className="col-span-2 text-[11px] text-slate-400">
+          18% of a VAT-inclusive {formatRs(expense.amount)} is {formatRs(suggested)} — match the invoice exactly.
+          The claim lands in the month of the invoice date and can be deferred from VAT Filing.
+        </p>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
+        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
+        {Boolean(expense.input_vat) && (
+          <button onClick={() => save(true)} disabled={saving}
+            className="px-4 py-2 rounded-lg border border-red-200 text-sm font-bold text-red-600 hover:bg-red-50 disabled:opacity-50">Remove claim</button>
+        )}
+        <button onClick={() => save(false)} disabled={saving}
+          className="px-5 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
 
 function SummaryCell({ label, value }: { label: string; value: string }) {
   return (

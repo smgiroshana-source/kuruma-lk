@@ -24,6 +24,15 @@ const csvCell = (v: any) => {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
+// Where an input credit came from: stock bought locally, an overhead or
+// consumable paid as an expense, or VAT paid at Customs on a shipment.
+const KIND_LABEL: Record<string, string> = { local: 'STOCK', expense: 'OVERHEAD', import: 'IMPORT' }
+const KIND_STYLE: Record<string, string> = {
+  local: 'bg-slate-100 text-slate-600',
+  expense: 'bg-violet-100 text-violet-700',
+  import: 'bg-sky-100 text-sky-700',
+}
+
 // What goes in the schedules' free-text Description column. Owner's accountant
 // will confirm the wording; "Auto parts" is the working default.
 const DESCRIPTION = 'Auto parts'
@@ -105,9 +114,10 @@ export default function TabTax({ showToast, vendorSettings }: {
     (data?.schedule01 || []).map((r: any, i: number) =>
       [i + 1, mdy(r.invoiceDate), r.taxInvoiceNo, r.purchaserTin, csvCell(r.purchaserName), DESCRIPTION, r.valueOfSupply, r.vatAmount].join(',')))
 
+  const localAndExpense = claimedNow.filter(i => i.kind === 'local' || i.kind === 'expense')
   const genSchedule02 = () => download('02',
     "Serial No,Invoice Date,Tax Invoice No,Supplier's TIN,Name of the Supplier,Description,Value of purchase,VAT Amount,Disallowed VAT Amount",
-    claimedNow.filter(i => i.kind === 'local').map((r: any, i: number) =>
+    localAndExpense.map((r: any, i: number) =>
       [i + 1, mdy(r.invoiceDate), csvCell(r.invoiceNo), r.partyTin, csvCell(r.partyName), DESCRIPTION, r.value, r.vat, r.disallowedVat || 0].join(',')))
 
   const genSchedule03 = () => download('03',
@@ -159,8 +169,8 @@ export default function TabTax({ showToast, vendorSettings }: {
       {checkable && (
         <input type="checkbox" checked={selected.has(key(i))} onChange={() => toggle(i)} className="w-4 h-4 accent-amber-500 shrink-0" />
       )}
-      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${i.kind === 'import' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
-        {i.kind === 'import' ? 'IMPORT' : 'LOCAL'}
+      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${KIND_STYLE[i.kind] || 'bg-slate-100 text-slate-600'}`}>
+        {KIND_LABEL[i.kind] || 'LOCAL'}
       </span>
       <span className="font-mono font-bold shrink-0">{i.ref}</span>
       <span className="flex-1 truncate text-slate-500">{i.partyName || i.invoiceNo || ''}</span>
@@ -207,7 +217,7 @@ export default function TabTax({ showToast, vendorSettings }: {
             <p>Output VAT: <span className="font-mono font-bold">{rs(t.outputVat)}</span> <span className="text-slate-400">({t.invoiceCount} invoices)</span></p>
             {t.crnVat > 0 && <p>Less credit notes: <span className="font-mono font-bold text-red-600">−{rs(t.crnVat)}</span></p>}
             <p>Input VAT claimed: <span className="font-mono font-bold">−{rs(t.inputVat)}</span></p>
-            <p className="text-[11px] text-slate-400">local {rs(t.inputLocal)} · imports {rs(t.inputImport)}</p>
+            <p className="text-[11px] text-slate-400">stock {rs(t.inputLocal)} · overheads {rs(t.inputExpense)} · imports {rs(t.inputImport)}</p>
             {t.supplierCrnVat > 0 && (
               <p className="text-[11px]">Less supplier credit notes: <span className="font-mono font-bold text-red-600">+{rs(t.supplierCrnVat)}</span></p>
             )}
@@ -269,8 +279,8 @@ export default function TabTax({ showToast, vendorSettings }: {
           </div>
           {parkedLater.map(i => (
             <div key={key(i)} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-xs">
-              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${i.kind === 'import' ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
-                {i.kind === 'import' ? 'IMPORT' : 'LOCAL'}
+              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${KIND_STYLE[i.kind] || 'bg-slate-100 text-slate-600'}`}>
+                {KIND_LABEL[i.kind] || 'LOCAL'}
               </span>
               <span className="font-mono font-bold">{i.ref}</span>
               <span className="flex-1 truncate text-slate-500">{i.partyName} · claim in {i.claimPeriod}</span>
@@ -286,12 +296,12 @@ export default function TabTax({ showToast, vendorSettings }: {
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <h3 className="font-bold text-sm text-slate-800 mb-1">📤 Schedules for the return</h3>
         {(() => {
-          const gaps = claimedNow.filter(i => i.kind === 'local' && i.missingInvoiceInfo)
+          const gaps = localAndExpense.filter(i => i.missingInvoiceInfo)
           if (gaps.length === 0) return null
           return (
             <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-2">
-              ⚠️ {gaps.length} local purchase{gaps.length !== 1 ? 's' : ''} missing the supplier&apos;s invoice number or date
-              ({gaps.slice(0, 4).map(g => g.ref).join(', ')}{gaps.length > 4 ? '…' : ''}) — Schedule 02 needs both. Fix them on the GRN before filing.
+              ⚠️ {gaps.length} local purchase{gaps.length !== 1 ? 's' : ''} missing the supplier&apos;s invoice details
+              ({gaps.slice(0, 4).map(g => g.ref).join(', ')}{gaps.length > 4 ? '…' : ''}) — Schedule 02 needs the invoice number, date and supplier TIN. Fix them before filing.
             </p>
           )
         })()}
@@ -302,7 +312,7 @@ export default function TabTax({ showToast, vendorSettings }: {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
           {[
             { n: '01', l: 'Output — sales', c: (data?.schedule01 || []).length, fn: genSchedule01 },
-            { n: '02', l: 'Input — local', c: claimedNow.filter(i => i.kind === 'local').length, fn: genSchedule02 },
+            { n: '02', l: 'Input — local & overheads', c: localAndExpense.length, fn: genSchedule02 },
             { n: '03', l: 'Input — imports', c: claimedNow.filter(i => i.kind === 'import').length, fn: genSchedule03 },
             { n: '04', l: 'Credit notes', c: (data?.schedule04 || []).length, fn: genSchedule04 },
           ].map(s => (

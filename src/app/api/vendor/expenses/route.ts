@@ -16,7 +16,10 @@ async function getVendor() {
 
 const VALID_CATEGORIES = [
   'rent', 'utilities', 'salaries', 'fuel', 'maintenance',
-  'repairs', 'bank_charges', 'tax', 'petty_cash', 'other',
+  'repairs', 'bank_charges', 'tax', 'petty_cash',
+  // Overheads that usually carry claimable input VAT
+  'stationery', 'consumables', 'tools', 'insurance', 'advertising',
+  'other',
 ] as const
 
 type ExpenseCategory = typeof VALID_CATEGORIES[number]
@@ -79,6 +82,13 @@ export async function POST(req: NextRequest) {
       payment_method,
       reference,
       cash_session_id,
+      // Input VAT on overheads/consumables — Schedule 02 needs the same
+      // details as a stock purchase, so they're validated together below.
+      supplier_name,
+      supplier_tin,
+      supplier_invoice_no,
+      supplier_invoice_date,
+      input_vat,
     } = body
 
     // Validate required fields
@@ -95,6 +105,22 @@ export async function POST(req: NextRequest) {
     }
     if (typeof amount !== 'number' || amount <= 0) {
       return NextResponse.json({ error: 'amount must be a positive integer (LKR)' }, { status: 400 })
+    }
+
+    // Input VAT is only claimable against a valid tax invoice from a
+    // VAT-registered supplier — no invoice number, no claim.
+    const claimVat = Math.round(Number(input_vat) || 0)
+    if (claimVat < 0) return NextResponse.json({ error: 'Input VAT cannot be negative' }, { status: 400 })
+    if (claimVat > 0) {
+      if (!supplier_invoice_no || !String(supplier_invoice_no).trim()) {
+        return NextResponse.json({ error: 'To claim input VAT, enter the supplier\'s tax invoice number' }, { status: 400 })
+      }
+      if (!supplier_tin || !/^\d{9}$/.test(String(supplier_tin).trim())) {
+        return NextResponse.json({ error: 'To claim input VAT, enter the supplier\'s 9-digit TIN' }, { status: 400 })
+      }
+      if (claimVat >= Math.round(amount)) {
+        return NextResponse.json({ error: 'Input VAT must be less than the amount paid' }, { status: 400 })
+      }
     }
 
     // If cash_session_id provided, verify it belongs to this vendor
@@ -122,6 +148,11 @@ export async function POST(req: NextRequest) {
         payment_method: payment_method || 'cash',
         reference: reference || null,
         cash_session_id: cash_session_id || null,
+        supplier_name:         supplier_name ? String(supplier_name).trim() : null,
+        supplier_tin:          claimVat > 0 ? String(supplier_tin).trim() : (supplier_tin || null),
+        supplier_invoice_no:   supplier_invoice_no ? String(supplier_invoice_no).trim() : null,
+        supplier_invoice_date: supplier_invoice_date || null,
+        input_vat:             claimVat,
         created_by: userId,
       })
       .select()
@@ -130,6 +161,44 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
     return NextResponse.json({ ok: true, expense })
+  }
+
+  // ── set_vat ───────────────────────────────────────────────────────────────────
+  // Attach (or correct) the tax-invoice details on an expense already recorded.
+  // The bill often turns up after the money went out, and a cashier paying the
+  // electricity has no reason to be typing TINs — the owner tidies it up later.
+  if (action === 'set_vat') {
+    const { expenseId, supplier_name, supplier_tin, supplier_invoice_no, supplier_invoice_date, input_vat } = body
+    if (!expenseId) return NextResponse.json({ error: 'expenseId required' }, { status: 400 })
+
+    const { data: expense } = await admin
+      .from('expenses').select('id, amount').eq('id', expenseId).eq('vendor_id', vendor.id).single()
+    if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
+
+    const claimVat = Math.round(Number(input_vat) || 0)
+    if (claimVat < 0) return NextResponse.json({ error: 'Input VAT cannot be negative' }, { status: 400 })
+    if (claimVat > 0) {
+      if (!supplier_invoice_no || !String(supplier_invoice_no).trim()) {
+        return NextResponse.json({ error: 'To claim input VAT, enter the supplier\'s tax invoice number' }, { status: 400 })
+      }
+      if (!supplier_tin || !/^\d{9}$/.test(String(supplier_tin).trim())) {
+        return NextResponse.json({ error: 'To claim input VAT, enter the supplier\'s 9-digit TIN' }, { status: 400 })
+      }
+      if (claimVat >= expense.amount) {
+        return NextResponse.json({ error: 'Input VAT must be less than the amount paid' }, { status: 400 })
+      }
+    }
+
+    const { error } = await admin.from('expenses').update({
+      supplier_name:         supplier_name ? String(supplier_name).trim() : null,
+      supplier_tin:          supplier_tin ? String(supplier_tin).trim() : null,
+      supplier_invoice_no:   supplier_invoice_no ? String(supplier_invoice_no).trim() : null,
+      supplier_invoice_date: supplier_invoice_date || null,
+      input_vat:             claimVat,
+    }).eq('id', expenseId).eq('vendor_id', vendor.id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+    return NextResponse.json({ ok: true })
   }
 
   // ── delete ────────────────────────────────────────────────────────────────────

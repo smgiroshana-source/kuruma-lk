@@ -101,6 +101,15 @@ export async function GET(req: NextRequest) {
     .order('received_at')
   if (grnErr) return NextResponse.json({ error: 'GRNs: ' + grnErr.message }, { status: 500 })
 
+  // Overheads and consumables with a supplier tax invoice — same 12-month
+  // window as any other local purchase.
+  const { data: expenses, error: expErr } = await admin.from('expenses')
+    .select('id, expense_date, category, description, supplier_name, supplier_tin, supplier_invoice_no, supplier_invoice_date, amount, input_vat, vat_claim_period')
+    .eq('vendor_id', caller.vendor.id).gt('input_vat', 0)
+    .gte('expense_date', localWindowStart)
+    .order('expense_date')
+  if (expErr) return NextResponse.json({ error: 'Expenses: ' + expErr.message }, { status: 500 })
+
   const importWindowStart = addMonths(period, -24) + '-01'
   const { data: imports, error: impErr } = await admin.from('import_vat_entries')
     .select('*').eq('vendor_id', caller.vendor.id)
@@ -147,7 +156,28 @@ export async function GET(req: NextRequest) {
     }
   })
 
-  const allInput = [...localItems, ...importItems]
+  const expenseItems = (expenses || []).map((e: any) => {
+    const invoiceDate = e.supplier_invoice_date || String(e.expense_date).slice(0, 10)
+    const originMonth = monthOf(invoiceDate)
+    const claimPeriod = e.vat_claim_period || originMonth
+    const deadline = addMonths(originMonth, 12)
+    const vat = parseInt(e.input_vat || 0)
+    return {
+      kind: 'expense' as const, id: e.id,
+      ref: e.supplier_invoice_no || e.description,
+      invoiceDate, invoiceNo: e.supplier_invoice_no || '',
+      missingInvoiceInfo: !e.supplier_invoice_no || !e.supplier_tin,
+      partyTin: e.supplier_tin || '', partyName: e.supplier_name || e.description || '',
+      // The amount paid is VAT-inclusive; Schedule 02 wants the value excluding it
+      value: Math.round(parseInt(e.amount || 0) - vat), vat,
+      disallowedVat: 0,
+      category: e.category,
+      originMonth, claimPeriod, deadline,
+      monthsLeft: monthsBetween(nowMonth, deadline),
+    }
+  })
+
+  const allInput = [...localItems, ...expenseItems, ...importItems]
   const claimedNow = allInput.filter(i => i.claimPeriod === period)
   const parkedLater = allInput.filter(i => i.claimPeriod > period).sort((a, b) => a.monthsLeft - b.monthsLeft)
   const inputVat = claimedNow.reduce((s, i) => s + i.vat, 0)
@@ -226,6 +256,7 @@ export async function GET(req: NextRequest) {
       outputNet, outputVat, crnVat, netOutputVat,
       inputVat, supplierCrnVat, netInputVat,
       inputLocal: claimedNow.filter(i => i.kind === 'local').reduce((s, i) => s + i.vat, 0),
+      inputExpense: claimedNow.filter(i => i.kind === 'expense').reduce((s, i) => s + i.vat, 0),
       inputImport: claimedNow.filter(i => i.kind === 'import').reduce((s, i) => s + i.vat, 0),
       netPayable,
       parkedTotal: parkedLater.reduce((s, i) => s + i.vat, 0),
@@ -256,6 +287,7 @@ export async function POST(req: NextRequest) {
     }
 
     const localIds = items.filter(i => i.kind === 'local').map(i => i.id)
+    const expenseIds = items.filter(i => i.kind === 'expense').map(i => i.id)
     const importIds = items.filter(i => i.kind === 'import').map(i => i.id)
     const problems: string[] = []
 
@@ -266,6 +298,17 @@ export async function POST(req: NextRequest) {
         const origin = monthOf(r.received_at)
         if (period && period < origin) problems.push(`${r.grn_number}: cannot claim before ${origin}`)
         else if (period && period > addMonths(origin, 12)) problems.push(`${r.grn_number}: past the 12-month deadline (${addMonths(origin, 12)})`)
+      }
+    }
+    if (expenseIds.length > 0) {
+      const { data: rows } = await admin.from('expenses')
+        .select('id, description, expense_date, supplier_invoice_date, supplier_invoice_no')
+        .eq('vendor_id', caller.vendor.id).in('id', expenseIds)
+      for (const r of (rows || [])) {
+        const label = r.supplier_invoice_no || r.description
+        const origin = monthOf(r.supplier_invoice_date || r.expense_date)
+        if (period && period < origin) problems.push(`${label}: cannot claim before ${origin}`)
+        else if (period && period > addMonths(origin, 12)) problems.push(`${label}: past the 12-month deadline (${addMonths(origin, 12)})`)
       }
     }
     if (importIds.length > 0) {
@@ -282,6 +325,11 @@ export async function POST(req: NextRequest) {
     if (localIds.length > 0) {
       const { error } = await admin.from('grns').update({ vat_claim_period: period })
         .eq('vendor_id', caller.vendor.id).in('id', localIds)
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    if (expenseIds.length > 0) {
+      const { error } = await admin.from('expenses').update({ vat_claim_period: period })
+        .eq('vendor_id', caller.vendor.id).in('id', expenseIds)
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     }
     if (importIds.length > 0) {
