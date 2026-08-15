@@ -44,22 +44,7 @@ interface Expense {
   input_vat?: number | null
 }
 
-type ExpenseCategory =
-  | 'rent'
-  | 'utilities'
-  | 'salaries'
-  | 'fuel'
-  | 'maintenance'
-  | 'repairs'
-  | 'bank_charges'
-  | 'tax'
-  | 'petty_cash'
-  | 'stationery'
-  | 'consumables'
-  | 'tools'
-  | 'insurance'
-  | 'advertising'
-  | 'other'
+type ExpenseCategory = string
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -81,40 +66,58 @@ function formatTime(isoStr: string | null): string {
   return new Date(isoStr).toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' })
 }
 
+// What the operator picks. Kept short and concrete — a shop assistant should
+// find the right one without reading the whole list.
+const CATEGORIES: { v: string; l: string; icon: string }[] = [
+  { v: 'grocery',     l: 'Grocery',     icon: '🛒' },
+  { v: 'rent',        l: 'Rental',      icon: '🏠' },
+  { v: 'electricity', l: 'Electricity', icon: '💡' },
+  { v: 'water',       l: 'Water',       icon: '💧' },
+  { v: 'stationery',  l: 'Stationery',  icon: '📄' },
+  { v: 'internet',    l: 'Internet',    icon: '🌐' },
+  { v: 'transport',   l: 'Transport',   icon: '🚚' },
+  { v: 'repairs',     l: 'Repair',      icon: '🔧' },
+  { v: 'maintenance', l: 'Maintenance', icon: '🧰' },
+  { v: 'other',       l: 'Other',       icon: '📌' },
+]
+
+// Display names — the picker list plus every legacy value already in the table
+// (and 'salaries', which Staff/HR writes; it is never chosen by hand).
 const CATEGORY_LABELS: Record<string, string> = {
-  rent: 'Rent',
+  ...Object.fromEntries(CATEGORIES.map(c => [c.v, c.l])),
+  salaries: 'Salaries & Wages',
   utilities: 'Utilities',
-  salaries: 'Salaries',
   fuel: 'Fuel',
-  maintenance: 'Maintenance',
-  repairs: 'Repairs',
   bank_charges: 'Bank Charges',
   tax: 'Tax',
   petty_cash: 'Petty Cash',
-  stationery: 'Stationery',
   consumables: 'Consumables',
   tools: 'Tools & Equipment',
   insurance: 'Insurance',
   advertising: 'Advertising',
-  other: 'Other',
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
+  grocery: 'bg-lime-100 text-lime-700',
   rent: 'bg-violet-100 text-violet-700',
-  utilities: 'bg-blue-100 text-blue-700',
-  salaries: 'bg-indigo-100 text-indigo-700',
-  fuel: 'bg-amber-100 text-amber-700',
-  maintenance: 'bg-teal-100 text-teal-700',
+  electricity: 'bg-amber-100 text-amber-700',
+  water: 'bg-sky-100 text-sky-700',
+  stationery: 'bg-cyan-100 text-cyan-700',
+  internet: 'bg-blue-100 text-blue-700',
+  transport: 'bg-orange-100 text-orange-700',
   repairs: 'bg-rose-100 text-rose-700',
+  maintenance: 'bg-teal-100 text-teal-700',
+  other: 'bg-gray-100 text-gray-600',
+  salaries: 'bg-indigo-100 text-indigo-700',
+  utilities: 'bg-blue-100 text-blue-700',
+  fuel: 'bg-amber-100 text-amber-700',
   bank_charges: 'bg-slate-100 text-slate-700',
   tax: 'bg-red-100 text-red-700',
   petty_cash: 'bg-orange-100 text-orange-700',
-  stationery: 'bg-cyan-100 text-cyan-700',
   consumables: 'bg-lime-100 text-lime-700',
   tools: 'bg-fuchsia-100 text-fuchsia-700',
   insurance: 'bg-sky-100 text-sky-700',
   advertising: 'bg-pink-100 text-pink-700',
-  other: 'bg-gray-100 text-gray-600',
 }
 
 const METHOD_BADGE: Record<string, string> = {
@@ -128,7 +131,7 @@ const METHOD_BADGE: Record<string, string> = {
 function blankExpenseForm() {
   return {
     expense_date: todayStr(),
-    category: 'other' as ExpenseCategory,
+    category: '' as ExpenseCategory,
     description: '',
     amount: '' as number | '',
     payment_method: 'cash',
@@ -461,8 +464,8 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // ── Expense actions ────────────────────────────────────────────────────────
 
   async function handleAddInlineExpense() {
-    if (!inlineExpForm.description.trim()) {
-      showToast('Description is required')
+    if (!inlineExpForm.category) {
+      showToast('Pick what the expense was for')
       return
     }
     if (inlineExpForm.amount === '' || Number(inlineExpForm.amount) <= 0) {
@@ -478,7 +481,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           action: 'create',
           expense_date: todayStr(),
           category: inlineExpForm.category,
-          description: inlineExpForm.description.trim(),
+          description: inlineExpForm.description.trim() || CATEGORY_LABELS[inlineExpForm.category] || 'Expense',
           amount: Math.round(Number(inlineExpForm.amount)),
           payment_method: inlineExpForm.payment_method,
           reference: inlineExpForm.reference.trim() || null,
@@ -527,13 +530,18 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   }
 
   async function handleAddExpense() {
-    if (!expForm.description.trim()) {
-      showToast('Description is required')
+    if (!expForm.category) {
+      showToast('Pick what the expense was for')
       return
     }
     if (expForm.amount === '' || Number(expForm.amount) <= 0) {
       showToast('Enter a valid amount')
       return
+    }
+    if (expForm.claim_vat) {
+      if (!/^\d{9}$/.test(expForm.supplier_tin.trim())) { showToast('Enter the shop\'s 9-digit VAT / TIN number'); return }
+      if (!expForm.supplier_invoice_no.trim()) { showToast('Enter the bill number'); return }
+      if (Number(expForm.input_vat) <= 0) { showToast('Enter the VAT shown on the bill'); return }
     }
     setSavingExp(true)
     try {
@@ -544,7 +552,8 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           action: 'create',
           expense_date: expForm.expense_date,
           category: expForm.category,
-          description: expForm.description.trim(),
+          // The note is optional — the category name says enough on its own
+          description: expForm.description.trim() || CATEGORY_LABELS[expForm.category] || 'Expense',
           amount: Math.round(Number(expForm.amount)),
           payment_method: expForm.payment_method,
           reference: expForm.reference.trim() || null,
@@ -783,8 +792,9 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                           value={inlineExpForm.category}
                           onChange={e => setInlineExpForm(p => ({ ...p, category: e.target.value as ExpenseCategory }))}
                         >
-                          {Object.entries(CATEGORY_LABELS).map(([v, l]) => (
-                            <option key={v} value={v}>{l}</option>
+                          <option value="">Choose…</option>
+                          {CATEGORIES.map(c => (
+                            <option key={c.v} value={c.v}>{c.icon} {c.l}</option>
                           ))}
                         </select>
                       </div>
@@ -1414,135 +1424,175 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       {/* ── ADD EXPENSE MODAL ────────────────────────────────────────────────── */}
       {showAddExpModal && (
         <Modal title="Add Expense" onClose={() => setShowAddExpModal(false)}>
-          <div className="flex flex-col gap-3">
-            {/* Date */}
+          <div className="flex flex-col gap-4">
+
+            {/* 1 — What was it for. Tiles, not a dropdown: one tap, and the
+                   operator sees every option at once instead of scrolling. */}
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Date</label>
-              <input
-                type="date"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                value={expForm.expense_date}
-                onChange={e => setExpForm(p => ({ ...p, expense_date: e.target.value }))}
-              />
+              <p className="text-xs font-bold text-slate-500 mb-2">1. What was it for?</p>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                {CATEGORIES.map(c => {
+                  const on = expForm.category === c.v
+                  return (
+                    <button
+                      key={c.v}
+                      onClick={() => setExpForm(p => ({ ...p, category: c.v }))}
+                      className={`flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl border-2 transition min-h-[62px] ${
+                        on ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-lg leading-none">{c.icon}</span>
+                      <span className="text-[11px] font-bold leading-tight text-center">{c.l}</span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
 
-            {/* Category */}
+            {/* 2 — How much. The one number that must be right, so it's big. */}
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Category</label>
-              <select
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
-                value={expForm.category}
-                onChange={e => setExpForm(p => ({ ...p, category: e.target.value as ExpenseCategory }))}
-              >
-                {Object.entries(CATEGORY_LABELS).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
-              </select>
+              <p className="text-xs font-bold text-slate-500 mb-2">2. How much?</p>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
+                <input
+                  type="number"
+                  min={1}
+                  autoFocus
+                  className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-orange-400"
+                  placeholder="0"
+                  value={expForm.amount}
+                  onChange={e => {
+                    const amt = e.target.value === '' ? '' : Math.round(Number(e.target.value))
+                    setExpForm(p => ({
+                      ...p,
+                      amount: amt,
+                      // Keep the suggested VAT in step while they type
+                      input_vat: p.claim_vat && amt !== '' ? Math.round(Number(amt) * 18 / 118) : p.input_vat,
+                    }))
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Description */}
+            {/* 3 — How it was paid. Buttons beat a select on a touchscreen. */}
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">
-                Description <span className="text-red-500">*</span>
-              </label>
+              <p className="text-xs font-bold text-slate-500 mb-2">3. Paid by</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { v: 'cash', l: 'Cash', icon: '💵' },
+                  { v: 'bank', l: 'Bank', icon: '🏦' },
+                  { v: 'card', l: 'Card', icon: '💳' },
+                ].map(m => {
+                  const on = expForm.payment_method === m.v
+                  return (
+                    <button
+                      key={m.v}
+                      onClick={() => setExpForm(p => ({ ...p, payment_method: m.v }))}
+                      className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 text-sm font-bold transition min-h-[44px] ${
+                        on ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                      }`}
+                    >
+                      <span>{m.icon}</span>{m.l}
+                    </button>
+                  )
+                })}
+              </div>
+              {expForm.payment_method !== 'cash' && (
+                <input
+                  type="text"
+                  className="mt-2 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  placeholder="Cheque no. / bank reference (8-digit confirmation no.)"
+                  value={expForm.reference}
+                  onChange={e => setExpForm(p => ({ ...p, reference: e.target.value }))}
+                />
+              )}
+            </div>
+
+            {/* 4 — A note. Optional: the category already says most of it. */}
+            <div>
+              <p className="text-xs font-bold text-slate-500 mb-2">4. Note <span className="font-normal text-slate-400">(optional)</span></p>
               <input
                 type="text"
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                placeholder="What was the expense for?"
+                placeholder={`e.g. ${expForm.category === 'grocery' ? 'tea and sugar for the office'
+                  : expForm.category === 'transport' ? 'three-wheeler to Customs'
+                  : expForm.category === 'electricity' ? 'CEB bill for July'
+                  : 'what exactly was bought'}`}
                 value={expForm.description}
                 onChange={e => setExpForm(p => ({ ...p, description: e.target.value }))}
               />
             </div>
 
-            {/* Amount */}
-            <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">
-                Amount (Rs.) <span className="text-red-500">*</span>
-              </label>
+            {/* Date — almost always today, so it stays out of the way */}
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-bold text-slate-500">Date</span>
               <input
-                type="number"
-                min={1}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                placeholder="0"
-                value={expForm.amount}
-                onChange={e => setExpForm(p => ({ ...p, amount: e.target.value === '' ? '' : Math.round(Number(e.target.value)) }))}
+                type="date"
+                max={todayStr()}
+                className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
+                value={expForm.expense_date}
+                onChange={e => setExpForm(p => ({ ...p, expense_date: e.target.value }))}
               />
+              {expForm.expense_date === todayStr()
+                ? <span className="text-slate-400">Today</span>
+                : <button onClick={() => setExpForm(p => ({ ...p, expense_date: todayStr() }))} className="text-orange-600 font-bold">back to today</button>}
             </div>
 
-            {/* Payment Method */}
-            <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Payment Method</label>
-              <select
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
-                value={expForm.payment_method}
-                onChange={e => setExpForm(p => ({ ...p, payment_method: e.target.value }))}
-              >
-                <option value="cash">Cash</option>
-                <option value="bank">Bank</option>
-                <option value="card">Card</option>
-              </select>
-            </div>
-
-            {/* Reference */}
-            <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">Reference (optional)</label>
-              <input
-                type="text"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                placeholder="Cheque no., bank ref…"
-                value={expForm.reference}
-                onChange={e => setExpForm(p => ({ ...p, reference: e.target.value }))}
-              />
-            </div>
-
-            {/* ── Input VAT ──────────────────────────────────────────────────
-                Electricity, phone, rent, stationery, workshop consumables:
-                the VAT on these is claimable, but ONLY against a proper tax
-                invoice from a VAT-registered supplier. A till receipt is not
-                one, so this stays off until someone ticks it. */}
+            {/* 5 — The VAT bill. Asked as a plain yes/no question about the
+                   piece of paper in the operator's hand, not as tax jargon. */}
             <div className={`rounded-xl border-2 p-3 ${expForm.claim_vat ? 'border-violet-300 bg-violet-50' : 'border-slate-200'}`}>
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 mt-0.5 accent-violet-600"
-                  checked={expForm.claim_vat}
-                  onChange={e => setExpForm(p => ({
-                    ...p,
-                    claim_vat: e.target.checked,
-                    // Bills are quoted VAT-inclusive — pull the 18% back out
-                    input_vat: e.target.checked && p.amount !== ''
-                      ? Math.round(Number(p.amount) * 18 / 118)
-                      : '',
-                  }))}
-                />
-                <span>
-                  <span className="block text-xs font-bold text-slate-700">Claim input VAT on this</span>
-                  <span className="block text-[11px] text-slate-400">
-                    Only if you hold the supplier&apos;s tax invoice in the company&apos;s name
-                  </span>
-                </span>
-              </label>
+              <p className="text-xs font-bold text-slate-500 mb-2">5. Did you get a VAT bill?</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[
+                  { on: false, l: 'No / just a receipt' },
+                  { on: true,  l: 'Yes — VAT bill' },
+                ].map(o => (
+                  <button
+                    key={String(o.on)}
+                    onClick={() => setExpForm(p => ({
+                      ...p,
+                      claim_vat: o.on,
+                      // Bills are quoted VAT-inclusive — pull the 18% back out
+                      input_vat: o.on && p.amount !== '' ? Math.round(Number(p.amount) * 18 / 118) : '',
+                    }))}
+                    className={`py-2.5 rounded-xl border-2 text-sm font-bold transition min-h-[44px] ${
+                      expForm.claim_vat === o.on
+                        ? (o.on ? 'border-violet-500 bg-white text-violet-700' : 'border-slate-400 bg-white text-slate-700')
+                        : 'border-slate-200 text-slate-400 hover:border-slate-300'
+                    }`}
+                  >
+                    {o.l}
+                  </button>
+                ))}
+              </div>
 
-              {expForm.claim_vat && (
+              {!expForm.claim_vat ? (
+                <p className="text-[11px] text-slate-400 mt-2">
+                  A VAT bill shows the shop&apos;s VAT number and the VAT amount. If one turns up later,
+                  add it from the list — no need to hold up the entry now.
+                </p>
+              ) : (
                 <div className="mt-3 grid grid-cols-2 gap-2.5">
-                  <div className="col-span-2">
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Supplier</label>
-                    <input
-                      type="text"
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                      placeholder="e.g. Ceylon Electricity Board"
-                      value={expForm.supplier_name}
-                      onChange={e => setExpForm(p => ({ ...p, supplier_name: e.target.value }))}
-                    />
+                  <div className="col-span-2 rounded-lg bg-white border border-violet-200 px-3 py-2">
+                    <p className="text-[11px] font-bold text-slate-500">VAT you can claim back</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-base font-bold text-slate-400">Rs.</span>
+                      <input
+                        type="number"
+                        min={0}
+                        className="flex-1 text-xl font-black text-violet-700 outline-none"
+                        value={expForm.input_vat}
+                        onChange={e => setExpForm(p => ({ ...p, input_vat: e.target.value === '' ? '' : Math.round(Number(e.target.value)) }))}
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Filled in as 18% of the amount. <strong>Change it to the VAT printed on the bill.</strong>
+                    </p>
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">
-                      Supplier TIN <span className="text-red-500">*</span>
-                    </label>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Shop&apos;s VAT / TIN no. <span className="text-red-500">*</span></label>
                     <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={9}
+                      type="text" inputMode="numeric" maxLength={9}
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
                       placeholder="9 digits"
                       value={expForm.supplier_tin}
@@ -1550,9 +1600,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">
-                      Tax invoice no. <span className="text-red-500">*</span>
-                    </label>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Bill no. <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
@@ -1561,30 +1609,18 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                       onChange={e => setExpForm(p => ({ ...p, supplier_invoice_no: e.target.value }))}
                     />
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Invoice date</label>
+                  <div className="col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Shop name</label>
                     <input
-                      type="date"
+                      type="text"
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                      value={expForm.supplier_invoice_date}
-                      onChange={e => setExpForm(p => ({ ...p, supplier_invoice_date: e.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">VAT on the bill (Rs.)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono font-bold focus:outline-none focus:ring-2 focus:ring-violet-400"
-                      value={expForm.input_vat}
-                      onChange={e => setExpForm(p => ({ ...p, input_vat: e.target.value === '' ? '' : Math.round(Number(e.target.value)) }))}
+                      placeholder="e.g. Ceylon Electricity Board"
+                      value={expForm.supplier_name}
+                      onChange={e => setExpForm(p => ({ ...p, supplier_name: e.target.value }))}
                     />
                   </div>
                   <p className="col-span-2 text-[11px] text-violet-700">
-                    {expForm.amount !== '' && (
-                      <>Amount paid {formatRs(Number(expForm.amount))} — 18% of a VAT-inclusive bill is {formatRs(Math.round(Number(expForm.amount) * 18 / 118))}. </>
-                    )}
-                    Change it to match the invoice exactly; it goes on VAT Schedule 02.
+                    Keep the bill in the file — the VAT office can ask for it.
                   </p>
                 </div>
               )}
@@ -1600,10 +1636,10 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             </button>
             <button
               onClick={handleAddExpense}
-              disabled={savingExp}
-              className="px-5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors disabled:opacity-50"
+              disabled={savingExp || !expForm.category || expForm.amount === '' || Number(expForm.amount) <= 0}
+              className="px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black transition-colors disabled:opacity-40"
             >
-              {savingExp ? 'Adding…' : 'Add Expense'}
+              {savingExp ? 'Saving…' : expForm.amount !== '' && Number(expForm.amount) > 0 ? `Save ${formatRs(Number(expForm.amount))}` : 'Save'}
             </button>
           </div>
         </Modal>

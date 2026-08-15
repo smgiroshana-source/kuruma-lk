@@ -14,12 +14,16 @@ async function getVendor() {
   return null
 }
 
+// What the operator can pick (see CATEGORY_LABELS in TabCash), plus every
+// legacy value already sitting in the table — old rows must keep validating.
+// 'salaries' is written by Staff/HR, never chosen by hand: payroll is recorded
+// once, against a person, so it can't be double-counted here.
 const VALID_CATEGORIES = [
-  'rent', 'utilities', 'salaries', 'fuel', 'maintenance',
-  'repairs', 'bank_charges', 'tax', 'petty_cash',
-  // Overheads that usually carry claimable input VAT
-  'stationery', 'consumables', 'tools', 'insurance', 'advertising',
-  'other',
+  'grocery', 'rent', 'electricity', 'water', 'stationery',
+  'internet', 'transport', 'repairs', 'maintenance', 'other',
+  // legacy / system-written
+  'utilities', 'salaries', 'fuel', 'bank_charges', 'tax', 'petty_cash',
+  'consumables', 'tools', 'insurance', 'advertising',
 ] as const
 
 type ExpenseCategory = typeof VALID_CATEGORIES[number]
