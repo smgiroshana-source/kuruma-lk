@@ -33,10 +33,20 @@ export async function GET(req: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { vendor, role, email, scope } = caller
-  if (role !== 'owner' && role !== 'manager') return NextResponse.json({ error: 'No access' }, { status: 403 })
-
   const admin = createAdminClient()
   const url = new URL(req.url)
+
+  // A cashier handing an advance out of the drawer needs the names and nothing
+  // else — no pay items, no salaries, no advance history for other people.
+  // Without this they cannot record the payment at all and the till goes short.
+  if (url.searchParams.get('mode') === 'names') {
+    let q = admin.from('employees').select('id, name, branch, active').eq('vendor_id', vendor.id).eq('active', true)
+    if (scope === 'shop' || scope === 'workshop') q = q.eq('branch', scope)
+    const { data } = await q.order('name')
+    return NextResponse.json({ employees: data || [] })
+  }
+
+  if (role !== 'owner' && role !== 'manager') return NextResponse.json({ error: 'No access' }, { status: 403 })
 
   // Branch scope: a login limited to one side of the business only ever
   // receives that side's people (owner and 'both' logins see everything)
@@ -86,7 +96,7 @@ export async function POST(req: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
   const { vendor, role, email, scope } = caller
-  if (role !== 'owner' && role !== 'manager') return NextResponse.json({ error: 'No access' }, { status: 403 })
+  const isOffice = role === 'owner' || role === 'manager'
   const inScope = (branch?: string | null) => scope === 'both' || !branch || branch === scope
 
   const admin = createAdminClient()
@@ -95,6 +105,7 @@ export async function POST(req: NextRequest) {
   //    (SL office practice: ID copies live in an ordinary office file) ──
   const contentType = req.headers.get('content-type') || ''
   if (contentType.includes('multipart/form-data')) {
+    if (!isOffice) return NextResponse.json({ error: 'No access' }, { status: 403 })
     try {
       const formData = await req.formData()
       const file = formData.get('file') as File | null
@@ -113,6 +124,12 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
   const { action } = body
+
+  // Everything in Staff is owner/manager work except paying an advance out of
+  // the till, which is the cashier's job — and only from drawer money.
+  if (!isOffice && action !== 'add_advance') {
+    return NextResponse.json({ error: 'No access' }, { status: 403 })
+  }
 
   // ── Create / edit employee profile (owner + manager/office) ──
   if (action === 'upsert_employee') {
@@ -258,7 +275,10 @@ export async function POST(req: NextRequest) {
     const amt = Math.round(Number(amount))
     if (!employee_id || !isFinite(amt) || amt <= 0) return NextResponse.json({ error: 'Valid employee and amount required' }, { status: 400 })
     const d = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date().toISOString().slice(0, 10)
-    const src = ['drawer', 'bank', 'owner'].includes(source) ? source : 'drawer'
+    // A cashier can only pay from the till they are accountable for; bank and
+    // owner-funded advances stay with the owner/manager.
+    const allowedSources = isOffice ? ['drawer', 'bank', 'owner'] : ['drawer']
+    const src = allowedSources.includes(source) ? source : 'drawer'
     const { data: emp } = await admin.from('employees').select('id, name, branch').eq('id', employee_id).eq('vendor_id', vendor.id).single()
     if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
     if (!inScope(emp.branch)) return NextResponse.json({ error: `Your access covers the ${scope} only` }, { status: 403 })

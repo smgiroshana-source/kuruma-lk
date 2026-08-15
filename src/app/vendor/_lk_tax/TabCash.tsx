@@ -188,6 +188,10 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Attaching a tax invoice to an expense already recorded (the bill usually
   // arrives after the money went out)
   const [vatFor, setVatFor] = useState<Expense | null>(null)
+  // Money handed to a staff member out of the till. Recorded against the
+  // person in Staff (so payroll can net it off), and posted as an expense so
+  // the drawer still reconciles at close.
+  const [showAdvance, setShowAdvance] = useState(false)
   const [savingExp, setSavingExp] = useState(false)
 
   // Opening ≠ previous day's closing (reported, fixed only on confirmation)
@@ -773,12 +777,20 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
               <div className="px-5 py-4 border-b border-slate-100">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">Cash Expenses Today</p>
-                  <button
-                    onClick={() => { setShowAddExpenseInline(true); setInlineExpForm(blankExpenseForm()) }}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-colors"
-                  >
-                    <span>+</span> Add Expense
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setShowAdvance(true)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg border-2 border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-xs font-bold transition-colors"
+                    >
+                      🧑‍🔧 Salary Advance
+                    </button>
+                    <button
+                      onClick={() => { setShowAddExpenseInline(true); setInlineExpForm(blankExpenseForm()) }}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold transition-colors"
+                    >
+                      <span>+</span> Add Expense
+                    </button>
+                  </div>
                 </div>
 
                 {/* Inline add expense form */}
@@ -1152,13 +1164,21 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           {/* Header */}
           <div className="flex items-center justify-between mb-5">
             <h1 className="text-2xl font-black text-slate-900">Expenses</h1>
-            <button
-              onClick={() => { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors shadow-sm"
-            >
-              <span className="text-base leading-none">+</span>
-              Add Expense
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAdvance(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-sm font-bold transition-colors"
+              >
+                🧑‍🔧 Salary Advance
+              </button>
+              <button
+                onClick={() => { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors shadow-sm"
+              >
+                <span className="text-base leading-none">+</span>
+                Add Expense
+              </button>
+            </div>
           </div>
 
           {/* Month filter */}
@@ -1645,6 +1665,17 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
         </Modal>
       )}
 
+      {showAdvance && (
+        <AdvanceModal
+          onClose={() => setShowAdvance(false)}
+          onSaved={async () => {
+            setShowAdvance(false)
+            await fetchExpenses(); await fetchTodayExpenses(); await fetchTodaySession()
+          }}
+          showToast={showToast}
+        />
+      )}
+
       {vatFor && (
         <ExpenseVatModal
           expense={vatFor}
@@ -1801,5 +1832,134 @@ function Spinner() {
     <div className="flex items-center justify-center py-16">
       <div className="w-8 h-8 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin" />
     </div>
+  )
+}
+
+// ── Salary advance ───────────────────────────────────────────────────────────
+// Cash handed to a staff member before payday. It is NOT an ordinary expense
+// the cashier types by hand: recorded here it lands against the person in
+// Staff, so payroll can deduct it, AND posts a salaries expense tied to the
+// open session, so the drawer still balances at close. Typing it as a plain
+// expense instead would count the money twice come payroll.
+function AdvanceModal({
+  onClose, onSaved, showToast,
+}: {
+  onClose: () => void
+  onSaved: () => void
+  showToast: (m: string) => void
+}) {
+  const [people, setPeople] = useState<{ id: string; name: string; branch?: string | null }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [employeeId, setEmployeeId] = useState('')
+  const [amount, setAmount] = useState<number | ''>('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/vendor/staff-hr?mode=names')
+      .then(r => r.json())
+      .then(j => setPeople(j.employees || []))
+      .catch(() => showToast('Could not load staff list'))
+      .finally(() => setLoading(false))
+  }, [showToast])
+
+  async function save() {
+    if (!employeeId) { showToast('Pick who is taking the advance'); return }
+    if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/vendor/staff-hr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_advance',
+          employee_id: employeeId,
+          amount: Math.round(Number(amount)),
+          date: todayStr(),
+          source: 'drawer',
+          note: note.trim() || null,
+        }),
+      })
+      const j = await res.json()
+      if (!res.ok) throw new Error(j.error ?? 'Failed to record advance')
+      showToast('Advance recorded — it will be deducted at payroll')
+      onSaved()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setSaving(false)
+  }
+
+  return (
+    <Modal title="Salary Advance" onClose={onClose}>
+      <p className="text-xs text-slate-500 -mt-2 mb-4">
+        Cash out of the till, before payday. It comes off what they are paid at the end of the month.
+      </p>
+
+      {loading ? (
+        <Spinner />
+      ) : people.length === 0 ? (
+        <p className="text-sm text-slate-400 py-6 text-center">No staff on the system yet.</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div>
+            <p className="text-xs font-bold text-slate-500 mb-2">1. Who is taking it?</p>
+            <div className="grid grid-cols-2 gap-1.5 max-h-52 overflow-y-auto">
+              {people.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setEmployeeId(p.id)}
+                  className={`text-left px-3 py-2.5 rounded-xl border-2 transition min-h-[44px] ${
+                    employeeId === p.id ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <span className="block text-sm font-bold leading-tight">{p.name}</span>
+                  {p.branch && <span className="block text-[10px] text-slate-400 capitalize">{p.branch}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-slate-500 mb-2">2. How much?</p>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
+              <input
+                type="number"
+                min={1}
+                className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-indigo-400"
+                placeholder="0"
+                value={amount}
+                onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
+              />
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-bold text-slate-500 mb-2">3. Note <span className="font-normal text-slate-400">(optional)</span></p>
+            <input
+              type="text"
+              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              placeholder="e.g. for hospital"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+            />
+          </div>
+
+          <p className="text-[11px] text-slate-400">
+            Paid from today&apos;s till. The drawer will expect {amount !== '' ? formatRs(Number(amount)) : 'this amount'} less at closing.
+          </p>
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
+        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
+        <button
+          onClick={save}
+          disabled={saving || !employeeId || amount === '' || Number(amount) <= 0}
+          className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-black disabled:opacity-40"
+        >
+          {saving ? 'Saving…' : amount !== '' && Number(amount) > 0 ? `Pay ${formatRs(Number(amount))}` : 'Pay'}
+        </button>
+      </div>
+    </Modal>
   )
 }
