@@ -89,6 +89,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
   // GRN state
   const [suppliers, setSuppliers] = useState<any[]>([])
+  // Standard VAT rate (config, not hardcoded) — a VAT-registered supplier
+  // charges it on every line, so that's what a GRN line should start at.
+  const [vatRate, setVatRate] = useState(18)
+  const supplierVatRate = (supplierId: string) =>
+    suppliers.find((x: any) => x.id === supplierId)?.vat_registered ? vatRate : 0
   const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '' })
   const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any }>>([])
   const [grnCsvPreview, setGrnCsvPreview] = useState<Array<{ matched: boolean; grnItem: any }> | null>(null)
@@ -126,6 +131,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
   async function fetchSuppliers() {
     try { const r = await fetch('/api/vendor/suppliers'); if (r.ok) { const j = await r.json(); setSuppliers(j.suppliers || []) } } catch {}
+    try { const r = await fetch('/api/vendor/tax-config'); if (r.ok) { const j = await r.json(); if (j.config?.vat_rate != null) setVatRate(parseFloat(j.config.vat_rate)) } } catch {}
   }
 
   async function fetchGrnList() {
@@ -256,7 +262,9 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
             productSku:  matched ? (matched.sku || '') : (sku || ''),
             quantity:    Math.max(1, parseInt(row.quantity) || 1),
             unitCost:    Math.max(0, parseInt(row.unit_cost || row.cost || '0') || 0),
-            vatRate:     parseFloat(row.vat_rate || '0') || 0,
+            vatRate:     row.vat_rate != null && row.vat_rate !== ''
+              ? (parseFloat(row.vat_rate) || 0)
+              : supplierVatRate(grnForm.supplierId),
             needsCreate: !matched,
             productData: !matched ? {
               name:        row.name?.trim() || 'Unnamed',
@@ -366,7 +374,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       const j = await r.json()
       if (j.success && j.product) {
         const p = j.product
-        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', quantity: 1, unitCost: 0, vatRate: 0, foreignCurrency: '', foreignAmount: '' }])
+        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', quantity: 1, unitCost: 0, vatRate: supplierVatRate(grnForm.supplierId), foreignCurrency: '', foreignAmount: '' }])
         setGrnInlineCreate(false)
         setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '' })
         setGrnProductSearch('')
@@ -804,11 +812,26 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier</label>
                   <select value={grnForm.supplierId} onChange={e => {
                     const s = suppliers.find(x => x.id === e.target.value)
+                    const wasDefault = supplierVatRate(grnForm.supplierId)
+                    const nowDefault = s?.vat_registered ? vatRate : 0
                     setGrnForm(f => ({ ...f, supplierId: e.target.value, supplierName: s?.name || '' }))
+                    if (nowDefault !== wasDefault) {
+                      setGrnItems(prev => prev.map(it => it.vatRate === wasDefault ? { ...it, vatRate: nowDefault } : it))
+                      if (grnItems.length > 0) {
+                        showToast(nowDefault > 0
+                          ? `${s?.name} is VAT-registered — lines set to ${nowDefault}%`
+                          : `${s?.name || 'This supplier'} is not VAT-registered — lines set to 0%`)
+                      }
+                    }
                   }} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white">
                     <option value="">— Select supplier —</option>
                     {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} {s.country !== 'LK' ? `(${s.country})` : ''}</option>)}
                   </select>
+                  {grnForm.supplierId && (
+                    suppliers.find((x: any) => x.id === grnForm.supplierId)?.vat_registered
+                      ? <p className="text-[10px] font-bold text-emerald-600 mt-1">VAT-registered — lines default to {vatRate}%, claimable as input VAT</p>
+                      : <p className="text-[10px] font-bold text-slate-400 mt-1">Not VAT-registered — no input VAT to claim on this purchase</p>
+                  )}
                   {/* Quick-add supplier */}
                   <div className="flex gap-2 mt-2">
                     <input type="text" value={newSupplierName} onChange={e => setNewSupplierName(e.target.value)}
@@ -878,7 +901,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     return (
                       <button key={p.id} onClick={() => {
                         if (alreadyAdded) { showToast('Already in list — adjust qty below'); return }
-                        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', quantity: 1, unitCost: 0, vatRate: 0 }])
+                        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', quantity: 1, unitCost: 0, vatRate: supplierVatRate(grnForm.supplierId) }])
                         setGrnProductSearch('')
                       }} className={`w-full text-left px-3 py-2.5 flex justify-between items-center border-b border-slate-100 last:border-0 active:bg-slate-50 ${alreadyAdded ? 'opacity-40' : ''}`}>
                         <div>
@@ -1159,7 +1182,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                               }}
                               className="px-1.5 py-1 border border-slate-200 rounded text-xs bg-white">
                               <option value={0}>0%</option>
-                              <option value={18}>18%</option>
+                              <option value={vatRate}>{vatRate}%</option>
                             </select>
                           </td>
                           <td className="py-2 text-right font-semibold">
