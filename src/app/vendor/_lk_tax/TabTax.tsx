@@ -48,7 +48,6 @@ export default function TabTax({ showToast, vendorSettings }: {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [moveTo, setMoveTo] = useState(addMonths(colomboToday().slice(0, 7), 1))
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async (p: string) => {
@@ -59,7 +58,6 @@ export default function TabTax({ showToast, vendorSettings }: {
       if (!r.ok) throw new Error(j.error || 'Failed to load')
       setData(j)
       setSelected(new Set())
-      setMoveTo(addMonths(p, 1))
     } catch (e: any) { showToast('⚠️ ' + e.message); setData(null) }
     setLoading(false)
   }, [showToast])
@@ -72,8 +70,13 @@ export default function TabTax({ showToast, vendorSettings }: {
     return n
   })
 
-  const claimedNow: any[] = data?.input?.claimedNow || []
-  const parkedLater: any[] = data?.input?.parkedLater || []
+  // Oldest first: the credit closest to its deadline is the one to look at.
+  const claimedNow: any[] = [...(data?.input?.claimedNow || [])]
+    .sort((a, b) => String(a.invoiceDate).localeCompare(String(b.invoiceDate)))
+  const nextMonth = addMonths(period, 1)
+  // Same rule for the waiting list — closest to its deadline at the top
+  const parkedLater: any[] = [...(data?.input?.parkedLater || [])]
+    .sort((a, b) => String(a.deadline).localeCompare(String(b.deadline)))
   const t = data?.totals || {}
   // Live: what the liability becomes if the ticked credits are pushed out
   const selectedVat = claimedNow.filter(i => selected.has(key(i))).reduce((s, i) => s + i.vat, 0)
@@ -204,12 +207,12 @@ export default function TabTax({ showToast, vendorSettings }: {
             <p className={`text-3xl font-black mt-1 ${inRefundPosition ? 'text-red-600' : 'text-emerald-700'}`}>{rs(t.netPayable)}</p>
             {inRefundPosition && (
               <p className="text-xs font-bold text-red-700 mt-1">
-                Negative — you&apos;d be claiming a refund. Push {rs(Math.abs(t.netPayable))} of input credits to a later month below.
+                Negative — you&apos;d be claiming a refund. Hold back {rs(Math.abs(t.netPayable))} of input credits below.
               </p>
             )}
             {selectedVat > 0 && (
               <p className="text-xs font-bold text-amber-700 mt-1">
-                With {rs(selectedVat)} moved out → payable becomes <span className="font-black">{rs(projectedPayable)}</span>
+                Holding back {rs(selectedVat)} → payable becomes <span className="font-black">{rs(projectedPayable)}</span>
               </p>
             )}
           </div>
@@ -251,19 +254,29 @@ export default function TabTax({ showToast, vendorSettings }: {
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <div>
             <h3 className="font-bold text-sm text-slate-800">Input credits claimed in {period}</h3>
-            <p className="text-[11px] text-slate-400">Tick any you want to keep for a later month — the payable figure above updates as you tick.</p>
+            <p className="text-[11px] text-slate-400">
+              Tick any you want to hold back — they move to {nextMonth}, and you decide again there. The payable figure above updates as you tick.
+            </p>
           </div>
-          {selected.size > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-amber-700">{selected.size} selected · {rs(selectedVat)}</span>
-              <input type="month" value={moveTo} min={period} onChange={e => setMoveTo(e.target.value)}
-                className="px-2.5 py-1.5 rounded-lg border-2 border-amber-300 text-xs font-bold outline-none" />
-              <button disabled={busy} onClick={() => moveCredits(claimedNow.filter(i => selected.has(key(i))), moveTo)}
-                className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-black disabled:opacity-50">
-                Move to {moveTo}
-              </button>
-            </div>
-          )}
+          {selected.size > 0 && (() => {
+            const picked = claimedNow.filter(i => selected.has(key(i)))
+            // Anything whose deadline is this month cannot wait another one
+            const stuck = picked.filter(i => i.deadline <= period)
+            return (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-amber-700">{selected.size} selected · {rs(selectedVat)}</span>
+                <button disabled={busy || stuck.length > 0} onClick={() => moveCredits(picked, nextMonth)}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-black disabled:opacity-50">
+                  Keep for {nextMonth} →
+                </button>
+                {stuck.length > 0 && (
+                  <span className="text-[11px] font-bold text-red-600">
+                    {stuck.map(i => i.ref).join(', ')} must be claimed this month — last month before the deadline
+                  </span>
+                )}
+              </div>
+            )
+          })()}
         </div>
         {claimedNow.length === 0
           ? <div className="p-6 text-center text-sm text-slate-400">No input credits in this period</div>
