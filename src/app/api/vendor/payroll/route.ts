@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
     if (!runId) return NextResponse.json({ error: 'runId required' }, { status: 400 })
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(paid_date || ''))
       ? paid_date : new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
-    const method = payment_method === 'bank' ? 'bank' : 'cash'
+    const method = payment_method === 'online' ? 'online' : 'cash'
 
     const { data: run } = await admin.from('payroll_runs')
       .select('*').eq('id', runId).eq('vendor_id', caller.vendor.id).single()

@@ -298,7 +298,7 @@ export async function POST(req: NextRequest) {
       const { data: exp, error: expErr } = await admin.from('expenses').insert({
         vendor_id: vendor.id, expense_date: d, category: 'salaries',
         description: `Staff advance — ${emp.name}`,
-        amount: amt, payment_method: src === 'drawer' ? 'cash' : 'bank',
+        amount: amt, payment_method: src === 'drawer' ? 'cash' : 'online',
         cash_session_id: sessionId, created_by: userId,
       }).select('id').single()
       // Never record an advance whose money isn't in the books: the deduction

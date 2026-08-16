@@ -35,7 +35,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [payDate, setPayDate] = useState(colomboToday())
-  const [payMethod, setPayMethod] = useState<'cash' | 'bank'>('cash')
+  const [payMethod, setPayMethod] = useState<'cash' | 'online'>('cash')
   const [showPay, setShowPay] = useState(false)
   const [dirty, setDirty] = useState(false)
 
@@ -402,7 +402,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
 
             <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Paid from</label>
             <div className="grid grid-cols-2 gap-1.5 mb-2">
-              {([{ v: 'cash', l: '💵 Cash / drawer' }, { v: 'bank', l: '🏦 Bank' }] as const).map(m => (
+              {([{ v: 'cash', l: '💵 Cash / drawer' }, { v: 'online', l: '🏦 Online' }] as const).map(m => (
                 <button key={m.v} onClick={() => setPayMethod(m.v)}
                   className={`py-2.5 rounded-xl border-2 text-sm font-bold ${payMethod === m.v ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
                   {m.l}

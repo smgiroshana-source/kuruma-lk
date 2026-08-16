@@ -122,9 +122,15 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 const METHOD_BADGE: Record<string, string> = {
   cash: 'bg-emerald-100 text-emerald-700',
-  bank: 'bg-blue-100 text-blue-700',
+  online: 'bg-blue-100 text-blue-700',
   cheque: 'bg-purple-100 text-purple-700',
-  card: 'bg-slate-100 text-slate-600',
+  bank: 'bg-blue-100 text-blue-700',
+  card: 'bg-blue-100 text-blue-700',
+}
+
+// Legacy rows stored 'bank'/'card'; both were online bank movements
+const METHOD_LABEL: Record<string, string> = {
+  cash: 'Cash', online: 'Online', cheque: 'Cheque', bank: 'Online', card: 'Online',
 }
 
 // ── Blank form factories ──────────────────────────────────────────────────────
@@ -478,7 +484,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       return
     }
     if (inlineExpForm.payment_method !== 'cash' && !inlineExpForm.reference.trim()) {
-      showToast(inlineExpForm.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the bank reference number')
+      showToast(inlineExpForm.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the 8-digit bank confirmation number')
       return
     }
     setSavingInlineExp(true)
@@ -548,7 +554,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       return
     }
     if (expForm.payment_method !== 'cash' && !expForm.reference.trim()) {
-      showToast(expForm.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the bank reference number')
+      showToast(expForm.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the 8-digit bank confirmation number')
       return
     }
     if (expForm.claim_vat) {
@@ -850,7 +856,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                           onChange={e => setInlineExpForm(p => ({ ...p, payment_method: e.target.value }))}
                         >
                           <option value="cash">Cash</option>
-                          <option value="bank">Bank</option>
+                          <option value="online">Online</option>
                           <option value="cheque">Cheque</option>
                         </select>
                       </div>
@@ -912,8 +918,8 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                             <td className="py-1.5 pr-2 text-slate-600">{e.description}</td>
                             <td className="py-1.5 pr-2 text-right font-bold text-slate-800">{formatRs(e.amount)}</td>
                             <td className="py-1.5 pr-2 text-center">
-                              <span className={`inline-block text-[11px] font-bold px-1.5 py-0.5 rounded-full capitalize ${METHOD_BADGE[e.payment_method] ?? 'bg-gray-100 text-gray-600'}`}>
-                                {e.payment_method}
+                              <span className={`inline-block text-[11px] font-bold px-1.5 py-0.5 rounded-full ${METHOD_BADGE[e.payment_method] ?? 'bg-gray-100 text-gray-600'}`}>
+                                {METHOD_LABEL[e.payment_method] ?? e.payment_method}
                               </span>
                             </td>
                             <td className="py-1.5 text-right">
@@ -1261,8 +1267,8 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                           <td className="px-4 py-3 text-sm text-slate-700">{e.description}</td>
                           <td className="px-4 py-3 text-right font-bold text-slate-800 whitespace-nowrap">{formatRs(e.amount)}</td>
                           <td className="px-4 py-3 text-center">
-                            <span className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full capitalize ${METHOD_BADGE[e.payment_method] ?? 'bg-gray-100 text-gray-600'}`}>
-                              {e.payment_method}
+                            <span className={`inline-block text-[11px] font-bold px-2 py-0.5 rounded-full ${METHOD_BADGE[e.payment_method] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {METHOD_LABEL[e.payment_method] ?? e.payment_method}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -1509,7 +1515,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
               <div className="grid grid-cols-3 gap-1.5">
                 {[
                   { v: 'cash', l: 'Cash', icon: '💵' },
-                  { v: 'bank', l: 'Bank', icon: '🏦' },
+                  { v: 'online', l: 'Online', icon: '🏦' },
                   { v: 'cheque', l: 'Cheque', icon: '📝' },
                 ].map(m => {
                   const on = expForm.payment_method === m.v
@@ -1540,7 +1546,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                   <p className="text-[11px] text-slate-400 mt-1">
                     {expForm.payment_method === 'cheque'
                       ? 'The cheque counts as paid the day it is written. Nothing comes off the till.'
-                      : 'Nothing comes off the till — this is money moving in the bank.'}
+                      : 'A bank transfer or standing order. Nothing comes off the till.'}
                   </p>
                 </>
               )}

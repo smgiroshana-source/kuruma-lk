@@ -112,17 +112,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'amount must be a positive integer (LKR)' }, { status: 400 })
     }
 
-    // Cash, bank or cheque — no card is used, and a card payment is a bank
-    // payment anyway. Money leaving outside the till must carry its reference
-    // (cheque number, or the bank's confirmation number) or it can never be
-    // matched to the statement.
+    // Cash, online or cheque. "Bank" was ambiguous — a cheque is a bank
+    // payment too — so a transfer is 'online'. Legacy 'bank'/'card' rows are
+    // still accepted and display as Online. Money leaving outside the till
+    // must carry its reference (cheque number, or the bank's 8-digit
+    // confirmation number) or it can never be matched to the statement.
     const method = payment_method || 'cash'
-    if (!['cash', 'bank', 'cheque'].includes(method)) {
-      return NextResponse.json({ error: 'Payment must be cash, bank or cheque' }, { status: 400 })
+    if (!['cash', 'online', 'cheque', 'bank', 'card'].includes(method)) {
+      return NextResponse.json({ error: 'Payment must be cash, online or cheque' }, { status: 400 })
     }
     if (method !== 'cash' && !String(reference || '').trim()) {
       return NextResponse.json({
-        error: method === 'cheque' ? 'Enter the cheque number' : 'Enter the bank reference number',
+        error: method === 'cheque' ? 'Enter the cheque number' : 'Enter the 8-digit bank confirmation number',
       }, { status: 400 })
     }
 
