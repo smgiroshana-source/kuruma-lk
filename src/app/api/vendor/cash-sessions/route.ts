@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { computeExpected } from '@/lib/cash'
 import { fetchAllByIds } from '@/lib/fetchAll'
 
 async function getVendor() {
@@ -132,38 +133,6 @@ export async function GET(req: NextRequest) {
  * totals counted unpaid credit sales as cash, missed split payments, ignored
  * credit collections on older invoices, and never subtracted cash refunds.
  */
-async function computeExpected(admin: any, vendorId: string, session: any) {
-  const sessionDate: string = session.session_date
-  const openingBal = parseInt(session.opening_balance || 0)
-
-  const dateStart = `${sessionDate}T00:00:00+05:30`
-  const dateEnd = `${sessionDate}T23:59:59.999+05:30`
-  const { data: payRows } = await admin
-    .from('payments')
-    .select('amount')
-    .eq('vendor_id', vendorId)
-    .eq('payment_method', 'cash')
-    .gte('created_at', new Date(dateStart).toISOString())
-    .lte('created_at', new Date(dateEnd).toISOString())
-  const cashSales = Math.round((payRows || []).reduce((s: number, p: any) => s + parseFloat(p.amount || 0), 0))
-
-  const { data: expenseRows } = await admin
-    .from('expenses')
-    .select('amount')
-    .eq('vendor_id', vendorId)
-    .eq('expense_date', sessionDate)
-    .eq('payment_method', 'cash')
-  const cashExpenses = (expenseRows || []).reduce((s: number, e: any) => s + parseInt(e.amount || 0), 0)
-
-  const adjIn = parseInt(session.adjustment_in || 0)
-  const adjOut = parseInt(session.adjustment_out || 0)
-
-  return {
-    cashSales, cashExpenses, adjIn, adjOut,
-    expectedCash: openingBal + cashSales - cashExpenses + adjIn - adjOut,
-  }
-}
-
 export async function POST(req: NextRequest) {
   const auth = await getVendor()
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

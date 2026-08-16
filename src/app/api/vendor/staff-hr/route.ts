@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { recomputeSessionForDate } from '@/lib/cash'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WHEEL MART Staff/HR — stage 1: registry, pay items, attendance, advances.
@@ -20,9 +21,9 @@ async function getCaller() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { vendor, role: 'owner', email: user.email || '', scope: 'both' }
+  if (vendor) return { vendor, userId: user.id, role: 'owner', email: user.email || '', scope: 'both' }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { vendor: staffLink.vendor, role: staffLink.role || 'cashier', email: user.email || '', scope: staffLink.branch_scope || 'shop' }
+  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id, role: staffLink.role || 'cashier', email: user.email || '', scope: staffLink.branch_scope || 'shop' }
   return null
 }
 
@@ -95,7 +96,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const caller = await getCaller()
   if (!caller) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-  const { vendor, role, email, scope } = caller
+  const { vendor, userId, role, email, scope } = caller
   const isOffice = role === 'owner' || role === 'manager'
   const inScope = (branch?: string | null) => scope === 'both' || !branch || branch === scope
 
@@ -285,28 +286,39 @@ export async function POST(req: NextRequest) {
 
     let expenseId: string | null = null
     if (src !== 'owner') {
-      // Link to the open cash session if there is one (drawer money must reconcile)
+      // Drawer money must reconcile, so link the expense to the session for the
+      // DAY it was paid — open or already closed. A late entry then shows up in
+      // that day's expected cash instead of leaving the drawer looking short.
       let sessionId: string | null = null
       if (src === 'drawer') {
-        const { data: openSession } = await admin.from('cash_sessions')
-          .select('id').eq('vendor_id', vendor.id).is('closed_at', null)
-          .order('opened_at', { ascending: false }).limit(1)
-        sessionId = openSession?.[0]?.id || null
+        const { data: daySession } = await admin.from('cash_sessions')
+          .select('id').eq('vendor_id', vendor.id).eq('session_date', d).maybeSingle()
+        sessionId = daySession?.id || null
       }
-      const { data: exp } = await admin.from('expenses').insert({
+      const { data: exp, error: expErr } = await admin.from('expenses').insert({
         vendor_id: vendor.id, expense_date: d, category: 'salaries',
         description: `Staff advance — ${emp.name}`,
         amount: amt, payment_method: src === 'drawer' ? 'cash' : 'bank',
-        cash_session_id: sessionId, created_by: email,
+        cash_session_id: sessionId, created_by: userId,
       }).select('id').single()
-      expenseId = exp?.id || null
+      // Never record an advance whose money isn't in the books: the deduction
+      // would land on the payslip while the cash went missing from the drawer.
+      if (expErr || !exp) {
+        return NextResponse.json({ error: 'Could not record the payment: ' + (expErr?.message || 'unknown error') }, { status: 500 })
+      }
+      expenseId = exp.id
     }
 
     const { data: adv, error } = await admin.from('staff_advances').insert({
       employee_id, vendor_id: vendor.id, amount: amt, date: d, source: src,
       note: note?.trim() || null, expense_id: expenseId, entered_by: email,
     }).select().single()
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    if (error) {
+      // The advance failed — don't leave its expense behind as a phantom
+      if (expenseId) await admin.from('expenses').delete().eq('id', expenseId).eq('vendor_id', vendor.id)
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    if (src === 'drawer') await recomputeSessionForDate(admin, vendor.id, d)
     audit(admin, vendor.id, email, 'advance_added', employee_id, { amount: amt, source: src })
     return NextResponse.json({ advance: adv })
   }
@@ -319,6 +331,8 @@ export async function POST(req: NextRequest) {
     if (adv.settled_in_run) return NextResponse.json({ error: 'Already settled in a payroll run' }, { status: 400 })
     if (adv.expense_id) await admin.from('expenses').delete().eq('id', adv.expense_id).eq('vendor_id', vendor.id)
     await admin.from('staff_advances').delete().eq('id', id)
+    // Putting the money back must put the drawer back too
+    if (adv.source === 'drawer') await recomputeSessionForDate(admin, vendor.id, adv.date)
     audit(admin, vendor.id, email, 'advance_deleted', adv.employee_id, { amount: adv.amount })
     return NextResponse.json({ ok: true })
   }

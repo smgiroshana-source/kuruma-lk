@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { recomputeSessionForDate } from '@/lib/cash'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -164,6 +165,13 @@ export async function POST(req: NextRequest) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
+    // Keep that day's drawer arithmetic right — including a cash expense
+    // entered after the day was closed, which is the usual way a phantom
+    // shortage appears.
+    if ((payment_method || 'cash') === 'cash') {
+      await recomputeSessionForDate(admin, vendor.id, expense_date)
+    }
+
     return NextResponse.json({ ok: true, expense })
   }
 
@@ -214,7 +222,7 @@ export async function POST(req: NextRequest) {
     // Fetch expense and verify ownership
     const { data: expense } = await admin
       .from('expenses')
-      .select('id, cash_session_id')
+      .select('id, cash_session_id, expense_date, payment_method')
       .eq('id', expenseId)
       .eq('vendor_id', vendor.id)
       .single()
@@ -242,6 +250,10 @@ export async function POST(req: NextRequest) {
       .eq('vendor_id', vendor.id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+
+    if ((expense as any).payment_method === 'cash') {
+      await recomputeSessionForDate(admin, vendor.id, (expense as any).expense_date)
+    }
 
     return NextResponse.json({ ok: true })
   }
