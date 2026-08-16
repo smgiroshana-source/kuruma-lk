@@ -1470,7 +1470,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1546,13 +1546,14 @@ ${totalCashReturnAmount > 0 ? '<div class="summary-box" style="border:2px solid 
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 </div>
 
+${(methodTotals.cash + methodTotals.cheque + methodTotals.bank + methodTotals.card) > 0 ? `
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
 <div class="method-grid">
 ${methodTotals.cash > 0 ? '<div class="method-box"><div class="val green">Rs.' + methodTotals.cash.toLocaleString() + '</div><div class="lbl">💵 Cash</div></div>' : ''}
 ${methodTotals.cheque > 0 ? '<div class="method-box"><div class="val blue">Rs.' + methodTotals.cheque.toLocaleString() + '</div><div class="lbl">📝 Cheque</div></div>' : ''}
 ${methodTotals.bank > 0 ? '<div class="method-box"><div class="val" style="color:#7c3aed">Rs.' + methodTotals.bank.toLocaleString() + '</div><div class="lbl">🏦 Bank Transfer</div></div>' : ''}
 ${methodTotals.card > 0 ? '<div class="method-box"><div class="val" style="color:#0891b2">Rs.' + methodTotals.card.toLocaleString() + '</div><div class="lbl">💳 Card</div></div>' : ''}
-</div>
+</div>` : ''}
 
 ${(() => {
       // Cash reconciliation for the day (from the cash session, if one was opened).
@@ -1578,6 +1579,21 @@ ${(() => {
               (variance != null ? '<div class="method-box"><div class="val ' + (variance === 0 ? 'green' : (variance < 0 ? 'red' : 'orange')) + '">' + (variance > 0 ? '+' : variance < 0 ? '−' : '') + 'Rs.' + Math.abs(variance).toLocaleString() + '</div><div class="lbl">' + (variance === 0 ? 'Balanced' : (variance < 0 ? 'Short' : 'Over')) + '</div></div>' : '')
             : '<div class="method-box"><div class="val" style="color:#94a3b8">OPEN</div><div class="lbl">Not yet closed</div></div>') +
         '</div>' +
+        // Expected cash falls below the opening float whenever money is paid
+        // out. List every one of those payments, or the drop is unexplained.
+        (() => {
+          const cashOut = (dayExpenses || []).filter((e: any) => (e.payment_method || 'cash') === 'cash')
+          if (cashOut.length === 0) return ''
+          const total = cashOut.reduce((sum: number, e: any) => sum + parseInt(e.amount || 0), 0)
+          return '<div style="margin-top:10px;border:1.5px solid #e2e8f0;border-radius:8px;padding:10px 12px">' +
+            '<div style="font-size:12px;font-weight:800;color:#334155;margin-bottom:6px">Cash paid out of the drawer \u2014 Rs.' + total.toLocaleString() + ' (' + cashOut.length + ')</div>' +
+            cashOut.map((e: any) =>
+              '<div style="display:flex;justify-content:space-between;font-size:11px;color:#475569;padding:2px 0">' +
+              '<span>\u2022 ' + escapeHtml(String(e.description || '')) + '<span style="color:#94a3b8"> \u00b7 ' + escapeHtml(String(e.category || '')) + '</span></span>' +
+              '<span style="font-weight:700">Rs.' + parseInt(e.amount || 0).toLocaleString() + '</span></div>'
+            ).join('') +
+            '</div>'
+        })() +
         // Post-close corrections are an audit matter: a hand adjustment is how a
         // real shortage could be papered over, so the owner sees every one here.
         ((corrections && corrections.length > 0)
@@ -1840,9 +1856,10 @@ ${customerRows.map(c => `<tr>
       // Early-morning Colombo sales (+5:30) are stored under yesterday's UTC date;
       // fetch the previous UTC day too and pin each row to its Colombo day.
       const prev = new Date(date + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
-      const [r, cs] = await Promise.all([
+      const [r, cs, ex] = await Promise.all([
         fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${date}`),
         fetch(`/api/vendor/cash-sessions?date=${date}`),
+        fetch(`/api/vendor/expenses?date=${date}`),
       ])
       if (!r.ok) { showToast(`Failed (${r.status})`) }
       else {
@@ -1852,7 +1869,11 @@ ${customerRows.map(c => `<tr>
         let cashSession: any = undefined
         let corrections: any[] = []
         try { if (cs.ok) { const cj = await cs.json(); cashSession = cj.session || null; corrections = cj.corrections || [] } } catch {}
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections)
+        // Money that LEFT the drawer has to be on the report — otherwise the
+        // owner sees the float drop with no explanation of where it went.
+        let dayExpenses: any[] = []
+        try { if (ex.ok) { const ej = await ex.json(); dayExpenses = ej.expenses || [] } } catch {}
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses)
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)
