@@ -1087,6 +1087,26 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                           <button onClick={() => { setGrnCsvPreview(null); setGrnCsvFileName('') }} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
                         </div>
                       </div>
+                      {(() => {
+                        const sup = suppliers.find((x: any) => x.id === grnForm.supplierId)
+                        const zeroRows = grnCsvPreview.filter(r => !r.grnItem.vatRate)
+                        if (!sup?.vat_registered || zeroRows.length === 0) return null
+                        const lostVat = zeroRows.reduce((t, r) => t + Math.round(r.grnItem.quantity * r.grnItem.unitCost * vatRate / 100), 0)
+                        return (
+                          <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 flex items-center justify-between flex-wrap gap-2">
+                            <p className="text-[11px] font-bold text-amber-800">
+                              ⚠️ {zeroRows.length} row{zeroRows.length !== 1 ? 's' : ''} came in at 0% VAT, but {sup.name} is VAT-registered
+                              {lostVat > 0 && <> — that&apos;s Rs.{lostVat.toLocaleString()} of input VAT not claimed</>}
+                            </p>
+                            <button
+                              onClick={() => setGrnCsvPreview(prev => prev && prev.map(r =>
+                                r.grnItem.vatRate ? r : { ...r, grnItem: { ...r.grnItem, vatRate } }))}
+                              className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white shrink-0">
+                              Set them to {vatRate}%
+                            </button>
+                          </div>
+                        )
+                      })()}
                       <div className="overflow-x-auto max-h-56 overflow-y-auto">
                         <table className="w-full text-xs">
                           <thead className="sticky top-0 bg-white border-b border-slate-100">
