@@ -11,6 +11,7 @@ import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { createClient } from '@/lib/supabase/client'
 import { compressImage } from '@/lib/compressImage'
 import { escapeHtml } from '@/lib/escapeHtml'
+import PayrollRun from './PayrollRun'
 
 type PayItem = {
   id?: string; kind: string; label: string; amount: number | string
@@ -34,10 +35,10 @@ const PAY_PRESETS: Omit<PayItem, 'visible_to_office'>[] = [
   { kind: 'epf', label: 'EPF deduction (manual)', amount: '', unit: 'rs', period: 'monthly', half_day_policy: 'half' },
 ]
 
-export default function TabStaff({ staffRole, initialView, onInitialViewConsumed }: { staffRole: string; initialView?: string | null; onInitialViewConsumed?: () => void }) {
+export default function TabStaff({ staffRole, vendorName, initialView, onInitialViewConsumed }: { staffRole: string; vendorName?: string; initialView?: string | null; onInitialViewConsumed?: () => void }) {
   const isOwner = staffRole === 'owner'
-  const [view, setView] = useState<'people' | 'attendance' | 'advances'>(
-    initialView === 'attendance' || initialView === 'advances' ? initialView : 'people'
+  const [view, setView] = useState<'people' | 'attendance' | 'advances' | 'payroll'>(
+    initialView === 'attendance' || initialView === 'advances' || initialView === 'payroll' ? initialView : 'people'
   )
   useEffect(() => { if (initialView && onInitialViewConsumed) onInitialViewConsumed() }, [initialView, onInitialViewConsumed])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -254,7 +255,7 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
           {scope !== 'both' && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase">{scope} only</span>}
         </h2>
         <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
-          {(['people', 'attendance', 'advances'] as const).map(v => (
+          {(isOwner ? ['people', 'attendance', 'advances', 'payroll'] as const : ['people', 'attendance', 'advances'] as const).map(v => (
             <button key={v} onClick={() => setView(v)} className={`px-3.5 py-1.5 rounded-lg text-xs font-bold capitalize transition ${view === v ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>{v}</button>
           ))}
         </div>
@@ -336,6 +337,8 @@ export default function TabStaff({ staffRole, initialView, onInitialViewConsumed
       )}
 
       {/* ── ADVANCES ── */}
+      {view === 'payroll' && isOwner && <PayrollRun showToast={tt} vendorName={vendorName} />}
+
       {view === 'advances' && (
         <>
           <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">

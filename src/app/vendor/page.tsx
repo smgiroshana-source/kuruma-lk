@@ -2281,7 +2281,7 @@ ${customerRows.map(c => `<tr>
 
         {/* STAFF / HR — WHEEL MART only; owner + manager (server re-checks role) */}
         {tab === 'staff' && isLkTax && (staffRole === 'owner' || staffRole === 'manager') && (
-          <TabStaff staffRole={staffRole} initialView={stockInitialView} onInitialViewConsumed={() => setStockInitialView(null)} />
+          <TabStaff staffRole={staffRole} vendorName={vendorSettings?.invoice_title || vendor?.name} initialView={stockInitialView} onInitialViewConsumed={() => setStockInitialView(null)} />
         )}
 
         {/* PRODUCTS */}
