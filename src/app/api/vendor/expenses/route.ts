@@ -112,6 +112,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'amount must be a positive integer (LKR)' }, { status: 400 })
     }
 
+    // Cash, bank or cheque — no card is used, and a card payment is a bank
+    // payment anyway. Money leaving outside the till must carry its reference
+    // (cheque number, or the bank's confirmation number) or it can never be
+    // matched to the statement.
+    const method = payment_method || 'cash'
+    if (!['cash', 'bank', 'cheque'].includes(method)) {
+      return NextResponse.json({ error: 'Payment must be cash, bank or cheque' }, { status: 400 })
+    }
+    if (method !== 'cash' && !String(reference || '').trim()) {
+      return NextResponse.json({
+        error: method === 'cheque' ? 'Enter the cheque number' : 'Enter the bank reference number',
+      }, { status: 400 })
+    }
+
     // Input VAT is only claimable against a valid tax invoice from a
     // VAT-registered supplier — no invoice number, no claim.
     const claimVat = Math.round(Number(input_vat) || 0)
@@ -150,7 +164,7 @@ export async function POST(req: NextRequest) {
         category,
         description: description.trim(),
         amount: Math.round(amount),
-        payment_method: payment_method || 'cash',
+        payment_method: method,
         reference: reference || null,
         cash_session_id: cash_session_id || null,
         supplier_name:         supplier_name ? String(supplier_name).trim() : null,
@@ -168,7 +182,7 @@ export async function POST(req: NextRequest) {
     // Keep that day's drawer arithmetic right — including a cash expense
     // entered after the day was closed, which is the usual way a phantom
     // shortage appears.
-    if ((payment_method || 'cash') === 'cash') {
+    if (method === 'cash') {
       await recomputeSessionForDate(admin, vendor.id, expense_date)
     }
 

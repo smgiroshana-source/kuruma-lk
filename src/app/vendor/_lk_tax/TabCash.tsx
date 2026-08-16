@@ -123,7 +123,8 @@ const CATEGORY_COLORS: Record<string, string> = {
 const METHOD_BADGE: Record<string, string> = {
   cash: 'bg-emerald-100 text-emerald-700',
   bank: 'bg-blue-100 text-blue-700',
-  card: 'bg-purple-100 text-purple-700',
+  cheque: 'bg-purple-100 text-purple-700',
+  card: 'bg-slate-100 text-slate-600',
 }
 
 // ── Blank form factories ──────────────────────────────────────────────────────
@@ -476,6 +477,10 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       showToast('Enter a valid amount')
       return
     }
+    if (inlineExpForm.payment_method !== 'cash' && !inlineExpForm.reference.trim()) {
+      showToast(inlineExpForm.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the bank reference number')
+      return
+    }
     setSavingInlineExp(true)
     try {
       const res = await fetch('/api/vendor/expenses', {
@@ -540,6 +545,10 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
     }
     if (expForm.amount === '' || Number(expForm.amount) <= 0) {
       showToast('Enter a valid amount')
+      return
+    }
+    if (expForm.payment_method !== 'cash' && !expForm.reference.trim()) {
+      showToast(expForm.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the bank reference number')
       return
     }
     if (expForm.claim_vat) {
@@ -842,7 +851,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                         >
                           <option value="cash">Cash</option>
                           <option value="bank">Bank</option>
-                          <option value="card">Card</option>
+                          <option value="cheque">Cheque</option>
                         </select>
                       </div>
                       <div>
@@ -1501,7 +1510,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                 {[
                   { v: 'cash', l: 'Cash', icon: '💵' },
                   { v: 'bank', l: 'Bank', icon: '🏦' },
-                  { v: 'card', l: 'Card', icon: '💳' },
+                  { v: 'cheque', l: 'Cheque', icon: '📝' },
                 ].map(m => {
                   const on = expForm.payment_method === m.v
                   return (
@@ -1518,13 +1527,22 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                 })}
               </div>
               {expForm.payment_method !== 'cash' && (
-                <input
-                  type="text"
-                  className="mt-2 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                  placeholder="Cheque no. / bank reference (8-digit confirmation no.)"
-                  value={expForm.reference}
-                  onChange={e => setExpForm(p => ({ ...p, reference: e.target.value }))}
-                />
+                <>
+                  <input
+                    type="text"
+                    className="mt-2 w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400"
+                    placeholder={expForm.payment_method === 'cheque'
+                      ? 'Cheque number *'
+                      : 'Bank reference — the 8-digit confirmation number *'}
+                    value={expForm.reference}
+                    onChange={e => setExpForm(p => ({ ...p, reference: e.target.value }))}
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    {expForm.payment_method === 'cheque'
+                      ? 'The cheque counts as paid the day it is written. Nothing comes off the till.'
+                      : 'Nothing comes off the till — this is money moving in the bank.'}
+                  </p>
+                </>
               )}
             </div>
 
