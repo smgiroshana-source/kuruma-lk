@@ -394,6 +394,20 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const [posCustomerIsInsurance, setPosCustomerIsInsurance] = useState(false)
   const [showManualLine, setShowManualLine] = useState(false)
   const [manualLine, setManualLine] = useState({ name: '', qty: '1', price: '' })
+  // Typed wording drifts ("alignment", "Wheel align", "W/A") and makes the
+  // invoice and the service report inconsistent. These are the shop's list.
+  const SERVICE_TYPES = [
+    'Wheel Alignment',
+    'Camber Adjustment',
+    'Caster Adjustment',
+    'Steering Adjustment',
+    'Body Balancing',
+    'Wheel Balancing (clip)',
+    'Wheel Balancing (sticker)',
+    'Thrust Angle',
+    'Tyre Repair',
+  ]
+  const [serviceOther, setServiceOther] = useState(false)
 
   // ── lk_tax computed values ─────────────────────────────────────────────
   const posCurrentEntity = posInvoiceEntities.find((e: any) => e.id === posEntityId) || null
@@ -590,7 +604,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       quantity: qty, maxStock: null, ssclStream: 'SVC',
     }])
     setManualLine({ name: '', qty: '1', price: '' })
-    setShowManualLine(false)
+    setServiceOther(false)
+    // Stay open: a tyre job is usually several services in a row
+    // (alignment + balancing + repair), so the next one is one tap away.
   }
 
   // ── Payment lines ──────────────────────────────────────────────────────
@@ -1087,12 +1103,37 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                   ) : (
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-2">
                       <p className="text-[10px] font-black text-blue-700 uppercase tracking-widest">Service / Labour Line <span className="ml-1 bg-blue-200 text-blue-800 px-1.5 py-0.5 rounded text-[9px]">SVC</span></p>
-                      <input value={manualLine.name} onChange={e => setManualLine(p => ({ ...p, name: e.target.value }))} placeholder="Description (e.g. Wheel Alignment)" className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none focus:border-blue-400" />
+                      <div className="flex flex-wrap gap-1.5">
+                        {SERVICE_TYPES.map(sv => (
+                          <button
+                            key={sv}
+                            onClick={() => { setServiceOther(false); setManualLine(p => ({ ...p, name: sv })) }}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 transition ${
+                              !serviceOther && manualLine.name === sv
+                                ? 'border-blue-500 bg-blue-600 text-white'
+                                : 'border-blue-200 bg-white text-blue-700 hover:border-blue-400'
+                            }`}
+                          >
+                            {sv}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => { setServiceOther(true); setManualLine(p => ({ ...p, name: '' })) }}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 transition ${
+                            serviceOther ? 'border-blue-500 bg-blue-600 text-white' : 'border-blue-200 bg-white text-blue-700 hover:border-blue-400'
+                          }`}
+                        >
+                          ✏️ Other
+                        </button>
+                      </div>
+                      {(serviceOther || (manualLine.name && !SERVICE_TYPES.includes(manualLine.name))) && (
+                        <input autoFocus value={manualLine.name} onChange={e => setManualLine(p => ({ ...p, name: e.target.value }))} placeholder="Type the service — appears on the invoice exactly as written" className="w-full px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none focus:border-blue-400" />
+                      )}
                       <div className="flex gap-2">
                         <input type="text" inputMode="numeric" value={manualLine.qty} onChange={e => setManualLine(p => ({ ...p, qty: e.target.value.replace(/[^0-9]/g, '') }))} placeholder="Qty" className="w-20 px-3 py-2 rounded-lg border-2 border-blue-200 text-sm outline-none text-center" />
                         <input type="text" inputMode="numeric" value={manualLine.price} onChange={e => setManualLine(p => ({ ...p, price: e.target.value.replace(/[^0-9]/g, '') }))} placeholder={posEntryExcl ? `Price excl. VAT (+${posVatRate}% added)` : 'Price (Rs.)'} className={`flex-1 px-3 py-2 rounded-lg border-2 text-sm outline-none ${posEntryExcl ? 'border-amber-300 bg-amber-50' : 'border-blue-200'}`} />
                         <button onClick={addManualLine} className="bg-blue-600 text-white font-bold px-3 py-2 rounded-lg text-sm">Add</button>
-                        <button onClick={() => { setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' }) }} className="text-slate-400 hover:text-red-500 font-bold px-2">✕</button>
+                        <button onClick={() => { setShowManualLine(false); setServiceOther(false); setManualLine({ name: '', qty: '1', price: '' }) }} className="text-slate-400 hover:text-red-500 font-bold px-2">✕</button>
                       </div>
                     </div>
                   )}
