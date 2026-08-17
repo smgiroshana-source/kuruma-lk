@@ -225,7 +225,20 @@ export async function POST(req: NextRequest) {
 
   if (action === 'add_staff') {
     if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
-    const { email, name, role, pin } = body
+    const { name, role, pin } = body
+
+    // Staff log in with a username. An email is still needed underneath for
+    // Supabase Auth — a real one when they have it (so password reset by mail
+    // works), otherwise a placeholder nobody ever types.
+    const username = String(body.username || '').trim().toLowerCase()
+    if (!/^[a-z0-9._-]{3,20}$/.test(username)) {
+      return NextResponse.json({ error: 'Username must be 3–20 characters: letters, numbers, dot, dash or underscore' }, { status: 400 })
+    }
+    const { data: takenRow } = await admin.from('vendor_staff')
+      .select('id').ilike('username', username).maybeSingle()
+    if (takenRow) return NextResponse.json({ error: `Username "${username}" is already taken` }, { status: 400 })
+
+    const email = String(body.email || '').trim() || `${username}.${vendor.id.slice(0, 8)}@staff.kuruma.lk`
 
     const { data: existingUsers } = await admin.auth.admin.listUsers()
     let staffUser = existingUsers?.users?.find((u: any) => u.email === email)
@@ -253,6 +266,7 @@ export async function POST(req: NextRequest) {
       vendor_id: vendor.id,
       user_id: staffUser.id,
       name,
+      username,
       email,
       role: role || 'cashier',
       // Which side of the business this login covers. Owners see both always.
@@ -262,7 +276,25 @@ export async function POST(req: NextRequest) {
     })
 
     if (insertError) return NextResponse.json({ error: insertError.message }, { status: 500 })
-    return NextResponse.json({ success: true, tempPassword })
+    return NextResponse.json({ success: true, tempPassword, username })
+  }
+
+  // ── Reset a staff password ────────────────────────────────────────────────
+  // Staff with a generated email cannot use "forgot password" — there is no
+  // mailbox. The owner resets it here and hands over the new one, which is how
+  // a shop works anyway.
+  if (action === 'reset_staff_password') {
+    if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
+    const { staff_id } = body
+    const { data: target } = await admin.from('vendor_staff')
+      .select('id, name, username, email, user_id').eq('id', staff_id).eq('vendor_id', vendor.id).single()
+    if (!target) return NextResponse.json({ error: 'Staff member not found' }, { status: 404 })
+
+    const tempPassword = 'Staff@' + Math.random().toString(36).slice(2, 8).toUpperCase()
+    const { error: resetErr } = await admin.auth.admin.updateUserById(target.user_id, { password: tempPassword })
+    if (resetErr) return NextResponse.json({ error: resetErr.message }, { status: 400 })
+
+    return NextResponse.json({ success: true, tempPassword, username: target.username, name: target.name })
   }
 
   if (action === 'update_staff') {

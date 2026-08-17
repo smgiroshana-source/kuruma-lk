@@ -2,7 +2,27 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 
 export async function POST(req: NextRequest) {
-  const { email, password } = await req.json()
+  const body = await req.json()
+  const password = body.password
+  // Staff type a username; owners type their email. Anything without an "@" is
+  // treated as a username and resolved to the auth email underneath. Failure
+  // returns the same generic error as a wrong password, so this cannot be used
+  // to find out which usernames exist.
+  let email = String(body.email || '').trim()
+  if (email && !email.includes('@')) {
+    const { createAdminClient } = await import('@/lib/supabase/admin')
+    const admin = createAdminClient()
+    const { data: staffRow } = await admin
+      .from('vendor_staff')
+      .select('email')
+      .ilike('username', email)
+      .eq('active', true)
+      .maybeSingle()
+    if (!staffRow?.email) {
+      return NextResponse.json({ error: 'Invalid login credentials' }, { status: 400 })
+    }
+    email = staffRow.email
+  }
 
   // Create response first so we can set cookies on it
   let response: any = NextResponse.json({ success: false })

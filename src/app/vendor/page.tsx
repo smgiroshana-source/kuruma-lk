@@ -622,8 +622,8 @@ export default function VendorDashboard() {
   // Staff / multi-user
   const [staffList, setStaffList] = useState<any[]>([])
   const [staffLoading, setStaffLoading] = useState(false)
-  const [newStaff, setNewStaff] = useState({ email: '', name: '', role: 'cashier', pin: '' })
-  const [staffTempPassword, setStaffTempPassword] = useState<{ name: string; email: string; password: string } | null>(null)
+  const [newStaff, setNewStaff] = useState({ username: '', email: '', name: '', role: 'cashier', pin: '' })
+  const [staffTempPassword, setStaffTempPassword] = useState<{ name: string; username: string; password: string } | null>(null)
 
   // Draft / On Approval (page-level: used by Sales "Finalise →" to hand off to TabPOS)
   const [pendingPosDraft, setPendingPosDraft] = useState<PendingDraft | null>(null)
@@ -854,19 +854,32 @@ export default function VendorDashboard() {
   const staffSaving = useRef(false)
   async function addStaffMember() {
     if (staffSaving.current) return // double-tap guard — duplicate staff accounts
-    if (!newStaff.email || !newStaff.name) { showToast('Name and email required'); return }
+    if (!newStaff.name.trim() || !newStaff.username.trim()) { showToast('Name and username required'); return }
     staffSaving.current = true
     try {
       const res = await fetch('/api/vendor/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add_staff', ...newStaff }) })
       const j = await res.json()
       if (j.success) {
-        if (j.tempPassword) setStaffTempPassword({ name: newStaff.name, email: newStaff.email, password: j.tempPassword })
+        if (j.tempPassword) setStaffTempPassword({ name: newStaff.name, username: j.username || newStaff.username, password: j.tempPassword })
         else showToast('Staff added!')
-        setNewStaff({ email: '', name: '', role: 'cashier', pin: '' })
+        setNewStaff({ username: '', email: '', name: '', role: 'cashier', pin: '' })
         fetchStaff()
       } else { showToast(j.error || 'Failed') }
     } catch { showToast('Error adding staff') }
     staffSaving.current = false
+  }
+
+  async function resetStaffPassword(s: any) {
+    if (!confirm(`Reset the password for ${s.name}? Their current one stops working immediately.`)) return
+    try {
+      const res = await fetch('/api/vendor/settings', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reset_staff_password', staff_id: s.id }),
+      })
+      const j = await res.json()
+      if (j.success) setStaffTempPassword({ name: j.name || s.name, username: j.username || s.username, password: j.tempPassword })
+      else showToast(j.error || 'Failed')
+    } catch { showToast('Error resetting password') }
   }
 
   async function updateStaffTax(staffId: string, canFile: boolean) {
@@ -4224,8 +4237,9 @@ ${customerRows.map(c => `<tr>
               <div className="bg-slate-50 rounded-lg p-3 mb-3">
                 <div className="grid grid-cols-2 gap-2 mb-2">
                   <input type="text" value={newStaff.name} onChange={e => setNewStaff({ ...newStaff, name: e.target.value })} placeholder="Name" className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  <input type="email" value={newStaff.email} onChange={e => setNewStaff({ ...newStaff, email: e.target.value })} placeholder="Email" className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                  <input type="text" autoCapitalize="none" value={newStaff.username} onChange={e => setNewStaff({ ...newStaff, username: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, '') })} placeholder="Username (they type this to log in)" maxLength={20} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                 </div>
+                <input type="email" value={newStaff.email} onChange={e => setNewStaff({ ...newStaff, email: e.target.value })} placeholder="Email (optional — only for password reset by mail)" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none mb-2" />
                 <div className="grid grid-cols-2 gap-2 mb-2">
                   <select value={newStaff.role} onChange={e => setNewStaff({ ...newStaff, role: e.target.value })} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">
                     <option value="cashier">Cashier (POS only)</option>
@@ -4240,9 +4254,15 @@ ${customerRows.map(c => `<tr>
                 <div className="space-y-2">{staffList.map((s: any) => (
                   <div key={s.id} className="bg-slate-50 rounded-lg px-3 py-2.5">
                     <div className="flex items-center justify-between">
-                      <div><p className="font-semibold text-sm">{s.name}</p><p className="text-[10px] text-slate-400">{s.email}</p></div>
+                      <div>
+                        <p className="font-semibold text-sm">{s.name}</p>
+                        {/* The login they actually type. Older staff created
+                            before usernames existed still sign in by email. */}
+                        <p className="text-[10px] font-mono text-slate-500">{s.username || s.email}</p>
+                      </div>
                       <div className="flex gap-2 items-center">
                         <span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (s.role === 'manager' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600')}>{s.role}</span>
+                        <button onClick={() => resetStaffPassword(s)} className="text-[10px] font-bold text-slate-500 hover:text-orange-600 border border-slate-200 rounded px-1.5 py-0.5">Reset password</button>
                         <button onClick={() => removeStaff(s.id)} className="text-red-400 text-xs font-bold">✕</button>
                       </div>
                     </div>
@@ -4293,8 +4313,8 @@ ${customerRows.map(c => `<tr>
                         <p className="text-sm font-mono font-semibold text-slate-700">{(typeof window !== 'undefined' ? window.location.host : 'kuruma.lk')}/login</p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Email</p>
-                        <p className="text-sm font-mono font-semibold text-slate-700">{staffTempPassword.email}</p>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Username</p>
+                        <p className="text-sm font-mono font-semibold text-slate-700">{staffTempPassword.username}</p>
                       </div>
                       <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Temporary Password</p>
@@ -4308,7 +4328,7 @@ ${customerRows.map(c => `<tr>
                       <p className="text-[10px] text-amber-700">Save this password — it won&apos;t be shown again. Staff change it themselves with &ldquo;Forgot password&rdquo; on the login page (only the owner can reach Settings).</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { const origin = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'; const shop = (isLkTax ? (vendorSettings?.invoice_title || vendor?.name) : vendor?.name) || 'the shop'; const msg = encodeURIComponent('Hi ' + staffTempPassword.name + ',\n\nYour ' + shop + ' staff account is ready:\n\nLogin: ' + origin + '/login\nEmail: ' + staffTempPassword.email + '\nPassword: ' + staffTempPassword.password + '\n\nPlease change your password after first login using "Forgot password" on the login page.'); window.open('https://wa.me/?text=' + msg, '_blank') }} className="flex-1 bg-green-500 text-white font-bold text-sm py-2.5 rounded-xl">Send via WhatsApp</button>
+                      <button onClick={() => { const origin = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'; const shop = (isLkTax ? (vendorSettings?.invoice_title || vendor?.name) : vendor?.name) || 'the shop'; const msg = encodeURIComponent('Hi ' + staffTempPassword.name + ',\n\nYour ' + shop + ' staff account is ready:\n\nLogin: ' + origin + '/login\nUsername: ' + staffTempPassword.username + '\nPassword: ' + staffTempPassword.password + '\n\nKeep this safe. If you forget it, ask the owner to reset it.'); window.open('https://wa.me/?text=' + msg, '_blank') }} className="flex-1 bg-green-500 text-white font-bold text-sm py-2.5 rounded-xl">Send via WhatsApp</button>
                       <button onClick={() => setStaffTempPassword(null)} className="px-4 text-slate-500 text-sm font-semibold">Done</button>
                     </div>
                   </div>
