@@ -203,7 +203,6 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const secondary: Action[] = isCashier ? [] : [
     { icon: '➕', label: 'Add Product', tab: 'add' },
     { icon: '📦', label: 'Stock Count', tab: 'stocktake' },
-    { icon: '🚢', label: 'Import Shipment', tab: 'imports' },
     { icon: '🔀', label: 'Transfer Stock', tab: 'stocktake', sub: 'transfer' },
     { icon: '📝', label: 'Credit Note', tab: 'credit' },
     { icon: '📄', label: 'Daily Report', tab: 'reports' },
@@ -307,31 +306,52 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         </div>
       ))}
 
-      {/* ── Money Out — one door, four paths ──────────────────────────────────
-          Where money goes decides the books: bills are expenses, stock is a
-          GRN (cost + input VAT + payable), supplier payments settle payables,
-          advances land on the person for payroll. The operator just answers
-          "who are you paying?" — each tile routes to the flow that records it
-          correctly, so nothing gets double-counted or lost. */}
-      <div className="bg-white rounded-xl border-2 border-slate-300 p-4 mb-5">
-        <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💸 Money out — who are you paying?</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {([
-            { icon: '🧾', title: 'Bills & expenses', sub: 'Electricity, grocery, transport…', tab: 'cash', tabSub: 'add-expense' },
-            { icon: '📦', title: 'Buying stock', sub: 'Tyres / parts coming in — GRN', tab: 'stocktake', tabSub: 'receive' },
-            { icon: '🏭', title: 'Paying a supplier', sub: 'Money we owe for stock', tab: 'suppliers', tabSub: undefined },
-            { icon: '🧑\u200d🔧', title: 'Staff advance', sub: 'Cash before payday', tab: 'cash', tabSub: 'advance' },
-          ] as const).map(t => (
-            <button
-              key={t.title}
-              onClick={() => onNavigate(t.tab, t.tabSub)}
-              className="text-left px-3.5 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
-            >
-              <span className="text-xl leading-none">{t.icon}</span>
-              <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
-              <span className="block text-[11px] text-slate-400 leading-tight mt-0.5">{t.sub}</span>
-            </button>
-          ))}
+      {/* ── Money vs Goods — two different questions ──────────────────────────
+          "Money out" is paying someone: bills are expenses, supplier payments
+          settle payables, advances land on the person for payroll. Receiving
+          stock is NOT a payment — it's goods arriving; the GRN asks about
+          payment only as its last step. Mixing the two confused operators
+          ("why is buying stock under who-are-you-paying?"), so they're split. */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
+        <div className="lg:col-span-3 bg-white rounded-xl border-2 border-slate-300 p-4">
+          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💸 Money out — who are you paying?</h3>
+          <div className="grid grid-cols-3 gap-2.5">
+            {([
+              { icon: '🧾', title: 'Bills & expenses', sub: 'Electricity, grocery, transport…', tab: 'cash', tabSub: 'add-expense' },
+              { icon: '🏭', title: 'Paying a supplier', sub: 'Money we owe for stock', tab: 'suppliers', tabSub: undefined },
+              { icon: '🧑\u200d🔧', title: 'Staff advance', sub: 'Cash before payday', tab: 'cash', tabSub: 'advance' },
+            ] as const).map(t => (
+              <button
+                key={t.title}
+                onClick={() => onNavigate(t.tab, t.tabSub)}
+                className="text-left px-3.5 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
+              >
+                <span className="text-xl leading-none">{t.icon}</span>
+                <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
+                <span className="block text-[11px] text-slate-400 leading-tight mt-0.5">{t.sub}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="lg:col-span-2 bg-white rounded-xl border-2 border-slate-300 p-4">
+          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">📦 Stock — goods moving</h3>
+          <div className="grid grid-cols-2 gap-2.5">
+            {([
+              { icon: '📥', title: 'Stock arrived', sub: 'GRN — asks about payment at the end', tab: 'stocktake', tabSub: 'receive' },
+              { icon: '🚢', title: 'Container cleared', sub: 'Cusdec + import VAT', tab: 'imports', tabSub: undefined },
+            ] as const).map(t => (
+              <button
+                key={t.title}
+                onClick={() => onNavigate(t.tab, t.tabSub)}
+                className="text-left px-3.5 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
+              >
+                <span className="text-xl leading-none">{t.icon}</span>
+                <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
+                <span className="block text-[11px] text-slate-400 leading-tight mt-0.5">{t.sub}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
