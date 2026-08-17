@@ -76,8 +76,8 @@ const CATEGORIES: { v: string; l: string; icon: string }[] = [
   { v: 'stationery',  l: 'Stationery',  icon: '📄' },
   { v: 'internet',    l: 'Internet',    icon: '🌐' },
   { v: 'transport',   l: 'Transport',   icon: '🚚' },
-  { v: 'repairs',     l: 'Repair',      icon: '🔧' },
   { v: 'maintenance', l: 'Maintenance', icon: '🧰' },
+  { v: 'commission',  l: 'Commission',  icon: '🤝' },
   { v: 'other',       l: 'Other',       icon: '📌' },
 ]
 
@@ -85,6 +85,7 @@ const CATEGORIES: { v: string; l: string; icon: string }[] = [
 // (and 'salaries', which Staff/HR writes; it is never chosen by hand).
 const CATEGORY_LABELS: Record<string, string> = {
   ...Object.fromEntries(CATEGORIES.map(c => [c.v, c.l])),
+  repairs: 'Repair',
   salaries: 'Salaries & Wages',
   utilities: 'Utilities',
   fuel: 'Fuel',
@@ -106,6 +107,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   internet: 'bg-blue-100 text-blue-700',
   transport: 'bg-orange-100 text-orange-700',
   repairs: 'bg-rose-100 text-rose-700',
+  commission: 'bg-rose-100 text-rose-700',
   maintenance: 'bg-teal-100 text-teal-700',
   other: 'bg-gray-100 text-gray-600',
   salaries: 'bg-indigo-100 text-indigo-700',
@@ -1562,6 +1564,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                 placeholder={`e.g. ${expForm.category === 'grocery' ? 'tea and sugar for the office'
                   : expForm.category === 'transport' ? 'three-wheeler to Customs'
                   : expForm.category === 'electricity' ? 'CEB bill for July'
+                  : expForm.category === 'commission' ? 'broker who brought the lorry job'
                   : 'what exactly was bought'}`}
                 value={expForm.description}
                 onChange={e => setExpForm(p => ({ ...p, description: e.target.value }))}

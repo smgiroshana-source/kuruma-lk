@@ -21,9 +21,9 @@ async function getVendor() {
 // once, against a person, so it can't be double-counted here.
 const VALID_CATEGORIES = [
   'grocery', 'rent', 'electricity', 'water', 'stationery',
-  'internet', 'transport', 'repairs', 'maintenance', 'other',
-  // legacy / system-written
-  'utilities', 'salaries', 'fuel', 'bank_charges', 'tax', 'petty_cash',
+  'internet', 'transport', 'maintenance', 'commission', 'other',
+  // legacy / system-written ('repairs' folded into maintenance in the picker)
+  'repairs', 'utilities', 'salaries', 'fuel', 'bank_charges', 'tax', 'petty_cash',
   'consumables', 'tools', 'insurance', 'advertising',
 ] as const
 
