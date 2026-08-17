@@ -4290,7 +4290,7 @@ ${customerRows.map(c => `<tr>
                     <div className="bg-slate-50 rounded-xl p-4 space-y-3 mb-4">
                       <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Login URL</p>
-                        <p className="text-sm font-mono font-semibold text-slate-700">kuruma.lk/login</p>
+                        <p className="text-sm font-mono font-semibold text-slate-700">{(typeof window !== 'undefined' ? window.location.host : 'kuruma.lk')}/login</p>
                       </div>
                       <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Email</p>
@@ -4305,10 +4305,10 @@ ${customerRows.map(c => `<tr>
                       </div>
                     </div>
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-4">
-                      <p className="text-[10px] text-amber-700">Save this password — it won't be shown again. Staff should change it after first login.</p>
+                      <p className="text-[10px] text-amber-700">Save this password — it won&apos;t be shown again. Staff change it themselves with &ldquo;Forgot password&rdquo; on the login page (only the owner can reach Settings).</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { const msg = encodeURIComponent('Hi ' + staffTempPassword.name + ',\n\nYour kuruma.lk staff account is ready:\n\nLogin: https://kuruma.lk/login\nEmail: ' + staffTempPassword.email + '\nPassword: ' + staffTempPassword.password + '\n\nPlease change your password after first login.'); window.open('https://wa.me/?text=' + msg, '_blank') }} className="flex-1 bg-green-500 text-white font-bold text-sm py-2.5 rounded-xl">Send via WhatsApp</button>
+                      <button onClick={() => { const origin = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'; const shop = (isLkTax ? (vendorSettings?.invoice_title || vendor?.name) : vendor?.name) || 'the shop'; const msg = encodeURIComponent('Hi ' + staffTempPassword.name + ',\n\nYour ' + shop + ' staff account is ready:\n\nLogin: ' + origin + '/login\nEmail: ' + staffTempPassword.email + '\nPassword: ' + staffTempPassword.password + '\n\nPlease change your password after first login using "Forgot password" on the login page.'); window.open('https://wa.me/?text=' + msg, '_blank') }} className="flex-1 bg-green-500 text-white font-bold text-sm py-2.5 rounded-xl">Send via WhatsApp</button>
                       <button onClick={() => setStaffTempPassword(null)} className="px-4 text-slate-500 text-sm font-semibold">Done</button>
                     </div>
                   </div>
