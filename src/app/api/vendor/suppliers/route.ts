@@ -105,17 +105,20 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { action } = body
 
+  // Both supplier forms post here — TabStock uses camelCase field names and
+  // `id`, TabSuppliers snake_case and `supplierId`. Accept either spelling so
+  // neither screen's save can silently drop a field again (VAT/TIN were being
+  // discarded, and TabStock edits 400'd on the id mismatch).
+  const contactName = body.contact_name ?? body.contactName
+  const vatRegistered = body.vat_registered ?? body.vatRegistered
+  const supplierTin = body.tin !== undefined ? String(body.tin || '').trim() : undefined
+  if (vatRegistered === true && (supplierTin !== undefined && !/^\d{9}$/.test(supplierTin))) {
+    return NextResponse.json({ error: 'A VAT-registered supplier needs a 9-digit TIN — Schedule 02 rejects anything else' }, { status: 400 })
+  }
+
   // ── CREATE SUPPLIER ──────────────────────────────────────────────────────────
   if (action === 'create') {
-    const { name, contact_name, phone, email, address, payment_terms, notes } = body as {
-      name: string
-      contact_name?: string
-      phone?: string
-      email?: string
-      address?: string
-      payment_terms?: number
-      notes?: string
-    }
+    const { name, phone, email, address, payment_terms, notes, country, currency } = body
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 })
@@ -126,12 +129,16 @@ export async function POST(req: NextRequest) {
       .insert({
         vendor_id: vendor.id,
         name: name.trim(),
-        contact_name: contact_name ?? null,
+        contact_name: contactName ?? null,
         phone: phone ?? null,
         email: email ?? null,
         address: address ?? null,
         payment_terms: payment_terms ?? 30,
         notes: notes ?? null,
+        country: country ?? 'LK',
+        currency: currency ?? 'LKR',
+        vat_registered: vatRegistered === true,
+        tin: supplierTin || null,
         is_active: true,
       })
       .select()
@@ -155,7 +162,8 @@ export async function POST(req: NextRequest) {
       is_active?: boolean
     }
 
-    if (!supplierId) {
+    const targetId = supplierId || body.id
+    if (!targetId) {
       return NextResponse.json({ error: 'supplierId is required' }, { status: 400 })
     }
 
@@ -163,7 +171,7 @@ export async function POST(req: NextRequest) {
     const { data: existing, error: fetchError } = await admin
       .from('suppliers')
       .select('id')
-      .eq('id', supplierId)
+      .eq('id', targetId)
       .eq('vendor_id', vendor.id)
       .single()
 
@@ -174,18 +182,22 @@ export async function POST(req: NextRequest) {
     // Build update object — only include fields that were provided
     const updates: Record<string, unknown> = {}
     if (name !== undefined)          updates.name          = name.trim()
-    if (contact_name !== undefined)  updates.contact_name  = contact_name
+    if (contactName !== undefined)   updates.contact_name  = contactName
     if (phone !== undefined)         updates.phone         = phone
     if (email !== undefined)         updates.email         = email
     if (address !== undefined)       updates.address       = address
     if (payment_terms !== undefined) updates.payment_terms = payment_terms
     if (notes !== undefined)         updates.notes         = notes
     if (is_active !== undefined)     updates.is_active     = is_active
+    if (vatRegistered !== undefined) updates.vat_registered = vatRegistered === true
+    if (supplierTin !== undefined)   updates.tin           = supplierTin || null
+    if (body.country !== undefined)  updates.country       = body.country
+    if (body.currency !== undefined) updates.currency      = body.currency
 
     const { error } = await admin
       .from('suppliers')
       .update(updates)
-      .eq('id', supplierId)
+      .eq('id', targetId)
       .eq('vendor_id', vendor.id)
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

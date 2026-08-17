@@ -47,6 +47,14 @@ const BLANK_SUPPLIER = {
   address: '',
   payment_terms: 30,
   notes: '',
+  // Local supplier tax status — drives the GRN's default VAT rate and
+  // whether their invoices can be claimed as input VAT (Schedule 02)
+  vat_registered: false,
+  tin: '',
+  // What we already owed them before the system existed. Saved as a real
+  // opening-balance invoice so it ages and takes payments like any other.
+  opening_balance: '' as number | '',
+  opening_date: '',
 }
 
 const BLANK_INVOICE = {
@@ -132,15 +140,47 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
   // ── actions ───────────────────────────────────────────────────────────────
   async function handleAddSupplier() {
     if (!newSupplier.name.trim()) { showToast('Supplier name is required'); return }
+    if (newSupplier.vat_registered && !/^\d{9}$/.test(newSupplier.tin.trim())) {
+      showToast('Enter the supplier\'s 9-digit TIN'); return
+    }
+    const opening = Math.round(Number(newSupplier.opening_balance) || 0)
     setSaving(true)
     try {
+      const { opening_balance, opening_date, ...supplierFields } = newSupplier
       const res = await fetch('/api/vendor/suppliers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', vendor_id: vendor.id, ...newSupplier }),
+        body: JSON.stringify({ action: 'create', vendor_id: vendor.id, ...supplierFields }),
       })
-      if (!res.ok) { const d = await res.json(); throw new Error(d.error ?? 'Failed to add supplier') }
-      showToast('Supplier added')
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? 'Failed to add supplier')
+
+      // The old debt becomes a real invoice — it ages, nags when overdue and
+      // takes part-payments, which a number typed on the supplier never could.
+      if (opening > 0 && d.supplier?.id) {
+        const asAt = opening_date || todayStr()
+        const invRes = await fetch('/api/vendor/supplier-invoices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'create_invoice',
+            supplier_id: d.supplier.id,
+            invoice_no: 'OPENING-BALANCE',
+            invoice_date: asAt,
+            due_date: asAt,
+            amount: opening,
+            notes: 'Opening balance — owed before the system started',
+          }),
+        })
+        if (!invRes.ok) {
+          const e2 = await invRes.json()
+          showToast(`Supplier added, but the opening balance failed: ${e2.error ?? 'unknown'} — add it via Add Invoice`)
+        } else {
+          showToast(`Supplier added — Rs.${opening.toLocaleString()} opening balance recorded`)
+        }
+      } else {
+        showToast('Supplier added')
+      }
       setShowAddSupplier(false)
       setNewSupplier({ ...BLANK_SUPPLIER })
       await fetchSuppliers()
@@ -383,6 +423,49 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                 value={newSupplier.notes}
                 onChange={e => setNewSupplier(p => ({ ...p, notes: e.target.value }))}
               />
+            </div>
+
+            {/* VAT status — decides the GRN default rate and input VAT claims */}
+            <div className={`rounded-xl border-2 p-3 ${newSupplier.vat_registered ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={newSupplier.vat_registered}
+                  onChange={e => setNewSupplier(p => ({ ...p, vat_registered: e.target.checked }))}
+                  className="w-4 h-4 mt-0.5 accent-emerald-600" />
+                <span>
+                  <span className="block text-xs font-bold text-slate-700">VAT-registered supplier</span>
+                  <span className="block text-[11px] text-slate-400">GRN lines default to 18% and their invoices count as input VAT</span>
+                </span>
+              </label>
+              {newSupplier.vat_registered && (
+                <input
+                  type="text" inputMode="numeric" maxLength={9}
+                  className="mt-2 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  placeholder="9-digit TIN *"
+                  value={newSupplier.tin}
+                  onChange={e => setNewSupplier(p => ({ ...p, tin: e.target.value.replace(/\D/g, '') }))}
+                />
+              )}
+            </div>
+
+            {/* Old debt from before the system — becomes a real invoice */}
+            <div className="rounded-xl border-2 border-slate-200 p-3">
+              <p className="text-xs font-bold text-slate-700 mb-0.5">Already owe this supplier money?</p>
+              <p className="text-[11px] text-slate-400 mb-2">The old balance is saved as an invoice, so it ages and takes payments like any other.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="number" min={0}
+                  className="border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  placeholder="Amount owed (Rs.)"
+                  value={newSupplier.opening_balance}
+                  onChange={e => setNewSupplier(p => ({ ...p, opening_balance: e.target.value === '' ? '' : Math.round(Number(e.target.value)) }))}
+                />
+                <input
+                  type="date"
+                  className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
+                  value={newSupplier.opening_date}
+                  onChange={e => setNewSupplier(p => ({ ...p, opening_date: e.target.value }))}
+                />
+              </div>
             </div>
           </div>
           <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
