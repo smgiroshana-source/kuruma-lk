@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { recomputeSessionForDate } from '@/lib/cash'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -185,7 +186,7 @@ export async function POST(req: NextRequest) {
       supplier_id: string
       amount: number
       payment_date: string
-      method: 'cash' | 'bank' | 'cheque' | 'card'
+      method: 'cash' | 'online' | 'cheque' | 'bank' | 'card'
       reference?: string
       notes?: string
     }
@@ -221,20 +222,23 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Payment control (owner rule): cheque and bank-transfer payments get an
+    // Payment control (owner rule): cheque and online-transfer payments get an
     // 8-digit system confirmation number. Cheques: the operator writes it on
-    // the cheque book slip — the owner signs only numbered slips. Bank
+    // the cheque book slip — the owner signs only numbered slips. Online
     // transfers: the operator types it into the transfer's remarks field, so
     // the bank statement itself carries the traceable number.
+    // ('bank'/'card' accepted as legacy spellings of online.)
     const methodNorm = String(method).toLowerCase()
     const isCheque = methodNorm.includes('cheque')
-    const isBank = methodNorm.includes('bank')
+    const isOnline = methodNorm === 'online' || methodNorm.includes('bank') || methodNorm === 'card'
     if (isCheque && !reference?.trim()) {
       return NextResponse.json({ error: 'Cheque number is required for cheque payments' }, { status: 400 })
     }
-    const paymentConfirmNo = (isCheque || isBank)
+    const paymentConfirmNo = (isCheque || isOnline)
       ? String(Math.floor(10000000 + Math.random() * 90000000))
       : null
+
+    const methodCanon = isCheque ? 'cheque' : isOnline ? 'online' : 'cash'
 
     // Insert the payment record
     const { error: payErr } = await admin.from('supplier_payments').insert({
@@ -243,7 +247,7 @@ export async function POST(req: NextRequest) {
       supplier_invoice_id: invoice_id,
       amount,
       payment_date,
-      method,
+      method: methodCanon,
       reference: reference ?? null,
       notes: notes ?? null,
       payment_confirm_no: paymentConfirmNo,
@@ -264,7 +268,11 @@ export async function POST(req: NextRequest) {
       .eq('vendor_id', vendor.id)
 
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
-    return NextResponse.json({ ok: true, confirm_no: paymentConfirmNo, confirm_kind: isCheque ? 'cheque' : isBank ? 'bank' : null })
+
+    // Cash left the drawer — that day's expected count must know
+    if (methodCanon === 'cash') await recomputeSessionForDate(admin, vendor.id, payment_date)
+
+    return NextResponse.json({ ok: true, confirm_no: paymentConfirmNo, confirm_kind: isCheque ? 'cheque' : isOnline ? 'online' : null })
   }
 
   // ── DELETE INVOICE ───────────────────────────────────────────────────────────

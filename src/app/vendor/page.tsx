@@ -1868,11 +1868,21 @@ ${customerRows.map(c => `<tr>
         // null = checked, genuinely no session that day ("No cash session" note).
         let cashSession: any = undefined
         let corrections: any[] = []
-        try { if (cs.ok) { const cj = await cs.json(); cashSession = cj.session || null; corrections = cj.corrections || [] } } catch {}
+        let supplierCashPays: any[] = []
+        try { if (cs.ok) { const cj = await cs.json(); cashSession = cj.session || null; corrections = cj.corrections || []; supplierCashPays = cj.supplier_cash_payments || [] } } catch {}
         // Money that LEFT the drawer has to be on the report — otherwise the
         // owner sees the float drop with no explanation of where it went.
         let dayExpenses: any[] = []
         try { if (ex.ok) { const ej = await ex.json(); dayExpenses = ej.expenses || [] } } catch {}
+        // Supplier payments aren't expenses (they settle payables), but cash is
+        // cash: the report's paid-out list carries both.
+        dayExpenses = [
+          ...dayExpenses,
+          ...supplierCashPays.map((p: any) => ({
+            description: `Supplier payment — ${p.supplier?.name || 'supplier'}`,
+            category: 'supplier', amount: p.amount, payment_method: 'cash',
+          })),
+        ]
         generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses)
       }
     } catch { showToast('Failed') }

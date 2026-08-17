@@ -159,7 +159,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Dashboard deep-links: 'expenses' opens the expenses view; 'add-expense'
   // additionally opens the Add Expense modal ready to type.
   const [activeTab, setActiveTab] = useState<'reconciliation' | 'expenses'>(
-    initialView === 'expenses' || initialView === 'add-expense' ? 'expenses' : 'reconciliation'
+    initialView === 'expenses' || initialView === 'add-expense' || initialView === 'advance' ? 'expenses' : 'reconciliation'
   )
 
   // ── Cash Reconciliation state ──────────────────────────────────────────────
@@ -284,6 +284,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Honour the dashboard deep-link once: land with the Add Expense modal open
   useEffect(() => {
     if (initialView === 'add-expense') { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }
+    if (initialView === 'advance') setShowAdvance(true)
     if (initialView && onInitialViewConsumed) onInitialViewConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

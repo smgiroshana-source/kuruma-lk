@@ -85,7 +85,21 @@ export async function GET(req: NextRequest) {
       .eq('session_date', date)
       .order('created_at')
 
-    return NextResponse.json({ session: sessionWithCount, carry_forward_mismatch: carryForward, corrections: corrections || [] })
+    // Cash handed to suppliers that day — the daily report lists it beside
+    // cash expenses so the drop in the drawer is fully explained
+    const { data: supplierPayments } = await admin
+      .from('supplier_payments')
+      .select('amount, method, reference, payment_date, supplier:suppliers(name)')
+      .eq('vendor_id', vendor.id)
+      .eq('payment_date', date)
+      .eq('method', 'cash')
+
+    return NextResponse.json({
+      session: sessionWithCount,
+      carry_forward_mismatch: carryForward,
+      corrections: corrections || [],
+      supplier_cash_payments: supplierPayments || [],
+    })
   }
 
   // No date param → last 60 sessions

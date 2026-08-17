@@ -193,10 +193,55 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     try {
       const r = await fetch('/api/vendor/grns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'post_grn', grnId }) })
       const j = await r.json()
-      if (r.ok) { showToast('✅ ' + j.message); fetchGrnList(); onDataChanged() }
+      if (r.ok) {
+        showToast('✅ ' + j.message)
+        fetchGrnList(); onDataChanged()
+        // The debt now exists — ask the one question the person at the goods
+        // door can answer: did money change hands?
+        if (j.payable) setPayNow({ payable: j.payable, supplierId: grnListSupplierOf(grnId) })
+      }
       else showToast('⚠️ ' + j.error)
     } catch { showToast('Network error') }
     setGrnPosting(null)
+  }
+
+  // Supplier id for a GRN already in the loaded list (needed by record_payment)
+  const grnListSupplierOf = (grnId: string) => (grnList.find((g: any) => g.id === grnId) as any)?.supplier_id || null
+
+  // ── Pay-now-or-later after posting ──
+  const [payNow, setPayNow] = useState<{ payable: any; supplierId: string | null } | null>(null)
+  const [payNowMethod, setPayNowMethod] = useState<'cash' | 'online'>('cash')
+  const [payNowRef, setPayNowRef] = useState('')
+  const [payNowBusy, setPayNowBusy] = useState(false)
+  const [payNowSlip, setPayNowSlip] = useState<{ no: string; amount: number } | null>(null)
+
+  async function settlePayableNow() {
+    if (!payNow?.payable || !payNow.supplierId) return
+    if (payNowMethod === 'online' && !payNowRef.trim()) {
+      // The 8-digit number comes back from the server; the operator types it
+      // into the transfer remarks — the reference here is optional context
+    }
+    setPayNowBusy(true)
+    try {
+      const r = await fetch('/api/vendor/supplier-invoices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'record_payment',
+          invoice_id: payNow.payable.id,
+          supplier_id: payNow.supplierId,
+          amount: payNow.payable.amount,
+          payment_date: colomboToday(),
+          method: payNowMethod,
+          reference: payNowRef.trim() || null,
+        }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Failed')
+      if (j.confirm_no) setPayNowSlip({ no: j.confirm_no, amount: payNow.payable.amount })
+      else showToast('✅ Paid — came off today\'s drawer')
+      setPayNow(null); setPayNowRef('')
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setPayNowBusy(false)
   }
 
   async function deleteGrn(grnId: string, grnNumber: string) {
@@ -1767,6 +1812,56 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           onClose={() => setDamageProduct(null)}
           onSaved={() => onDataChanged()}
         />
+      )}
+
+      {/* ── Did you pay for this now? (after posting a GRN) ── */}
+      {payNow && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5">
+            <h3 className="text-lg font-black text-slate-900">Did you pay for this now?</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">
+              {payNow.payable.invoice_no} · Rs.{Number(payNow.payable.amount).toLocaleString()} owed to the supplier
+            </p>
+
+            <div className="grid grid-cols-2 gap-1.5 mb-3">
+              {([{ v: 'cash', l: '💵 Cash / drawer' }, { v: 'online', l: '🏦 Online' }] as const).map(m => (
+                <button key={m.v} onClick={() => setPayNowMethod(m.v)}
+                  className={`py-2.5 rounded-xl border-2 text-sm font-bold ${payNowMethod === m.v ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
+                  {m.l}
+                </button>
+              ))}
+            </div>
+            {payNowMethod === 'cash'
+              ? <p className="text-[11px] text-amber-700 mb-3">Rs.{Number(payNow.payable.amount).toLocaleString()} comes off today&apos;s drawer count.</p>
+              : <p className="text-[11px] text-slate-400 mb-3">You&apos;ll get an 8-digit confirmation number to type into the transfer&apos;s remarks.</p>}
+
+            <div className="flex flex-col gap-2">
+              <button onClick={settlePayableNow} disabled={payNowBusy}
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-50">
+                {payNowBusy ? 'Recording…' : `Yes — paid Rs.${Number(payNow.payable.amount).toLocaleString()}`}
+              </button>
+              <button onClick={() => setPayNow(null)}
+                className="w-full py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600 hover:bg-slate-50">
+                No — paying later (due {payNow.payable.due_date})
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-2">
+              Either way the amount is tracked in Suppliers &amp; Payables — nothing is forgotten.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* 8-digit confirmation for an online pay-now (same drill as Payables) */}
+      {payNowSlip && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={() => setPayNowSlip(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center" onClick={e => e.stopPropagation()}>
+            <p className="text-xs font-bold text-slate-500 uppercase">Type this into the transfer remarks</p>
+            <p className="text-4xl font-black tracking-[0.3em] text-slate-900 my-4 font-mono">{payNowSlip.no}</p>
+            <p className="text-xs text-slate-400 mb-4">Rs.{payNowSlip.amount.toLocaleString()} — the bank statement will carry this number</p>
+            <button onClick={() => setPayNowSlip(null)} className="w-full py-2.5 rounded-xl bg-slate-800 text-white text-sm font-black">Done — number entered</button>
+          </div>
+        </div>
       )}
     </div>
   )

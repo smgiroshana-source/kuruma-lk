@@ -198,10 +198,42 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 3. The goods now exist in stock, so the debt for them must exist too.
+    // Auto-create the payable from the GRN totals (invoice total = net + VAT —
+    // what the supplier actually billed). Due date follows the supplier's
+    // payment terms. Without a supplier record there is nobody to owe, so no
+    // payable — the response says so instead of failing the post.
+    let payable: any = null
+    if (grn.supplier_id && parseInt(grn.total_cost || 0) > 0) {
+      const { data: sup } = await admin.from('suppliers')
+        .select('payment_terms').eq('id', grn.supplier_id).eq('vendor_id', vendor.id).single()
+      const termDays = sup?.payment_terms ?? 30
+      const baseDate = grn.supplier_invoice_date || grn.received_at
+      const due = new Date(`${baseDate}T00:00:00+05:30`)
+      due.setDate(due.getDate() + termDays)
+      const { data: inv, error: invErr } = await admin.from('supplier_invoices').insert({
+        vendor_id: vendor.id,
+        supplier_id: grn.supplier_id,
+        invoice_no: grn.supplier_invoice_no || grn.grn_number,
+        invoice_date: baseDate,
+        due_date: due.toLocaleDateString('en-CA'),
+        amount: parseInt(grn.total_cost),
+        amount_paid: 0,
+        status: 'unpaid',
+        notes: `Auto from ${grn.grn_number}`,
+        grn_id: grn.id,
+      }).select('id, invoice_no, amount, due_date').single()
+      // The stock posting stands either way — a payable failure is reported,
+      // never allowed to half-undo a posted GRN.
+      if (!invErr && inv) payable = inv
+    }
+
     const totalQty = items.reduce((s: number, i: any) => s + i.quantity, 0)
     return NextResponse.json({
       success: true,
       message: `GRN ${grn.grn_number} posted — ${totalQty} units received, stock updated`,
+      payable,
+      payableSkipped: !grn.supplier_id ? 'no_supplier' : (parseInt(grn.total_cost || 0) <= 0 ? 'zero_total' : null),
     })
   }
 

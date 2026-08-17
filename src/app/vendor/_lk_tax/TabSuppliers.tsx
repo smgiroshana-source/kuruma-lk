@@ -406,6 +406,10 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       {/* ── ADD INVOICE MODAL ──────────────────────────────────────────────── */}
       {showAddInvoice && selectedSupplier && (
         <Modal title={`Add Invoice — ${selectedSupplier.name}`} onClose={() => setShowAddInvoice(false)}>
+          <p className="text-[11px] text-slate-400 -mt-2 mb-3">
+            New stock arrivals create their invoice automatically when the GRN is posted — use this for
+            <strong> old pre-system debts</strong> (enter each as an opening balance) or an invoice with no GRN.
+          </p>
           <div className="flex flex-col gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">Supplier Invoice No. <span className="text-red-500">*</span></label>
@@ -562,9 +566,8 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                         onChange={e => setNewPayment(p => ({ ...p, method: e.target.value }))}
                       >
                         <option>Cash</option>
-                        <option>Bank Transfer</option>
+                        <option>Online</option>
                         <option>Cheque</option>
-                        <option>Card</option>
                       </select>
                     </div>
                   </div>
@@ -572,7 +575,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                     <label className="block text-xs font-bold text-slate-500 mb-1">Reference</label>
                     <input
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                      placeholder="Cheque no. / transfer ref (optional)"
+                      placeholder="Cheque no. / transfer ref"
                       value={newPayment.reference}
                       onChange={e => setNewPayment(p => ({ ...p, reference: e.target.value }))}
                     />

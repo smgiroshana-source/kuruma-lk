@@ -26,12 +26,22 @@ export async function computeExpected(admin: any, vendorId: string, session: any
     .eq('payment_method', 'cash')
   const cashExpenses = (expenseRows || []).reduce((s: number, e: any) => s + parseInt(e.amount || 0), 0)
 
+  // Cash handed to suppliers leaves the same drawer — without this a cash
+  // supplier payment shows up as a shortage at close.
+  const { data: supPayRows } = await admin
+    .from('supplier_payments')
+    .select('amount')
+    .eq('vendor_id', vendorId)
+    .eq('payment_date', sessionDate)
+    .eq('method', 'cash')
+  const cashSupplierPayments = (supPayRows || []).reduce((s: number, p: any) => s + parseInt(p.amount || 0), 0)
+
   const adjIn = parseInt(session.adjustment_in || 0)
   const adjOut = parseInt(session.adjustment_out || 0)
 
   return {
-    cashSales, cashExpenses, adjIn, adjOut,
-    expectedCash: openingBal + cashSales - cashExpenses + adjIn - adjOut,
+    cashSales, cashExpenses, cashSupplierPayments, adjIn, adjOut,
+    expectedCash: openingBal + cashSales - cashExpenses - cashSupplierPayments + adjIn - adjOut,
   }
 }
 
