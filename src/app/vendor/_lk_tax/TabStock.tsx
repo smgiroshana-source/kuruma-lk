@@ -140,7 +140,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     setGrnListLoading(false)
   }
 
-  async function createGrn() {
+  async function createGrn(postNow = false) {
     if (grnItems.length === 0) { showToast('Add at least one item'); return }
     setGrnLoading(true)
     try {
@@ -178,7 +178,24 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       })
       const j = await r.json()
       if (r.ok) {
-        showToast(`✅ ${j.grnNumber} saved as draft`)
+        const supplierIdAtSave = grnForm.supplierId
+        if (postNow && j.grn?.id) {
+          // Same motion: stock in, cost layers, payable, pay-now question
+          const pr = await fetch('/api/vendor/grns', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'post_grn', grnId: j.grn.id }),
+          })
+          const pj = await pr.json()
+          if (pr.ok) {
+            showToast('✅ ' + pj.message)
+            if (pj.payable) setPayNow({ payable: pj.payable, supplierId: supplierIdAtSave || null })
+          } else {
+            // Posting failed but the draft exists — say so, don't lose the work
+            showToast(`⚠️ ${j.grnNumber} saved as draft but posting failed: ${pj.error} — post it from GRN History`)
+          }
+        } else {
+          showToast(`✅ ${j.grnNumber} saved as draft`)
+        }
         setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '' })
         setGrnProductSearch(''); setGrnCsvPreview(null); setGrnCsvFileName('')
         fetchGrnList(); onDataChanged(); setStockMainView('history')
@@ -1273,12 +1290,18 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     <div className="flex gap-8 border-t border-slate-200 pt-1 mt-1"><span className="font-bold text-slate-700">Total Cost</span><span className="font-black w-32 text-right">Rs.{grnTotal.toLocaleString()}</span></div>
                   </div>
                   <div className="flex gap-3">
-                    <button onClick={createGrn} disabled={grnLoading}
-                      className="flex-1 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold text-sm py-3 rounded-xl">
-                      {grnLoading ? '⏳ Saving…' : '💾 Save as Draft'}
+                    <button onClick={() => createGrn(false)} disabled={grnLoading}
+                      className="bg-white border-2 border-slate-300 hover:bg-slate-50 disabled:opacity-50 text-slate-700 font-bold text-sm py-3 px-5 rounded-xl">
+                      {grnLoading ? '⏳' : '💾 Save as Draft'}
+                    </button>
+                    <button onClick={() => createGrn(true)} disabled={grnLoading}
+                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-black text-sm py-3 rounded-xl">
+                      {grnLoading ? '⏳ Saving…' : '✅ Post & Update Stock'}
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-400 text-center mt-2">Review the draft then post it to update stock quantities</p>
+                  <p className="text-[10px] text-slate-400 text-center mt-2">
+                    Post = stock counted and checked against the delivery note. Draft = still unpacking — finish it later from GRN History.
+                  </p>
                 </div>
               )}
             </div>
