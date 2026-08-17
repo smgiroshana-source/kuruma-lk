@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/client'
 import { compressImage } from '@/lib/compressImage'
 import { escapeHtml } from '@/lib/escapeHtml'
 import PayrollRun from './PayrollRun'
+import StaffLogins from '../_shared/StaffLogins'
 
 type PayItem = {
   id?: string; kind: string; label: string; amount: number | string
@@ -37,8 +38,8 @@ const PAY_PRESETS: Omit<PayItem, 'visible_to_office'>[] = [
 
 export default function TabStaff({ staffRole, vendorName, initialView, onInitialViewConsumed }: { staffRole: string; vendorName?: string; initialView?: string | null; onInitialViewConsumed?: () => void }) {
   const isOwner = staffRole === 'owner'
-  const [view, setView] = useState<'people' | 'attendance' | 'advances' | 'payroll'>(
-    initialView === 'attendance' || initialView === 'advances' || initialView === 'payroll' ? initialView : 'people'
+  const [view, setView] = useState<'people' | 'attendance' | 'advances' | 'payroll' | 'logins'>(
+    initialView === 'attendance' || initialView === 'advances' || initialView === 'payroll' || initialView === 'logins' ? initialView : 'people'
   )
   useEffect(() => { if (initialView && onInitialViewConsumed) onInitialViewConsumed() }, [initialView, onInitialViewConsumed])
   const [employees, setEmployees] = useState<Employee[]>([])
@@ -255,7 +256,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
           {scope !== 'both' && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 uppercase">{scope} only</span>}
         </h2>
         <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
-          {(isOwner ? ['people', 'attendance', 'advances', 'payroll'] as const : ['people', 'attendance', 'advances'] as const).map(v => (
+          {(isOwner ? ['people', 'attendance', 'advances', 'payroll', 'logins'] as const : ['people', 'attendance', 'advances'] as const).map(v => (
             <button key={v} onClick={() => setView(v)} className={`px-3.5 py-1.5 rounded-lg text-xs font-bold capitalize transition ${view === v ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>{v}</button>
           ))}
         </div>
@@ -338,6 +339,9 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
 
       {/* ── ADVANCES ── */}
       {view === 'payroll' && isOwner && <PayrollRun showToast={tt} vendorName={vendorName} />}
+
+      {/* Logins: who can sign in, and what they may touch. Owner only. */}
+      {view === 'logins' && isOwner && <StaffLogins showToast={tt} isLkTax />}
 
       {view === 'advances' && (
         <>

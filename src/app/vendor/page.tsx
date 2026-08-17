@@ -32,6 +32,7 @@ import TabFleet from './_lk_tax/TabFleet'
 import TabStaff from './_lk_tax/TabStaff'
 import TabImports from './_lk_tax/TabImports'
 import TabTax from './_lk_tax/TabTax'
+import StaffLogins from './_shared/StaffLogins'
 import TabCash from './_lk_tax/TabCash'
 import TabReports from './_lk_tax/TabReports'
 
@@ -620,10 +621,6 @@ export default function VendorDashboard() {
   const [passwordLoading, setPasswordLoading] = useState(false)
 
   // Staff / multi-user
-  const [staffList, setStaffList] = useState<any[]>([])
-  const [staffLoading, setStaffLoading] = useState(false)
-  const [newStaff, setNewStaff] = useState({ username: '', email: '', name: '', role: 'cashier', pin: '' })
-  const [staffTempPassword, setStaffTempPassword] = useState<{ name: string; username: string; password: string } | null>(null)
 
   // Draft / On Approval (page-level: used by Sales "Finalise →" to hand off to TabPOS)
   const [pendingPosDraft, setPendingPosDraft] = useState<PendingDraft | null>(null)
@@ -718,7 +715,6 @@ export default function VendorDashboard() {
     // Only load settings tab data once per session — fetchSettings() already runs on mount
     if (tab === 'settings' && !settingsTabLoadedRef.current) {
       settingsTabLoadedRef.current = true
-      fetchStaff()
       fetch('/api/vendor/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -842,79 +838,9 @@ export default function VendorDashboard() {
 
   // GRN / supplier / stocktake functions moved into _lk_tax/TabStock and _standard/TabStock components
 
-  async function fetchStaff() {
-    setStaffLoading(true)
-    try {
-      const res = await fetch('/api/vendor/settings?action=staff')
-      if (res.ok) { const j = await res.json(); setStaffList(j.staff || []) }
-    } catch {}
-    setStaffLoading(false)
-  }
-
-  const staffSaving = useRef(false)
-  async function addStaffMember() {
-    if (staffSaving.current) return // double-tap guard — duplicate staff accounts
-    if (!newStaff.name.trim() || !newStaff.username.trim()) { showToast('Name and username required'); return }
-    staffSaving.current = true
-    try {
-      const res = await fetch('/api/vendor/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'add_staff', ...newStaff }) })
-      const j = await res.json()
-      if (j.success) {
-        if (j.tempPassword) setStaffTempPassword({ name: newStaff.name, username: j.username || newStaff.username, password: j.tempPassword })
-        else showToast('Staff added!')
-        setNewStaff({ username: '', email: '', name: '', role: 'cashier', pin: '' })
-        fetchStaff()
-      } else { showToast(j.error || 'Failed') }
-    } catch { showToast('Error adding staff') }
-    staffSaving.current = false
-  }
-
-  async function resetStaffPassword(s: any) {
-    if (!confirm(`Reset the password for ${s.name}? Their current one stops working immediately.`)) return
-    try {
-      const res = await fetch('/api/vendor/settings', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'reset_staff_password', staff_id: s.id }),
-      })
-      const j = await res.json()
-      if (j.success) setStaffTempPassword({ name: j.name || s.name, username: j.username || s.username, password: j.tempPassword })
-      else showToast(j.error || 'Failed')
-    } catch { showToast('Error resetting password') }
-  }
-
-  async function updateStaffTax(staffId: string, canFile: boolean) {
-    try {
-      const res = await fetch('/api/vendor/settings', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_staff', staff_id: staffId, can_file_tax: canFile }),
-      })
-      const j = await res.json()
-      if (!res.ok || j.error) throw new Error(j.error || 'Failed')
-      setStaffList(prev => prev.map((s: any) => s.id === staffId ? { ...s, can_file_tax: canFile } : s))
-      showToast(canFile ? '🧾 Tax filing access granted — sees whole-company figures' : 'Tax filing access removed')
-    } catch (e: any) { showToast('Error: ' + e.message) }
-  }
-
-  async function updateStaffScope(staffId: string, scope: string) {
-    try {
-      const res = await fetch('/api/vendor/settings', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_staff', staff_id: staffId, branch_scope: scope }),
-      })
-      const j = await res.json()
-      if (!res.ok || j.error) throw new Error(j.error || 'Failed')
-      setStaffList(prev => prev.map((s: any) => s.id === staffId ? { ...s, branch_scope: scope } : s))
-      showToast(scope === 'both' ? 'Access: shop + workshop' : `Access: ${scope} only`)
-    } catch (e: any) { showToast('Error: ' + e.message) }
-  }
-
-  async function removeStaff(staffId: string) {
-    if (!confirm('Remove this staff member?')) return
-    try {
-      const res = await fetch('/api/vendor/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'remove_staff', staff_id: staffId }) })
-      if (res.ok) { showToast('Removed'); fetchStaff() }
-    } catch {}
-  }
+  // Staff logins are handled entirely by _shared/StaffLogins (username,
+  // password, role, branch scope, tax authority) — it loads and saves its own
+  // data, so the page keeps no staff state of its own.
 
   // Returns false (after triggering a full reload) when an API response belongs to
   // a different vendor than this page first rendered — see sessionVendorIdRef.
@@ -4230,110 +4156,11 @@ ${customerRows.map(c => `<tr>
               </div>
             </div>
 
-            {/* Staff */}
+            {/* Staff logins — one panel: username, password, role, scope.
+                Shared component so both vendors get the same behaviour, and
+                WHEEL MART also reaches it from Staff → Logins. */}
             <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <h3 className="font-bold text-sm mb-1">Staff / Multi-User</h3>
-              <p className="text-xs text-slate-400 mb-3">Add cashiers who can use POS.</p>
-              <div className="bg-slate-50 rounded-lg p-3 mb-3">
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <input type="text" value={newStaff.name} onChange={e => setNewStaff({ ...newStaff, name: e.target.value })} placeholder="Name" className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  <input type="text" autoCapitalize="none" value={newStaff.username} onChange={e => setNewStaff({ ...newStaff, username: e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, '') })} placeholder="Username (they type this to log in)" maxLength={20} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                </div>
-                <input type="email" value={newStaff.email} onChange={e => setNewStaff({ ...newStaff, email: e.target.value })} placeholder="Email (optional — only for password reset by mail)" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none mb-2" />
-                <div className="grid grid-cols-2 gap-2 mb-2">
-                  <select value={newStaff.role} onChange={e => setNewStaff({ ...newStaff, role: e.target.value })} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none">
-                    <option value="cashier">Cashier (POS only)</option>
-                    <option value="manager">Manager (Full access)</option>
-                  </select>
-                  <input type="text" value={newStaff.pin} onChange={e => setNewStaff({ ...newStaff, pin: e.target.value.replace(/\D/g, '').slice(0, 4) })} placeholder="4-digit PIN" className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" maxLength={4} />
-                </div>
-                <button onClick={addStaffMember} className="bg-blue-500 active:bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-lg w-full">+ Add Staff</button>
-              </div>
-              {staffLoading ? <div className="text-center py-4"><div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" /></div> :
-                staffList.length === 0 ? <p className="text-xs text-slate-400 text-center py-3">No staff yet — you're the sole owner.</p> :
-                <div className="space-y-2">{staffList.map((s: any) => (
-                  <div key={s.id} className="bg-slate-50 rounded-lg px-3 py-2.5">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-sm">{s.name}</p>
-                        {/* The login they actually type. Older staff created
-                            before usernames existed still sign in by email. */}
-                        <p className="text-[10px] font-mono text-slate-500">{s.username || s.email}</p>
-                      </div>
-                      <div className="flex gap-2 items-center">
-                        <span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (s.role === 'manager' ? 'bg-purple-100 text-purple-600' : 'bg-blue-100 text-blue-600')}>{s.role}</span>
-                        <button onClick={() => resetStaffPassword(s)} className="text-[10px] font-bold text-slate-500 hover:text-orange-600 border border-slate-200 rounded px-1.5 py-0.5">Reset password</button>
-                        <button onClick={() => removeStaff(s.id)} className="text-red-400 text-xs font-bold">✕</button>
-                      </div>
-                    </div>
-                    {/* Tax filing authority — sees the consolidated whole-company
-                        VAT/SSCL figures (one TIN, one return) and may submit */}
-                    <button
-                      onClick={() => updateStaffTax(s.id, !(s.can_file_tax === true))}
-                      className={'mt-2 w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 transition ' + (s.can_file_tax
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
-                        : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400')}>
-                      <span>🧾 Tax filing — consolidated VAT/SSCL for the whole Pvt Ltd</span>
-                      <span>{s.can_file_tax ? 'ON' : 'OFF'}</span>
-                    </button>
-                    {/* Which side of the business this login covers — tap to change */}
-                    <div className="flex items-center gap-1.5 mt-2">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mr-1">Can see</span>
-                      {[{ v: 'shop', l: 'Shop' }, { v: 'workshop', l: 'Workshop' }, { v: 'both', l: 'Both' }].map(o => {
-                        const active = (s.branch_scope || 'shop') === o.v
-                        return (
-                          <button key={o.v}
-                            onClick={() => updateStaffScope(s.id, o.v)}
-                            className={'px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 transition ' + (active
-                              ? (o.v === 'both' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-800 text-white border-slate-800')
-                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400')}>
-                            {o.l}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))}</div>
-              }
-              <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
-                <p className="text-[10px] text-amber-700"><strong>Cashiers</strong> handle POS, drawer, receivables, stock and suppliers. <strong>Managers</strong> get everything except settings. <strong>Can see</strong> limits a person to one side of the business — tap <strong>Both</strong> for someone who works across shop and workshop. All actions are logged.</p>
-              </div>
-
-              {staffTempPassword && (
-                <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setStaffTempPassword(null)}>
-                  <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl" onClick={e => e.stopPropagation()}>
-                    <div className="text-center mb-4">
-                      <div className="text-4xl mb-2">🔐</div>
-                      <h3 className="text-lg font-black text-slate-900">Staff Account Ready</h3>
-                      <p className="text-xs text-slate-400 mt-1">Share these login details with <strong>{staffTempPassword.name}</strong></p>
-                    </div>
-                    <div className="bg-slate-50 rounded-xl p-4 space-y-3 mb-4">
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Login URL</p>
-                        <p className="text-sm font-mono font-semibold text-slate-700">{(typeof window !== 'undefined' ? window.location.host : 'kuruma.lk')}/login</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Username</p>
-                        <p className="text-sm font-mono font-semibold text-slate-700">{staffTempPassword.username}</p>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Temporary Password</p>
-                        <div className="flex items-center gap-2">
-                          <p className="text-lg font-mono font-black text-orange-600 tracking-wider">{staffTempPassword.password}</p>
-                          <button onClick={() => { navigator.clipboard.writeText(staffTempPassword.password); showToast('Copied!') }} className="text-[10px] font-bold text-slate-400 hover:text-slate-600 px-2 py-1 rounded border border-slate-200">Copy</button>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-4">
-                      <p className="text-[10px] text-amber-700">Save this password — it won&apos;t be shown again. Staff change it themselves with &ldquo;Forgot password&rdquo; on the login page (only the owner can reach Settings).</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => { const origin = typeof window !== 'undefined' ? window.location.origin : 'https://kuruma.lk'; const shop = (isLkTax ? (vendorSettings?.invoice_title || vendor?.name) : vendor?.name) || 'the shop'; const msg = encodeURIComponent('Hi ' + staffTempPassword.name + ',\n\nYour ' + shop + ' staff account is ready:\n\nLogin: ' + origin + '/login\nUsername: ' + staffTempPassword.username + '\nPassword: ' + staffTempPassword.password + '\n\nKeep this safe. If you forget it, ask the owner to reset it.'); window.open('https://wa.me/?text=' + msg, '_blank') }} className="flex-1 bg-green-500 text-white font-bold text-sm py-2.5 rounded-xl">Send via WhatsApp</button>
-                      <button onClick={() => setStaffTempPassword(null)} className="px-4 text-slate-500 text-sm font-semibold">Done</button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <StaffLogins showToast={showToast} isLkTax={isLkTax} />
             </div>
 
             {/* ══ WHEEL MART ONLY ═══════════════════════════════════════════════════════

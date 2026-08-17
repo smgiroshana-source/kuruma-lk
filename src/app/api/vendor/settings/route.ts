@@ -243,7 +243,11 @@ export async function POST(req: NextRequest) {
     const { data: existingUsers } = await admin.auth.admin.listUsers()
     let staffUser = existingUsers?.users?.find((u: any) => u.email === email)
 
-    let tempPassword = 'Staff@' + Math.random().toString(36).slice(2, 8).toUpperCase()
+    const chosenPw = String(body.password || '').trim()
+    if (chosenPw && chosenPw.length < 6) {
+      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
+    }
+    let tempPassword = chosenPw || ('Staff@' + Math.random().toString(36).slice(2, 8).toUpperCase())
     if (!staffUser) {
       const { data: newUser, error: createError } = await admin.auth.admin.createUser({
         email,
@@ -285,12 +289,17 @@ export async function POST(req: NextRequest) {
   // a shop works anyway.
   if (action === 'reset_staff_password') {
     if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
-    const { staff_id } = body
+    const { staff_id, password: chosen } = body
     const { data: target } = await admin.from('vendor_staff')
       .select('id, name, username, email, user_id').eq('id', staff_id).eq('vendor_id', vendor.id).single()
     if (!target) return NextResponse.json({ error: 'Staff member not found' }, { status: 404 })
 
-    const tempPassword = 'Staff@' + Math.random().toString(36).slice(2, 8).toUpperCase()
+    // The owner may type a password they'll remember, or let one be generated
+    const wanted = String(chosen || '').trim()
+    if (wanted && wanted.length < 6) {
+      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
+    }
+    const tempPassword = wanted || ('Staff@' + Math.random().toString(36).slice(2, 8).toUpperCase())
     const { error: resetErr } = await admin.auth.admin.updateUserById(target.user_id, { password: tempPassword })
     if (resetErr) return NextResponse.json({ error: resetErr.message }, { status: 400 })
 
@@ -301,9 +310,18 @@ export async function POST(req: NextRequest) {
     // One-tap changes from the owner's staff list: which branch a login covers,
     // and (optionally) its role. Owner only.
     if (staff) return NextResponse.json({ error: 'Only owner can manage staff' }, { status: 403 })
-    const { staff_id, branch_scope, role: newRole, can_file_tax } = body
+    const { staff_id, branch_scope, role: newRole, can_file_tax, username: newUsername } = body
     if (!staff_id) return NextResponse.json({ error: 'staff_id required' }, { status: 400 })
     const patch: any = {}
+    if (newUsername !== undefined) {
+      const u = String(newUsername || '').trim().toLowerCase()
+      if (!/^[a-z0-9._-]{3,20}$/.test(u)) {
+        return NextResponse.json({ error: 'Username must be 3–20 characters: letters, numbers, dot, dash or underscore' }, { status: 400 })
+      }
+      const { data: clash } = await admin.from('vendor_staff').select('id').ilike('username', u).maybeSingle()
+      if (clash && clash.id !== staff_id) return NextResponse.json({ error: `Username "${u}" is already taken` }, { status: 400 })
+      patch.username = u
+    }
     // Tax-filing authority: this login sees the CONSOLIDATED whole-company
     // VAT/SSCL figures (one TIN, one return) even if its branch view is limited
     if (can_file_tax !== undefined) patch.can_file_tax = can_file_tax === true
