@@ -700,7 +700,11 @@ function SupplierListView({
                 {suppliers.map((s: any) => (
                   <tr key={s.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3">
-                      <p className="font-bold text-slate-800 text-sm">{s.name}</p>
+                      <p className="font-bold text-slate-800 text-sm">
+                        {s.name}
+                        {/* The code survives renames — quote it on orders and cheques */}
+                        {s.supplier_code && <span className="ml-1.5 text-[10px] font-mono font-bold text-slate-400">{s.supplier_code}</span>}
+                      </p>
                       {s.email && (
                         <p className="text-xs text-slate-400 mt-0.5">{s.email}</p>
                       )}

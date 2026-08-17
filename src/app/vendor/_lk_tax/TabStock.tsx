@@ -821,6 +821,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                         <span className="font-semibold text-sm text-slate-800">{s.name}</span>
                         {s.country !== 'LK' && <span className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{s.country}</span>}
                         {s.currency !== 'LKR' && <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{s.currency}</span>}
+                        {s.supplier_code && <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{s.supplier_code}</span>}
                         {s.vat_registered && <span className="text-[10px] font-bold bg-green-50 text-green-700 px-1.5 py-0.5 rounded">VAT Reg.</span>}
                       </div>
                       <div className="flex flex-wrap gap-x-3 mt-0.5">
@@ -887,7 +888,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     }
                   }} className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white">
                     <option value="">— Select supplier —</option>
-                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} {s.country !== 'LK' ? `(${s.country})` : ''}</option>)}
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.supplier_code ? `${s.supplier_code} · ` : ''}{s.name} {s.country !== 'LK' ? `(${s.country})` : ''}</option>)}
                   </select>
                   {grnForm.supplierId && (
                     suppliers.find((x: any) => x.id === grnForm.supplierId)?.vat_registered
