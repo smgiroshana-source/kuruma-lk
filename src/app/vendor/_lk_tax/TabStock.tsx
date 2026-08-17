@@ -1,5 +1,6 @@
 'use client'
 import { colomboToday } from '@/lib/dates'
+import SupplierForm from './SupplierForm'
 import { useState, useEffect, useRef } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
 import DamageCapture from '../_shared/DamageCapture'
@@ -106,11 +107,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [newSupplierName, setNewSupplierName] = useState('')
   const [addingSupplier, setAddingSupplier] = useState(false)
   // Supplier management
-  const blankSupplierForm = { name: '', contactName: '', phone: '', email: '', country: 'LK', currency: 'LKR', vatRegistered: false, tin: '' }
   const [supplierFormOpen, setSupplierFormOpen] = useState(false)
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null)
-  const [supplierForm, setSupplierForm] = useState(blankSupplierForm)
-  const [supplierSaving, setSupplierSaving] = useState(false)
   const [supplierDeleting, setSupplierDeleting] = useState<string | null>(null)
   // GRN inline product creation
   const [grnInlineCreate, setGrnInlineCreate] = useState(false)
@@ -362,28 +360,6 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url; a.download = 'grn-items-template.csv'; a.click(); URL.revokeObjectURL(url)
-  }
-
-  async function saveSupplier() {
-    if (!supplierForm.name.trim()) { showToast('Supplier name is required'); return }
-    setSupplierSaving(true)
-    try {
-      const action = editingSupplierId ? 'update' : 'create'
-      const body = editingSupplierId ? { action, id: editingSupplierId, ...supplierForm } : { action, ...supplierForm }
-      const r = await fetch('/api/vendor/suppliers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      const j = await r.json()
-      if (r.ok) {
-        setSuppliers(prev => {
-          const filtered = editingSupplierId ? prev.filter(s => s.id !== editingSupplierId) : prev
-          return [...filtered, j.supplier].sort((a, b) => a.name.localeCompare(b.name))
-        })
-        setSupplierFormOpen(false)
-        setEditingSupplierId(null)
-        setSupplierForm(blankSupplierForm)
-        showToast(editingSupplierId ? 'Supplier updated' : 'Supplier added')
-      } else showToast('⚠️ ' + (j.error || 'Failed'))
-    } catch { showToast('Network error') }
-    setSupplierSaving(false)
   }
 
   async function reverseGrn(grnId: string, grnNumber: string) {
@@ -720,92 +696,29 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 <p className="text-[11px] text-slate-400 mt-0.5">Manage your parts & goods suppliers</p>
               </div>
               <button
-                onClick={() => { setEditingSupplierId(null); setSupplierForm(blankSupplierForm); setSupplierFormOpen(true) }}
+                onClick={() => { setEditingSupplierId(null); setSupplierFormOpen(true) }}
                 className="bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold px-3 py-2 rounded-lg"
               >+ Add Supplier</button>
             </div>
 
             {/* Add / Edit form */}
             {supplierFormOpen && (
-              <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                <h4 className="text-xs font-bold text-slate-600 uppercase">{editingSupplierId ? 'Edit Supplier' : 'New Supplier'}</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="sm:col-span-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier Name <span className="text-red-400">*</span></label>
-                    <input type="text" value={supplierForm.name} onChange={e => setSupplierForm(f => ({ ...f, name: e.target.value }))}
-                      placeholder="e.g. Toyota Lanka (Pvt) Ltd"
-                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Contact Name</label>
-                    <input type="text" value={supplierForm.contactName} onChange={e => setSupplierForm(f => ({ ...f, contactName: e.target.value }))}
-                      placeholder="e.g. Kamal Perera"
-                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Phone</label>
-                    <input type="tel" value={supplierForm.phone} onChange={e => setSupplierForm(f => ({ ...f, phone: e.target.value }))}
-                      placeholder="e.g. 0112345678"
-                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Email</label>
-                    <input type="email" value={supplierForm.email} onChange={e => setSupplierForm(f => ({ ...f, email: e.target.value }))}
-                      placeholder="e.g. orders@supplier.lk"
-                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Country</label>
-                    <select value={supplierForm.country} onChange={e => setSupplierForm(f => ({ ...f, country: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white">
-                      <option value="LK">🇱🇰 Sri Lanka (LK)</option>
-                      <option value="JP">🇯🇵 Japan (JP)</option>
-                      <option value="CN">🇨🇳 China (CN)</option>
-                      <option value="IN">🇮🇳 India (IN)</option>
-                      <option value="TH">🇹🇭 Thailand (TH)</option>
-                      <option value="KR">🇰🇷 South Korea (KR)</option>
-                      <option value="DE">🇩🇪 Germany (DE)</option>
-                      <option value="US">🇺🇸 USA (US)</option>
-                      <option value="OTHER">Other</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Currency</label>
-                    <select value={supplierForm.currency} onChange={e => setSupplierForm(f => ({ ...f, currency: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white">
-                      <option value="LKR">LKR — Sri Lankan Rupee</option>
-                      <option value="JPY">JPY — Japanese Yen</option>
-                      <option value="USD">USD — US Dollar</option>
-                      <option value="CNY">CNY — Chinese Yuan</option>
-                      <option value="INR">INR — Indian Rupee</option>
-                      <option value="EUR">EUR — Euro</option>
-                      <option value="KRW">KRW — Korean Won</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">VAT Registration No. (TIN)</label>
-                    <input type="text" value={supplierForm.tin} onChange={e => setSupplierForm(f => ({ ...f, tin: e.target.value }))}
-                      placeholder="9-digit TIN"
-                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  </div>
-                  <div className="flex items-center gap-3 pt-5">
-                    <button
-                      onClick={() => setSupplierForm(f => ({ ...f, vatRegistered: !f.vatRegistered }))}
-                      className={`relative w-10 h-5 rounded-full transition-colors ${supplierForm.vatRegistered ? 'bg-orange-500' : 'bg-slate-200'}`}
-                    >
-                      <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${supplierForm.vatRegistered ? 'translate-x-5' : ''}`} />
-                    </button>
-                    <label className="text-xs font-semibold text-slate-600">VAT Registered Supplier</label>
-                  </div>
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <button onClick={saveSupplier} disabled={supplierSaving}
-                    className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-lg">
-                    {supplierSaving ? 'Saving…' : editingSupplierId ? 'Save Changes' : 'Add Supplier'}
-                  </button>
-                  <button onClick={() => { setSupplierFormOpen(false); setEditingSupplierId(null); setSupplierForm(blankSupplierForm) }}
-                    className="text-xs font-bold text-slate-500 px-4 py-2 rounded-lg hover:bg-slate-100">Cancel</button>
-                </div>
+              <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <h4 className="text-xs font-bold text-slate-600 uppercase mb-3">{editingSupplierId ? 'Edit Supplier' : 'New Supplier'}</h4>
+                {/* THE supplier form — same component as Suppliers & Payables */}
+                <SupplierForm
+                  initial={editingSupplierId ? suppliers.find(x => x.id === editingSupplierId) : null}
+                  showToast={showToast}
+                  onSaved={saved => {
+                    setSuppliers(prev => {
+                      const filtered = editingSupplierId ? prev.filter(x => x.id !== editingSupplierId) : prev
+                      return [...filtered, saved].sort((a, b) => a.name.localeCompare(b.name))
+                    })
+                    setSupplierFormOpen(false)
+                    setEditingSupplierId(null)
+                  }}
+                  onCancel={() => { setSupplierFormOpen(false); setEditingSupplierId(null) }}
+                />
               </div>
             )}
 
@@ -832,11 +745,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       </div>
                     </div>
                     <div className="flex gap-2 shrink-0">
-                      <button onClick={() => {
-                        setEditingSupplierId(s.id)
-                        setSupplierForm({ name: s.name, contactName: s.contact_name || '', phone: s.phone || '', email: s.email || '', country: s.country || 'LK', currency: s.currency || 'LKR', vatRegistered: s.vat_registered || false, tin: s.tin || '' })
-                        setSupplierFormOpen(true)
-                      }} className="text-[11px] font-bold text-slate-500 hover:text-orange-600 px-2 py-1 rounded hover:bg-orange-50">Edit</button>
+                      <button onClick={() => { setEditingSupplierId(s.id); setSupplierFormOpen(true) }} className="text-[11px] font-bold text-slate-500 hover:text-orange-600 px-2 py-1 rounded hover:bg-orange-50">Edit</button>
                       <button onClick={() => deleteSupplier(s.id, s.name)} disabled={supplierDeleting === s.id}
                         className="text-[11px] font-bold text-slate-400 hover:text-red-500 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-40">
                         {supplierDeleting === s.id ? '…' : 'Delete'}
