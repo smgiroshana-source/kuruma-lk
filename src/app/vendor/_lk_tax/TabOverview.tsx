@@ -315,11 +315,12 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
         <div className="lg:col-span-3 bg-white rounded-xl border-2 border-slate-300 p-4">
           <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💸 Money out — who are you paying?</h3>
-          <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {([
               { icon: '🧾', title: 'Bills & expenses', sub: 'Electricity, grocery, transport…', tab: 'cash', tabSub: 'add-expense' },
               { icon: '🏭', title: 'Paying a supplier', sub: 'Money we owe for stock', tab: 'suppliers', tabSub: undefined },
               { icon: '🧑\u200d🔧', title: 'Staff advance', sub: 'Cash before payday', tab: 'cash', tabSub: 'advance' },
+              { icon: '🔁', title: 'Owner & bank', sub: 'Top-up, banking, drawings — not a sale', tab: 'cash', tabSub: 'movement' },
             ] as const).map(t => (
               <button
                 key={t.title}

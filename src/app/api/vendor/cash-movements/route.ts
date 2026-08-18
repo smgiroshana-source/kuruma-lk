@@ -62,10 +62,10 @@ export async function POST(req: NextRequest) {
     if (!TYPES.includes(type)) return NextResponse.json({ error: 'Invalid movement type' }, { status: 400 })
     const amt = Math.round(Number(amount) || 0)
     if (amt <= 0) return NextResponse.json({ error: 'Amount must be a positive whole number' }, { status: 400 })
-    // Owner drawings are the owner's business, literally
-    if (type === 'owner_out' && caller.role !== 'owner') {
-      return NextResponse.json({ error: 'Only the owner can record drawings' }, { status: 403 })
-    }
+    // The cashier is usually the one physically handing excess cash to the
+    // owner, so recording is open to all staff. The control is visibility, not
+    // permission: every movement is audit-stamped and printed on the daily
+    // report the owner reads — a fake "gave it to the owner" cannot hide.
 
     const { data, error } = await admin.from('cash_movements').insert({
       vendor_id: caller.vendor.id, movement_date, type, amount: amt,

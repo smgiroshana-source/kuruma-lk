@@ -122,6 +122,14 @@ const CATEGORY_COLORS: Record<string, string> = {
   advertising: 'bg-pink-100 text-pink-700',
 }
 
+const MOVEMENT_LABEL: Record<string, string> = {
+  owner_in: 'Owner put money in', bank_in: 'Drawn from bank',
+  to_bank: 'Banked to account', owner_out: 'Given to owner',
+}
+const MOVEMENT_ICON: Record<string, string> = {
+  owner_in: '👤→💵', bank_in: '🏦→💵', to_bank: '💵→🏦', owner_out: '💵→👤',
+}
+
 const METHOD_BADGE: Record<string, string> = {
   cash: 'bg-emerald-100 text-emerald-700',
   online: 'bg-blue-100 text-blue-700',
@@ -204,6 +212,34 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Money moved, not earned: owner top-up, bank withdrawal, banking the
   // takings, owner drawings. Changes the drawer count, never profit.
   const [showMovement, setShowMovement] = useState(false)
+  const [dayMovements, setDayMovements] = useState<any[]>([])
+  const [monthMovements, setMonthMovements] = useState<any[]>([])
+  async function fetchDayMovements() {
+    try {
+      const r = await fetch('/api/vendor/cash-movements?date=' + todayStr())
+      if (r.ok) { const j = await r.json(); setDayMovements(j.movements || []) }
+    } catch {}
+  }
+  async function fetchMonthMovements(month: string) {
+    try {
+      const r = await fetch('/api/vendor/cash-movements?month=' + month)
+      if (r.ok) { const j = await r.json(); setMonthMovements(j.movements || []) }
+    } catch {}
+  }
+  async function deleteMovement(m: any) {
+    const label = MOVEMENT_LABEL[m.type] || m.type
+    if (!confirm(`Delete "${label} — ${formatRs(m.amount)}" on ${m.movement_date}? The drawer count for that day will be recomputed.`)) return
+    try {
+      const r = await fetch('/api/vendor/cash-movements', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id: m.id }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Failed')
+      showToast('Movement removed — drawer recomputed')
+      await Promise.all([fetchDayMovements(), fetchMonthMovements(expMonth), fetchTodaySession(), fetchRecentSessions()])
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+  }
   const [savingExp, setSavingExp] = useState(false)
 
   // Opening ≠ previous day's closing (reported, fixed only on confirmation)
@@ -290,6 +326,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   useEffect(() => {
     if (initialView === 'add-expense') { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }
     if (initialView === 'advance') setShowAdvance(true)
+    if (initialView === 'movement') setShowMovement(true)
     if (initialView && onInitialViewConsumed) onInitialViewConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -304,6 +341,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   useEffect(() => {
     if (activeTab === 'expenses') {
       fetchExpenses()
+      fetchMonthMovements(expMonth)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, expMonth])
@@ -338,6 +376,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       setCarryMismatch(data.carry_forward_mismatch ?? null)
       if (data.session) {
         fetchTodayExpenses()
+        fetchDayMovements()
       } else {
         setTodayExpenses([])
       }
@@ -956,6 +995,23 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                     )}
                   </div>
                 )}
+                {/* ── Money moved today — the drawer follows these, profit never sees them ── */}
+                {dayMovements.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-sky-100">
+                    <p className="text-[11px] font-bold text-sky-700 uppercase tracking-wide mb-1.5">🔁 Money moved today (not sales, not expenses)</p>
+                    {dayMovements.map(m => {
+                      const isIn = m.type === 'owner_in' || m.type === 'bank_in'
+                      return (
+                        <div key={m.id} className="flex items-center gap-2 text-xs py-1">
+                          <span className="font-mono text-[10px] text-slate-400 shrink-0">{MOVEMENT_ICON[m.type]}</span>
+                          <span className="flex-1 text-slate-600 truncate">{MOVEMENT_LABEL[m.type]}{m.note ? <span className="text-slate-400"> — {m.note}</span> : null}</span>
+                          <span className={`font-bold ${isIn ? 'text-emerald-600' : 'text-amber-700'}`}>{isIn ? '+' : '−'}{formatRs(m.amount)}</span>
+                          <button onClick={() => deleteMovement(m)} className="text-red-300 hover:text-red-500 font-bold text-sm leading-none" title="Delete (owner/manager)">×</button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Close Session form (inline expand) */}
@@ -1231,6 +1287,51 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
               ›
             </button>
           </div>
+
+          {/* ── Money moved this month — owner account + banking, tracked ──
+              These never appear in expenses or profit; this card is where the
+              owner sees the running position instead. */}
+          {monthMovements.length > 0 && (() => {
+            const sum = (t: string) => monthMovements.filter(m => m.type === t).reduce((s, m) => s + Number(m.amount || 0), 0)
+            const ownerIn = sum('owner_in'), ownerOut = sum('owner_out')
+            const bankIn = sum('bank_in'), toBank = sum('to_bank')
+            const ownerNet = ownerIn - ownerOut
+            return (
+              <div className="bg-sky-50 rounded-xl border border-sky-200 p-4 mb-4">
+                <p className="text-[11px] font-black text-sky-800 uppercase tracking-wide mb-2">🔁 Money moved this month — not in expenses or profit</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                  {[
+                    { l: 'Owner put in', v: ownerIn, tone: 'text-emerald-700' },
+                    { l: 'Given to owner', v: ownerOut, tone: 'text-amber-700' },
+                    { l: 'Drawn from bank', v: bankIn, tone: 'text-emerald-700' },
+                    { l: 'Banked', v: toBank, tone: 'text-amber-700' },
+                  ].map(c => (
+                    <div key={c.l} className="bg-white rounded-lg px-3 py-2">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">{c.l}</p>
+                      <p className={`text-sm font-black ${c.tone}`}>{formatRs(c.v)}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-sky-800 font-semibold">
+                  Owner this month: {ownerNet === 0 ? 'even' : ownerNet > 0 ? `put in ${formatRs(ownerNet)} more than taken` : `took ${formatRs(-ownerNet)} more than put in`}
+                </p>
+                <div className="mt-2 max-h-40 overflow-y-auto">
+                  {monthMovements.map(m => {
+                    const isIn = m.type === 'owner_in' || m.type === 'bank_in'
+                    return (
+                      <div key={m.id} className="flex items-center gap-2 text-xs py-1 border-t border-sky-100">
+                        <span className="text-slate-400 font-mono text-[10px] shrink-0 w-14">{String(m.movement_date).slice(5)}</span>
+                        <span className="font-mono text-[10px] text-slate-400 shrink-0">{MOVEMENT_ICON[m.type]}</span>
+                        <span className="flex-1 text-slate-600 truncate">{MOVEMENT_LABEL[m.type]}{m.note ? <span className="text-slate-400"> — {m.note}</span> : null}</span>
+                        <span className={`font-bold ${isIn ? 'text-emerald-600' : 'text-amber-700'}`}>{isIn ? '+' : '−'}{formatRs(m.amount)}</span>
+                        <button onClick={() => deleteMovement(m)} className="text-red-300 hover:text-red-500 font-bold text-sm leading-none" title="Delete (owner/manager)">×</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* Category totals */}
           {!loadingExp && expenses.length > 0 && (
@@ -1713,9 +1814,11 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           onClose={() => setShowMovement(false)}
           onSaved={async () => {
             setShowMovement(false)
-            await fetchTodaySession(); await fetchRecentSessions()
+            await Promise.all([fetchTodaySession(), fetchRecentSessions(), fetchDayMovements(), fetchMonthMovements(expMonth)])
           }}
           showToast={showToast}
+          drawerExpected={todaySession?.status === 'open' && todaySession.expected_cash != null ? Number(todaySession.expected_cash) : null}
+          todayMovements={dayMovements}
         />
       )}
 
@@ -2025,11 +2128,13 @@ function AdvanceModal({
 // stops "owner put in 50,000" appearing as a mystery overage — or worse, being
 // typed in as income.
 function MovementModal({
-  onClose, onSaved, showToast,
+  onClose, onSaved, showToast, drawerExpected, todayMovements,
 }: {
   onClose: () => void
   onSaved: () => void
   showToast: (m: string) => void
+  drawerExpected?: number | null
+  todayMovements?: any[]
 }) {
   const TYPES = [
     { v: 'owner_in',  icon: '👤', l: 'From owner',  d: 'Owner’s own money into the till', dir: 'in' },
@@ -2047,6 +2152,16 @@ function MovementModal({
   async function save() {
     if (!type) { showToast('Pick what happened'); return }
     if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
+    const amt = Math.round(Number(amount))
+    // Guardrail 1: taking out more than the drawer holds is usually a typo
+    if (picked?.dir === 'out' && date === todayStr() && drawerExpected != null && amt > drawerExpected) {
+      if (!confirm(`The drawer only expects ${formatRs(drawerExpected)} right now — taking out ${formatRs(amt)} would leave it negative.\n\nRecord anyway?`)) return
+    }
+    // Guardrail 2: the same movement twice in a day is usually a double-entry
+    const dupe = (todayMovements || []).find(m => m.type === type && Number(m.amount) === amt && date === todayStr())
+    if (dupe) {
+      if (!confirm(`${MOVEMENT_LABEL[type]} of ${formatRs(amt)} is already recorded today.\n\nRecord it a second time?`)) return
+    }
     setSaving(true)
     try {
       const r = await fetch('/api/vendor/cash-movements', {
