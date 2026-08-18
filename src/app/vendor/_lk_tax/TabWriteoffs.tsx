@@ -144,10 +144,12 @@ export default function TabWriteoffs({ vendor, showToast }: Props) {
   async function fetchProducts() {
     setLoadingData(true)
     try {
-      const res = await fetch(`/api/vendor/products?vendor_id=${vendor.id}`)
+      // The products API is POST-only (actions); the catalogue comes from the
+      // full data endpoint, same as every other tab.
+      const res = await fetch('/api/vendor/data')
       if (!res.ok) throw new Error('Failed to load products')
       const data = await res.json()
-      setProducts(data.products ?? data ?? [])
+      setProducts(data.products ?? [])
     } catch (e: any) {
       showToast(e.message ?? 'Error loading products')
     } finally {
