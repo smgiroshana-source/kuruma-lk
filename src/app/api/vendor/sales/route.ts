@@ -302,7 +302,7 @@ export async function GET(req: NextRequest) {
     // Get ALL payments made in this period (on any invoice, including older ones)
     let pQuery = admin
       .from('payments')
-      .select('id, amount, payment_method, cheque_number, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, customer:customers(name, phone), items:sale_items(product_sku))')
+      .select('id, amount, payment_method, cheque_number, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
       .eq('sales.vendor_id', vendor.id)
       .gte('created_at', periodStart)
     if (periodEnd) pQuery = pQuery.lt('created_at', periodEnd)
@@ -329,11 +329,14 @@ export async function GET(req: NextRequest) {
       sale_id: p.sale_id,
       invoice_no: p.sales?.invoice_no,
       customer_name: p.sales?.customer?.name || p.sales?.customer_name || 'Unknown',
+      sale_voided: p.sales?.payment_status === 'voided',
     }))
   }
   // Separate positive collections from negative (returns/refunds)
   const positiveCollections = collectionsToday.filter((c: any) => c.amount > 0)
-  const returnsInPeriod = collectionsToday.filter((c: any) => c.amount < 0).map((c: any) => ({ ...c, amount: Math.abs(c.amount) }))
+  const returnsInPeriod = collectionsToday
+    .filter((c: any) => c.amount < 0 && !c.sale_voided)
+    .map((c: any) => ({ ...c, amount: Math.abs(c.amount) }))
   const totalCollections = positiveCollections.reduce((s: number, c: any) => s + c.amount, 0)
   const totalReturns = returnsInPeriod.reduce((s: number, c: any) => s + c.amount, 0)
 
@@ -342,14 +345,16 @@ export async function GET(req: NextRequest) {
   if (periodStart) {
     let rQuery = admin
       .from('payments')
-      .select('id, amount, payment_method, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, vendor_id, customer:customers(name))')
+      .select('id, amount, payment_method, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, vendor_id, payment_status, customer:customers(name))')
       .eq('sales.vendor_id', vendor.id)
       .lt('amount', 0)
       .gte('created_at', periodStart)
     if (periodEnd) rQuery = rQuery.lt('created_at', periodEnd)
     const { data: returnPayments } = await rQuery.limit(200)
     const existingIds = new Set(returnsInPeriod.map((r: any) => r.id))
-    ;(returnPayments || []).filter((p: any) => !existingIds.has(p.id)).forEach((p: any) => {
+    ;(returnPayments || [])
+      .filter((p: any) => !existingIds.has(p.id) && p.sales?.payment_status !== 'voided')
+      .forEach((p: any) => {
       returnsInPeriod.push({
         id: p.id, amount: Math.abs(parseFloat(p.amount || 0)),
         payment_method: p.payment_method, created_at: p.created_at, sale_id: p.sale_id,
