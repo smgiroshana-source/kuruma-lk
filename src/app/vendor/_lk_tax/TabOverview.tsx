@@ -311,7 +311,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             rows: [
               { icon: 'card', title: 'Customer credit', sub: 'settling what they owe', tab: 'receivables', tabSub: undefined },
               { icon: 'user', title: 'From owner', sub: 'own money into the till', tab: 'cash', tabSub: 'movement-in' },
-              { icon: 'bank', title: 'From bank', sub: 'drawn for the float', tab: 'cash', tabSub: 'movement-in' },
+              { icon: 'bank', title: 'From bank', sub: 'drawn for the float', tab: 'cash', tabSub: 'movement-in-bank' },
             ],
           },
           {

@@ -212,7 +212,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Money moved, not earned: owner top-up, bank withdrawal, banking the
   // takings, owner drawings. Changes the drawer count, never profit.
   const [showMovement, setShowMovement] = useState(false)
-  const [movementDir, setMovementDir] = useState<'in' | 'out'>('in')
+  const [movementPreset, setMovementPreset] = useState<{ dir: 'in' | 'out'; type: string }>({ dir: 'in', type: 'owner_in' })
   const [dayMovements, setDayMovements] = useState<any[]>([])
   const [monthMovements, setMonthMovements] = useState<any[]>([])
   async function fetchDayMovements() {
@@ -328,8 +328,9 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
     if (initialView === 'add-expense') { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }
     if (initialView === 'advance') setShowAdvance(true)
     if (initialView === 'movement') setShowMovement(true)
-    if (initialView === 'movement-in') { setMovementDir('in'); setShowMovement(true) }
-    if (initialView === 'movement-out') { setMovementDir('out'); setShowMovement(true) }
+    if (initialView === 'movement-in') { setMovementPreset({ dir: 'in', type: 'owner_in' }); setShowMovement(true) }
+    if (initialView === 'movement-in-bank') { setMovementPreset({ dir: 'in', type: 'bank_in' }); setShowMovement(true) }
+    if (initialView === 'movement-out') { setMovementPreset({ dir: 'out', type: 'to_bank' }); setShowMovement(true) }
     if (initialView && onInitialViewConsumed) onInitialViewConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -842,13 +843,13 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                   <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">Cash Expenses Today</p>
                   <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => { setMovementDir('in'); setShowMovement(true) }}
+                      onClick={() => { setMovementPreset({ dir: 'in', type: 'owner_in' }); setShowMovement(true) }}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg border-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs font-bold transition-colors"
                     >
                       ⬆ Money In
                     </button>
                     <button
-                      onClick={() => { setMovementDir('out'); setShowMovement(true) }}
+                      onClick={() => { setMovementPreset({ dir: 'out', type: 'to_bank' }); setShowMovement(true) }}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg border-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold transition-colors"
                     >
                       ⬇ Money Out
@@ -1258,13 +1259,13 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             <h1 className="text-2xl font-black text-slate-900">Expenses</h1>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => { setMovementDir('in'); setShowMovement(true) }}
+                onClick={() => { setMovementPreset({ dir: 'in', type: 'owner_in' }); setShowMovement(true) }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-sm font-bold transition-colors"
               >
                 ⬆ Money In
               </button>
               <button
-                onClick={() => { setMovementDir('out'); setShowMovement(true) }}
+                onClick={() => { setMovementPreset({ dir: 'out', type: 'to_bank' }); setShowMovement(true) }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-sm font-bold transition-colors"
               >
                 ⬇ Money Out
@@ -1834,7 +1835,8 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           showToast={showToast}
           drawerExpected={todaySession?.status === 'open' && todaySession.expected_cash != null ? Number(todaySession.expected_cash) : null}
           todayMovements={dayMovements}
-          initialDir={movementDir}
+          initialDir={movementPreset.dir}
+          initialType={movementPreset.type}
         />
       )}
 
@@ -2143,7 +2145,7 @@ function AdvanceModal({
 // drawer count follows it, profit never sees it. The direction is decided by
 // whichever button opened the modal — it is never asked twice.
 function MovementModal({
-  onClose, onSaved, showToast, drawerExpected, todayMovements, initialDir,
+  onClose, onSaved, showToast, drawerExpected, todayMovements, initialDir, initialType,
 }: {
   onClose: () => void
   onSaved: () => void
@@ -2151,6 +2153,7 @@ function MovementModal({
   drawerExpected?: number | null
   todayMovements?: any[]
   initialDir: 'in' | 'out'
+  initialType?: string
 }) {
   const TYPES = [
     { v: 'owner_in',  icon: '👤', l: 'From owner',  d: 'Owner’s own money into the till', dir: 'in' },
@@ -2159,7 +2162,7 @@ function MovementModal({
     { v: 'owner_out', icon: '👤', l: 'To owner',    d: 'Excess cash / drawings handed to the owner', dir: 'out' },
   ] as const
   const dir = initialDir
-  const [type, setType] = useState<string>('')
+  const [type, setType] = useState<string>(initialType || (dir === 'in' ? 'owner_in' : 'to_bank'))
   const [amount, setAmount] = useState<number | ''>('')
   const [date, setDate] = useState(todayStr())
   const [note, setNote] = useState('')
