@@ -189,24 +189,22 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   // ── Quick actions (role-trimmed) ──
   type Action = { icon: string; label: string; tab: string; sub?: string }
   // Money OUT lives in its own hub above — these are the rest of the day
+  // Today's flow already walks the daily rhythm (drawer → attendance → count →
+  // daily report), so Quick actions carry ONLY what the flow doesn't:
+  // occasional work, not the routine.
   const primaryActions: Action[] = isCashier
     ? [
         { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
-        { icon: '💵', label: 'Cash Reconcile', tab: 'cash' },
       ]
     : [
         { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
-        { icon: '🧑‍🔧', label: 'Attendance', tab: 'staff', sub: 'attendance' },
-        { icon: '💵', label: 'Cash Reconcile', tab: 'cash' },
+        { icon: '📝', label: 'Credit Note', tab: 'credit' },
       ]
 
   const secondary: Action[] = isCashier ? [] : [
     { icon: '➕', label: 'Add Product', tab: 'add' },
     { icon: '📦', label: 'Stock Count', tab: 'stocktake' },
     { icon: '🔀', label: 'Transfer Stock', tab: 'stocktake', sub: 'transfer' },
-    { icon: '📝', label: 'Credit Note', tab: 'credit' },
-    { icon: '📄', label: 'Daily Report', tab: 'reports' },
-    { icon: '💵', label: 'Cash Reconcile', tab: 'cash' },
   ]
 
   const cashState =

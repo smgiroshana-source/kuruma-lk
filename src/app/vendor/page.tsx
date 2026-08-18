@@ -28,7 +28,6 @@ import TabOverview from './_lk_tax/TabOverview'
 import TabSuppliers from './_lk_tax/TabSuppliers'
 import TabSupplierReturns from './_lk_tax/TabSupplierReturns'
 import TabWriteoffs from './_lk_tax/TabWriteoffs'
-import TabFleet from './_lk_tax/TabFleet'
 import TabStaff from './_lk_tax/TabStaff'
 import TabImports from './_lk_tax/TabImports'
 import TabTax from './_lk_tax/TabTax'
@@ -2241,10 +2240,8 @@ ${customerRows.map(c => `<tr>
           <TabWriteoffs vendor={vendor} showToast={showToast} />
         )}
 
-        {/* FLEET / VEHICLES — WHEEL MART only */}
-        {tab === 'fleet' && isLkTax && (
-          <TabFleet vendor={vendor} showToast={showToast} />
-        )}
+        {/* Fleet & Vehicles removed from the nav (owner decision 2026-08-18);
+            TabFleet stays in the repo in case it returns. */}
 
         {/* CASH RECONCILIATION + EXPENSES — WHEEL MART only */}
         {tab === 'cash' && isLkTax && (

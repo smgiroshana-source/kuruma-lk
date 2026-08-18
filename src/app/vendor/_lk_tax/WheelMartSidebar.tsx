@@ -37,7 +37,6 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { id: 'sales',       icon: '📋', label: 'Sales & Invoices' },
       { id: 'credit',      icon: '📝', label: 'Credit Notes' },
-      { id: '_coming',     icon: '📅', label: 'Appointments', comingSoon: true },
     ],
   },
   {
@@ -63,7 +62,6 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { id: 'receivables', icon: '💰', label: 'Receivables' },
       { id: 'customers',   icon: '👥', label: 'Customers' },
-      { id: 'fleet',       icon: '🚗', label: 'Fleet & Vehicles' },
     ],
   },
   {
