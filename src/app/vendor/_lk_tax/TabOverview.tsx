@@ -186,27 +186,6 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
     attention.sort((a, b) => (a.tone === b.tone ? 0 : a.tone === 'red' ? -1 : 1))
   }
 
-  // ── Quick actions (role-trimmed) ──
-  type Action = { icon: string; label: string; tab: string; sub?: string }
-  // Money OUT lives in its own hub above — these are the rest of the day
-  // Today's flow already walks the daily rhythm (drawer → attendance → count →
-  // daily report), so Quick actions carry ONLY what the flow doesn't:
-  // occasional work, not the routine.
-  const primaryActions: Action[] = isCashier
-    ? [
-        { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
-      ]
-    : [
-        { icon: '💰', label: 'Receive Payment', tab: 'receivables' },
-        { icon: '📝', label: 'Credit Note', tab: 'credit' },
-      ]
-
-  const secondary: Action[] = isCashier ? [] : [
-    { icon: '➕', label: 'Add Product', tab: 'add' },
-    { icon: '📦', label: 'Stock Count', tab: 'stocktake' },
-    { icon: '🔀', label: 'Transfer Stock', tab: 'stocktake', sub: 'transfer' },
-  ]
-
   const cashState =
     dashLoading ? { label: '…', sub: 'Loading', tone: 'slate' as const }
     : !sess ? { label: 'No session', sub: 'Open the drawer', tone: 'amber' as const }
@@ -304,26 +283,45 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         </div>
       ))}
 
-      {/* ── Money vs Goods — two different questions ──────────────────────────
-          "Money out" is paying someone: bills are expenses, supplier payments
-          settle payables, advances land on the person for payroll. Receiving
-          stock is NOT a payment — it's goods arriving; the GRN asks about
-          payment only as its last step. Mixing the two confused operators
-          ("why is buying stock under who-are-you-paying?"), so they're split. */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
+      {/* ── Money in / Money out / Stock — three honest questions ────────────
+          Every tile answers exactly its card's question. Money-in used to hide
+          inside "who are you paying?" — it confused operators, so in and out
+          are separate cards, and stock stays goods, not money. */}
+      <div className="grid grid-cols-1 lg:grid-cols-9 gap-4 mb-5">
         <div className="lg:col-span-3 bg-white rounded-xl border-2 border-slate-300 p-4">
-          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💸 Money out — who are you paying?</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💰 Money in — who is paying you?</h3>
+          <div className="grid grid-cols-3 gap-2.5">
             {([
-              { icon: '🧾', title: 'Bills & expenses', sub: 'Electricity, grocery, transport…', tab: 'cash', tabSub: 'add-expense' },
-              { icon: '🏭', title: 'Paying a supplier', sub: 'Money we owe for stock', tab: 'suppliers', tabSub: undefined },
-              { icon: '🧑\u200d🔧', title: 'Staff advance', sub: 'Cash before payday', tab: 'cash', tabSub: 'advance' },
-              { icon: '🔁', title: 'Owner & bank', sub: 'Top-up, banking, drawings — not a sale', tab: 'cash', tabSub: 'movement' },
+              { icon: '💳', title: 'Customer credit', sub: 'Settling what they owe', tab: 'receivables', tabSub: undefined },
+              { icon: '👤', title: 'From owner', sub: 'Own money into the till', tab: 'cash', tabSub: 'movement-in' },
+              { icon: '🏦', title: 'From bank', sub: 'Drawn for the float', tab: 'cash', tabSub: 'movement-in' },
             ] as const).map(t => (
               <button
                 key={t.title}
                 onClick={() => onNavigate(t.tab, t.tabSub)}
-                className="text-left px-3.5 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                className="text-left px-3 py-3 rounded-xl border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
+              >
+                <span className="text-xl leading-none">{t.icon}</span>
+                <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
+                <span className="block text-[11px] text-slate-400 leading-tight mt-0.5">{t.sub}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="lg:col-span-4 bg-white rounded-xl border-2 border-slate-300 p-4">
+          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💸 Money out — who are you paying?</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {([
+              { icon: '🧾', title: 'Bills & expenses', sub: 'Electricity, grocery…', tab: 'cash', tabSub: 'add-expense' },
+              { icon: '🏭', title: 'Supplier', sub: 'Money we owe for stock', tab: 'suppliers', tabSub: undefined },
+              { icon: '🧑\u200d🔧', title: 'Staff advance', sub: 'Cash before payday', tab: 'cash', tabSub: 'advance' },
+              { icon: '🏦', title: 'Banking & drawings', sub: 'Cash leaving the till — not an expense', tab: 'cash', tabSub: 'movement-out' },
+            ] as const).map(t => (
+              <button
+                key={t.title}
+                onClick={() => onNavigate(t.tab, t.tabSub)}
+                className="text-left px-3 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
               >
                 <span className="text-xl leading-none">{t.icon}</span>
                 <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
@@ -337,13 +335,13 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
           <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">📦 Stock — goods moving</h3>
           <div className="grid grid-cols-2 gap-2.5">
             {([
-              { icon: '📥', title: 'Stock arrived', sub: 'GRN — asks about payment at the end', tab: 'stocktake', tabSub: 'receive' },
-              { icon: '🚢', title: 'Container cleared', sub: 'Cusdec + import VAT', tab: 'imports', tabSub: undefined },
+              { icon: '📥', title: 'Stock arrived', sub: 'GRN — payment asked at the end', tab: 'stocktake', tabSub: 'receive' },
+              { icon: '🚢', title: 'Container', sub: 'Cusdec + import VAT', tab: 'imports', tabSub: undefined },
             ] as const).map(t => (
               <button
                 key={t.title}
                 onClick={() => onNavigate(t.tab, t.tabSub)}
-                className="text-left px-3.5 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
+                className="text-left px-3 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
               >
                 <span className="text-xl leading-none">{t.icon}</span>
                 <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
@@ -354,36 +352,8 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         </div>
       </div>
 
-      {/* ── Quick actions ───────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
-        <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-3">Quick actions</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-          {primaryActions.map((a) => (
-            <button
-              key={a.label}
-              onClick={() => onNavigate(a.tab, a.sub)}
-              className="flex items-center gap-2.5 px-3.5 py-3.5 rounded-xl font-bold text-[13px] bg-white hover:bg-orange-50 border-2 border-slate-200 hover:border-orange-300 text-slate-800 transition-colors"
-            >
-              <span className="text-lg leading-none">{a.icon}</span>
-              <span className="text-left leading-tight">{a.label}</span>
-            </button>
-          ))}
-        </div>
-        {secondary.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-slate-100">
-            {secondary.map((a) => (
-              <button
-                key={a.label}
-                onClick={() => onNavigate(a.tab, a.sub)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-slate-500 bg-slate-50 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-              >
-                <span className="text-sm leading-none">{a.icon}</span>
-                <span>{a.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Quick actions removed — everything it held lives in the sidebar and
+          the cards above; duplicates on the dashboard were noise. */}
 
       {/* ── Money at a glance ───────────────────────────────────────────────── */}
       <div className={`grid grid-cols-2 ${seesMoney ? 'lg:grid-cols-4' : ''} gap-3 mb-5`}>

@@ -212,6 +212,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Money moved, not earned: owner top-up, bank withdrawal, banking the
   // takings, owner drawings. Changes the drawer count, never profit.
   const [showMovement, setShowMovement] = useState(false)
+  const [movementDir, setMovementDir] = useState<'in' | 'out'>('in')
   const [dayMovements, setDayMovements] = useState<any[]>([])
   const [monthMovements, setMonthMovements] = useState<any[]>([])
   async function fetchDayMovements() {
@@ -327,6 +328,8 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
     if (initialView === 'add-expense') { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }
     if (initialView === 'advance') setShowAdvance(true)
     if (initialView === 'movement') setShowMovement(true)
+    if (initialView === 'movement-in') { setMovementDir('in'); setShowMovement(true) }
+    if (initialView === 'movement-out') { setMovementDir('out'); setShowMovement(true) }
     if (initialView && onInitialViewConsumed) onInitialViewConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -839,7 +842,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                   <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">Cash Expenses Today</p>
                   <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => setShowMovement(true)}
+                      onClick={() => { setMovementDir('in'); setShowMovement(true) }}
                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg border-2 border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 text-xs font-bold transition-colors"
                     >
                       🔁 Money In / Out
@@ -1249,7 +1252,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             <h1 className="text-2xl font-black text-slate-900">Expenses</h1>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setShowMovement(true)}
+                onClick={() => { setMovementDir('in'); setShowMovement(true) }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 text-sm font-bold transition-colors"
               >
                 🔁 Money In / Out
@@ -1819,6 +1822,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
           showToast={showToast}
           drawerExpected={todaySession?.status === 'open' && todaySession.expected_cash != null ? Number(todaySession.expected_cash) : null}
           todayMovements={dayMovements}
+          initialDir={movementDir}
         />
       )}
 
@@ -2124,33 +2128,36 @@ function AdvanceModal({
 // ── Money in / out (not a sale) ──────────────────────────────────────────────
 // Owner tops up the float, cash is drawn from the bank, the takings are
 // banked, the owner takes drawings. Money MOVED, not earned or spent: the
-// drawer count follows it, profit never sees it. Recording these here is what
-// stops "owner put in 50,000" appearing as a mystery overage — or worse, being
-// typed in as income.
+// drawer count follows it, profit never sees it. Direction first — the modal
+// never mixes "into the till" and "out of the till" in one grid, because that
+// is exactly what confused people on the dashboard.
 function MovementModal({
-  onClose, onSaved, showToast, drawerExpected, todayMovements,
+  onClose, onSaved, showToast, drawerExpected, todayMovements, initialDir,
 }: {
   onClose: () => void
   onSaved: () => void
   showToast: (m: string) => void
   drawerExpected?: number | null
   todayMovements?: any[]
+  initialDir?: 'in' | 'out'
 }) {
   const TYPES = [
     { v: 'owner_in',  icon: '👤', l: 'From owner',  d: 'Owner’s own money into the till', dir: 'in' },
     { v: 'bank_in',   icon: '🏦', l: 'From bank',   d: 'Cash drawn from the business account', dir: 'in' },
-    { v: 'to_bank',   icon: '🏦', l: 'To bank',     d: 'Banking the day’s cash',          dir: 'out' },
-    { v: 'owner_out', icon: '👤', l: 'To owner',    d: 'Owner takes drawings (owner only)',    dir: 'out' },
+    { v: 'to_bank',   icon: '🏦', l: 'To bank',     d: 'Banking the day’s cash', dir: 'out' },
+    { v: 'owner_out', icon: '👤', l: 'To owner',    d: 'Excess cash / drawings handed to the owner', dir: 'out' },
   ] as const
+  const [dir, setDir] = useState<'in' | 'out'>(initialDir || 'in')
   const [type, setType] = useState<string>('')
   const [amount, setAmount] = useState<number | ''>('')
   const [date, setDate] = useState(todayStr())
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const picked = TYPES.find(t => t.v === type)
+  const visible = TYPES.filter(t => t.dir === dir)
 
   async function save() {
-    if (!type) { showToast('Pick what happened'); return }
+    if (!type) { showToast(dir === 'in' ? 'Pick where the money came from' : 'Pick where the money went'); return }
     if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
     const amt = Math.round(Number(amount))
     // Guardrail 1: taking out more than the drawer holds is usually a typo
@@ -2166,37 +2173,46 @@ function MovementModal({
     try {
       const r = await fetch('/api/vendor/cash-movements', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', movement_date: date, type, amount: Math.round(Number(amount)), note: note.trim() || null }),
+        body: JSON.stringify({ action: 'create', movement_date: date, type, amount: amt, note: note.trim() || null }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error ?? 'Failed to record')
       showToast(picked?.dir === 'in'
-        ? `✅ Recorded — the drawer expects ${formatRs(Number(amount))} more`
-        : `✅ Recorded — the drawer expects ${formatRs(Number(amount))} less`)
+        ? `✅ Recorded — the drawer expects ${formatRs(amt)} more`
+        : `✅ Recorded — the drawer expects ${formatRs(amt)} less`)
       onSaved()
     } catch (e: any) { showToast('⚠️ ' + e.message) }
     setSaving(false)
   }
 
   return (
-    <Modal title="Money In / Out — not a sale" onClose={onClose}>
-      <p className="text-xs text-slate-500 -mt-2 mb-4">
-        Money moved between the till, the bank and the owner. It changes what the drawer should hold —
-        it is never income or an expense, so profit is untouched.
+    <Modal title="Move money — not a sale, not an expense" onClose={onClose}>
+      <p className="text-xs text-slate-500 -mt-2 mb-3">
+        Between the till, the bank and the owner. The drawer count follows it; profit never sees it.
       </p>
 
+      {/* Direction first — never both mixed in one grid */}
+      <div className="grid grid-cols-2 gap-1.5 mb-3">
+        <button onClick={() => { setDir('in'); setType('') }}
+          className={`py-2.5 rounded-xl border-2 text-sm font-black transition ${dir === 'in' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+          ⬆ Into the till
+        </button>
+        <button onClick={() => { setDir('out'); setType('') }}
+          className={`py-2.5 rounded-xl border-2 text-sm font-black transition ${dir === 'out' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}>
+          ⬇ Out of the till
+        </button>
+      </div>
+
       <div className="grid grid-cols-2 gap-1.5 mb-4">
-        {TYPES.map(t => (
+        {visible.map(t => (
           <button key={t.v} onClick={() => setType(t.v)}
             className={`text-left px-3 py-2.5 rounded-xl border-2 transition ${
               type === t.v
-                ? (t.dir === 'in' ? 'border-emerald-500 bg-emerald-50' : 'border-amber-500 bg-amber-50')
+                ? (dir === 'in' ? 'border-emerald-500 bg-emerald-50' : 'border-amber-500 bg-amber-50')
                 : 'border-slate-200 hover:border-slate-300'
             }`}>
             <span className="text-lg leading-none">{t.icon}</span>
-            <span className="block text-xs font-black text-slate-800 mt-1">
-              {t.l} {type === t.v && <span className={t.dir === 'in' ? 'text-emerald-600' : 'text-amber-600'}>{t.dir === 'in' ? '↑ in' : '↓ out'}</span>}
-            </span>
+            <span className="block text-xs font-black text-slate-800 mt-1">{t.l}</span>
             <span className="block text-[10px] text-slate-400 leading-tight mt-0.5">{t.d}</span>
           </button>
         ))}
@@ -2207,8 +2223,13 @@ function MovementModal({
         <input type="number" min={1} value={amount}
           onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
           placeholder="0"
-          className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-sky-400" />
+          className={`w-full border-2 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none ${dir === 'in' ? 'border-slate-200 focus:border-emerald-400' : 'border-slate-200 focus:border-amber-400'}`} />
       </div>
+      {picked && amount !== '' && Number(amount) > 0 && (
+        <p className={`text-[11px] font-bold mb-3 ${dir === 'in' ? 'text-emerald-700' : 'text-amber-700'}`}>
+          {MOVEMENT_LABEL[picked.v]} — the drawer will expect {formatRs(Number(amount))} {dir === 'in' ? 'more' : 'less'}. Profit is untouched.
+        </p>
+      )}
 
       <div className="flex items-center gap-2 text-xs mb-3">
         <span className="font-bold text-slate-500">Date</span>
@@ -2224,7 +2245,7 @@ function MovementModal({
       <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
         <button onClick={save} disabled={saving || !type || amount === '' || Number(amount) <= 0}
-          className="px-5 py-2.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-sm font-black disabled:opacity-40">
+          className={`px-5 py-2.5 rounded-lg text-white text-sm font-black disabled:opacity-40 ${dir === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
           {saving ? 'Saving…' : 'Record'}
         </button>
       </div>
