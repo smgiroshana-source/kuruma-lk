@@ -1518,6 +1518,24 @@ ${(() => {
               (variance != null ? '<div class="method-box"><div class="val ' + (variance === 0 ? 'green' : (variance < 0 ? 'red' : 'orange')) + '">' + (variance > 0 ? '+' : variance < 0 ? '−' : '') + 'Rs.' + Math.abs(variance).toLocaleString() + '</div><div class="lbl">' + (variance === 0 ? 'Balanced' : (variance < 0 ? 'Short' : 'Over')) + '</div></div>' : '')
             : '<div class="method-box"><div class="val" style="color:#94a3b8">OPEN</div><div class="lbl">Not yet closed</div></div>') +
         '</div>' +
+        // When the drawer was opened and counted. The figures can't show that
+        // a drawer was counted the NEXT morning — the times can, and a count
+        // done the next day means the evening's cash sat unchecked overnight.
+        (() => {
+          const t = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' }) : null
+          const d = (iso: string | null) => iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }) : null
+          const openT = t(cashSession.opened_at)
+          const closeT = t(cashSession.closed_at)
+          if (!openT && !closeT) return ''
+          const closedNextDay = cashSession.closed_at && d(cashSession.closed_at) !== reportDate
+          let line = 'Drawer opened ' + (openT || '—')
+          if (closeT) line += ' · counted ' + closeT + (closedNextDay ? ' on ' + d(cashSession.closed_at) : '')
+          else line += ' · not yet counted'
+          return '<p style="font-size:10px;color:#94a3b8;margin:4px 0 0">' + line + '</p>' +
+            (closedNextDay
+              ? '<p style="font-size:10px;color:#b45309;font-weight:bold;margin:2px 0 0">⚠ Counted the next day — the evening\'s cash sat unchecked overnight. Count at close of business.</p>'
+              : '')
+        })() +
         // Money moved (owner/bank/till) — not income, not expense, but the
         // drawer follows it, so the report says so in plain words.
         (() => {
