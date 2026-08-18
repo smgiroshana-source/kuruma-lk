@@ -843,9 +843,15 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={() => { setMovementDir('in'); setShowMovement(true) }}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg border-2 border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 text-xs font-bold transition-colors"
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg border-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs font-bold transition-colors"
                     >
-                      🔁 Money In / Out
+                      ⬆ Money In
+                    </button>
+                    <button
+                      onClick={() => { setMovementDir('out'); setShowMovement(true) }}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg border-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold transition-colors"
+                    >
+                      ⬇ Money Out
                     </button>
                     <button
                       onClick={() => setShowAdvance(true)}
@@ -1253,9 +1259,15 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             <div className="flex items-center gap-2">
               <button
                 onClick={() => { setMovementDir('in'); setShowMovement(true) }}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100 text-sm font-bold transition-colors"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-sm font-bold transition-colors"
               >
-                🔁 Money In / Out
+                ⬆ Money In
+              </button>
+              <button
+                onClick={() => { setMovementDir('out'); setShowMovement(true) }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 text-sm font-bold transition-colors"
+              >
+                ⬇ Money Out
               </button>
               <button
                 onClick={() => setShowAdvance(true)}
@@ -2128,9 +2140,8 @@ function AdvanceModal({
 // ── Money in / out (not a sale) ──────────────────────────────────────────────
 // Owner tops up the float, cash is drawn from the bank, the takings are
 // banked, the owner takes drawings. Money MOVED, not earned or spent: the
-// drawer count follows it, profit never sees it. Direction first — the modal
-// never mixes "into the till" and "out of the till" in one grid, because that
-// is exactly what confused people on the dashboard.
+// drawer count follows it, profit never sees it. The direction is decided by
+// whichever button opened the modal — it is never asked twice.
 function MovementModal({
   onClose, onSaved, showToast, drawerExpected, todayMovements, initialDir,
 }: {
@@ -2139,7 +2150,7 @@ function MovementModal({
   showToast: (m: string) => void
   drawerExpected?: number | null
   todayMovements?: any[]
-  initialDir?: 'in' | 'out'
+  initialDir: 'in' | 'out'
 }) {
   const TYPES = [
     { v: 'owner_in',  icon: '👤', l: 'From owner',  d: 'Owner’s own money into the till', dir: 'in' },
@@ -2147,7 +2158,7 @@ function MovementModal({
     { v: 'to_bank',   icon: '🏦', l: 'To bank',     d: 'Banking the day’s cash', dir: 'out' },
     { v: 'owner_out', icon: '👤', l: 'To owner',    d: 'Excess cash / drawings handed to the owner', dir: 'out' },
   ] as const
-  const [dir, setDir] = useState<'in' | 'out'>(initialDir || 'in')
+  const dir = initialDir
   const [type, setType] = useState<string>('')
   const [amount, setAmount] = useState<number | ''>('')
   const [date, setDate] = useState(todayStr())
@@ -2186,22 +2197,11 @@ function MovementModal({
   }
 
   return (
-    <Modal title="Move money — not a sale, not an expense" onClose={onClose}>
-      <p className="text-xs text-slate-500 -mt-2 mb-3">
-        Between the till, the bank and the owner. The drawer count follows it; profit never sees it.
+    <Modal title={dir === 'in' ? 'Money into the till' : 'Money out of the till'} onClose={onClose}>
+      <p className="text-xs text-slate-500 -mt-2 mb-4">
+        {dir === 'in' ? 'Not a sale — ' : 'Not an expense — '}
+        the drawer count follows it, profit never sees it.
       </p>
-
-      {/* Direction first — never both mixed in one grid */}
-      <div className="grid grid-cols-2 gap-1.5 mb-3">
-        <button onClick={() => { setDir('in'); setType('') }}
-          className={`py-2.5 rounded-xl border-2 text-sm font-black transition ${dir === 'in' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}>
-          ⬆ Into the till
-        </button>
-        <button onClick={() => { setDir('out'); setType('') }}
-          className={`py-2.5 rounded-xl border-2 text-sm font-black transition ${dir === 'out' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-400 hover:border-slate-300'}`}>
-          ⬇ Out of the till
-        </button>
-      </div>
 
       <div className="grid grid-cols-2 gap-1.5 mb-4">
         {visible.map(t => (
