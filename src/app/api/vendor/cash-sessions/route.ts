@@ -94,11 +94,21 @@ export async function GET(req: NextRequest) {
       .eq('payment_date', date)
       .eq('method', 'cash')
 
+    // Capital/transfer movements for the day — the daily report explains the
+    // drawer with them ("owner put in 50,000", "banked 100,000")
+    const { data: movements } = await admin
+      .from('cash_movements')
+      .select('type, amount, note, created_by')
+      .eq('vendor_id', vendor.id)
+      .eq('movement_date', date)
+      .order('created_at')
+
     return NextResponse.json({
       session: sessionWithCount,
       carry_forward_mismatch: carryForward,
       corrections: corrections || [],
       supplier_cash_payments: supplierPayments || [],
+      cash_movements: movements || [],
     })
   }
 

@@ -14,7 +14,7 @@ async function getVendor() {
   return null
 }
 
-const ALLOWED_KEYS = ['vat_rate', 'sscl_rate', 'liable_base_part', 'liable_base_svc']
+const ALLOWED_KEYS = ['vat_rate', 'sscl_rate', 'liable_base_part', 'liable_base_svc', 'card_fee_pct']
 
 export async function GET() {
   const vendor = await getVendor()
@@ -34,6 +34,8 @@ export async function GET() {
     sscl_rate: 2.5,
     liable_base_part: 50,
     liable_base_svc: 100,
+    // What the bank takes on the card machine — editable, not a tax
+    card_fee_pct: 3.5,
   }
   for (const row of (rows || [])) config[row.key] = parseFloat(row.value)
 

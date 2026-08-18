@@ -36,12 +36,27 @@ export async function computeExpected(admin: any, vendorId: string, session: any
     .eq('method', 'cash')
   const cashSupplierPayments = (supPayRows || []).reduce((s: number, p: any) => s + parseInt(p.amount || 0), 0)
 
+  // Capital/transfer movements: owner top-ups and bank withdrawals put money
+  // IN; banking the takings and owner drawings take money OUT. None of it is
+  // income or expense — it only changes what the drawer should hold.
+  const { data: movementRows } = await admin
+    .from('cash_movements')
+    .select('type, amount')
+    .eq('vendor_id', vendorId)
+    .eq('movement_date', sessionDate)
+  const movementsIn = (movementRows || [])
+    .filter((m: any) => m.type === 'owner_in' || m.type === 'bank_in')
+    .reduce((s: number, m: any) => s + parseInt(m.amount || 0), 0)
+  const movementsOut = (movementRows || [])
+    .filter((m: any) => m.type === 'to_bank' || m.type === 'owner_out')
+    .reduce((s: number, m: any) => s + parseInt(m.amount || 0), 0)
+
   const adjIn = parseInt(session.adjustment_in || 0)
   const adjOut = parseInt(session.adjustment_out || 0)
 
   return {
-    cashSales, cashExpenses, cashSupplierPayments, adjIn, adjOut,
-    expectedCash: openingBal + cashSales - cashExpenses - cashSupplierPayments + adjIn - adjOut,
+    cashSales, cashExpenses, cashSupplierPayments, movementsIn, movementsOut, adjIn, adjOut,
+    expectedCash: openingBal + cashSales - cashExpenses - cashSupplierPayments + movementsIn - movementsOut + adjIn - adjOut,
   }
 }
 

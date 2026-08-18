@@ -1409,7 +1409,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1518,6 +1518,25 @@ ${(() => {
               (variance != null ? '<div class="method-box"><div class="val ' + (variance === 0 ? 'green' : (variance < 0 ? 'red' : 'orange')) + '">' + (variance > 0 ? '+' : variance < 0 ? '−' : '') + 'Rs.' + Math.abs(variance).toLocaleString() + '</div><div class="lbl">' + (variance === 0 ? 'Balanced' : (variance < 0 ? 'Short' : 'Over')) + '</div></div>' : '')
             : '<div class="method-box"><div class="val" style="color:#94a3b8">OPEN</div><div class="lbl">Not yet closed</div></div>') +
         '</div>' +
+        // Money moved (owner/bank/till) — not income, not expense, but the
+        // drawer follows it, so the report says so in plain words.
+        (() => {
+          const movs = cashMovements || []
+          if (movs.length === 0) return ''
+          const LABEL: Record<string, string> = {
+            owner_in: 'Owner put money in', bank_in: 'Drawn from bank',
+            to_bank: 'Banked to account', owner_out: 'Owner took drawings',
+          }
+          return '<div style="margin-top:10px;border:1.5px solid #bae6fd;background:#f0f9ff;border-radius:8px;padding:10px 12px">' +
+            '<div style="font-size:12px;font-weight:800;color:#075985;margin-bottom:6px">Money moved (not sales, not expenses)</div>' +
+            movs.map((m: any) => {
+              const isIn = m.type === 'owner_in' || m.type === 'bank_in'
+              return '<div style="display:flex;justify-content:space-between;font-size:11px;color:#0c4a6e;padding:2px 0">' +
+                '<span>\u2022 ' + escapeHtml(LABEL[m.type] || m.type) + (m.note ? '<span style="color:#64748b"> \u2014 ' + escapeHtml(String(m.note)) + '</span>' : '') + '</span>' +
+                '<span style="font-weight:700">' + (isIn ? '+' : '\u2212') + 'Rs.' + parseInt(m.amount || 0).toLocaleString() + '</span></div>'
+            }).join('') +
+            '</div>'
+        })() +
         // Expected cash falls below the opening float whenever money is paid
         // out. List every one of those payments, or the drop is unexplained.
         (() => {
@@ -1808,7 +1827,8 @@ ${customerRows.map(c => `<tr>
         let cashSession: any = undefined
         let corrections: any[] = []
         let supplierCashPays: any[] = []
-        try { if (cs.ok) { const cj = await cs.json(); cashSession = cj.session || null; corrections = cj.corrections || []; supplierCashPays = cj.supplier_cash_payments || [] } } catch {}
+        let cashMovements: any[] = []
+        try { if (cs.ok) { const cj = await cs.json(); cashSession = cj.session || null; corrections = cj.corrections || []; supplierCashPays = cj.supplier_cash_payments || []; cashMovements = cj.cash_movements || [] } } catch {}
         // Money that LEFT the drawer has to be on the report — otherwise the
         // owner sees the float drop with no explanation of where it went.
         let dayExpenses: any[] = []
@@ -1822,7 +1842,7 @@ ${customerRows.map(c => `<tr>
             category: 'supplier', amount: p.amount, payment_method: 'cash',
           })),
         ]
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses)
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements)
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)
@@ -4189,6 +4209,7 @@ ${customerRows.map(c => `<tr>
                 { key: 'sscl_rate',       label: 'SSCL Rate',               unit: '%',  hint: 'Rate on liable base (currently 2.5%)' },
                 { key: 'liable_base_part',label: 'SSCL Liable Base — Parts',unit: '%',  hint: 'Portion of parts turnover liable for SSCL (currently 50%)' },
                 { key: 'liable_base_svc', label: 'SSCL Liable Base — SVC',  unit: '%',  hint: 'Portion of service turnover liable for SSCL (currently 100%)' },
+                { key: 'card_fee_pct', label: 'Card machine fee', unit: '%', hint: 'What the bank takes on card payments — the POS "+ fee" button uses this when the customer pays it' },
               ]
               return (
                 <div className="bg-white rounded-xl border border-slate-200 p-5 lg:col-span-2">

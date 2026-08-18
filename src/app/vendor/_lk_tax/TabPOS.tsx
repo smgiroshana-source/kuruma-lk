@@ -628,6 +628,27 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   }, [posCart, posDiscount, posPayments, useAdvance, posCustomer])
 
   const posVatRate = Number(vendorSettings?.vat_rate) || 18
+  // The bank's card-machine fee. When the shop passes it to the customer it
+  // must be a LINE on the invoice (revenue, VAT applies, SVC stream) — extra
+  // money on the card machine that isn't invoiced would never reconcile with
+  // the bank settlement, and the VAT return would understate.
+  const [cardFeePct, setCardFeePct] = useState(3.5)
+  useEffect(() => {
+    fetch('/api/vendor/tax-config').then(r => r.json())
+      .then(j => { if (j.config?.card_fee_pct != null) setCardFeePct(parseFloat(j.config.card_fee_pct)) })
+      .catch(() => {})
+  }, [])
+  const hasCardFeeLine = posCart.some(i => !i.productId && String(i.productName).startsWith('Card fee'))
+  function addCardFeeLine() {
+    if (hasCardFeeLine) { showToast('Card fee is already on the bill'); return }
+    const fee = Math.round(posTotal * cardFeePct / 100)
+    if (fee <= 0) { showToast('Nothing on the bill yet'); return }
+    setPosCart(prev => [...prev, {
+      productId: null, productName: `Card fee (${cardFeePct}%)`, productSku: '',
+      unitPrice: fee, quantity: 1, maxStock: null, ssclStream: 'SVC',
+    }])
+    showToast(`Card fee Rs.${fee.toLocaleString()} added to the bill`)
+  }
   const posVatAmount = posIsVatEntity ? Math.round(posTotal * posVatRate / (100 + posVatRate)) : 0
   const posNetAmount = posIsVatEntity ? posTotal - posVatAmount : posTotal
   // Entered prices are VAT-inclusive. For the VAT entity the shop only keeps the
@@ -1263,6 +1284,13 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                         <input type="date" value={line.chequeDate} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeDate: e.target.value }; setPosPayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
                       </>)}
                       {line.method === 'bank' && <input type="text" value={line.bankRef} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], bankRef: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Ref #" />}
+                      {line.method === 'card' && !hasCardFeeLine && (
+                        <button onClick={addCardFeeLine}
+                          title="Only when the customer pays the machine fee — it becomes a line on the invoice"
+                          className="text-[10px] font-bold px-2 py-1.5 rounded-lg border-2 border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 whitespace-nowrap">
+                          + fee {cardFeePct}%
+                        </button>
+                      )}
                       {posPayments.length > 1 && <button onClick={() => setPosPayments(posPayments.filter((_, x) => x !== i))} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>}
                     </div>
                   ))}
