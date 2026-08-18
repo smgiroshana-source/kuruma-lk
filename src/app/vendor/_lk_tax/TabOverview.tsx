@@ -26,6 +26,22 @@ type Dashboard = {
   recentActivity: { time: string; customer: string; amount: number; method: string }[]
 }
 
+function ActionIcon({ name }: { name: string }) {
+  const P = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  switch (name) {
+    case 'card': return <svg {...P}><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+    case 'user': return <svg {...P}><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/></svg>
+    case 'bank': return <svg {...P}><path d="M3 21h18M4 18h16M6 18v-7M10 18v-7M14 18v-7M18 18v-7M3 8l9-5 9 5z"/></svg>
+    case 'bankout': return <svg {...P}><path d="M3 21h18M4 18h16M6 18v-7M12 18v-7M3 8l9-5 9 5z"/><path d="M17 14l3 3-3 3M20 17h-6"/></svg>
+    case 'receipt': return <svg {...P}><path d="M6 2h12v20l-2-1.5L14 22l-2-1.5L10 22l-2-1.5L6 22zM9.5 7h5M9.5 11h5M9.5 15h3"/></svg>
+    case 'factory': return <svg {...P}><path d="M3 21V9l6 4V9l6 4V4h6v17zM8 17h.01M13 17h.01M18 17h.01"/></svg>
+    case 'wallet': return <svg {...P}><path d="M20 7H5a2 2 0 0 1 0-4h13v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16V7"/><path d="M16 14h.01"/></svg>
+    case 'boxin': return <svg {...P}><path d="M12 3v8m0 0l-3-3m3 3l3-3"/><path d="M4 13l8 4 8-4M4 13v5l8 4 8-4v-5M4 13l4-2M20 13l-4-2"/></svg>
+    case 'ship': return <svg {...P}><path d="M4 18l-1-5 9-2 9 2-1 5"/><path d="M6 11V7h4V4h4v3h4v4"/><path d="M2 21c1.5 0 2-1 3.5-1s2 1 3.5 1 2-1 3.5-1 2 1 3.5 1 2-1 3.5-1 2 1 2.5 1"/></svg>
+    default: return null
+  }
+}
+
 type Props = {
   vendor: any
   stats: {
@@ -283,73 +299,69 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         </div>
       ))}
 
-      {/* ── Money in / Money out / Stock — three honest questions ────────────
-          Every tile answers exactly its card's question. Money-in used to hide
-          inside "who are you paying?" — it confused operators, so in and out
-          are separate cards, and stock stays goods, not money. */}
-      <div className="grid grid-cols-1 lg:grid-cols-9 gap-4 mb-5">
-        <div className="lg:col-span-3 bg-white rounded-xl border-2 border-slate-300 p-4">
-          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💰 Money in — who is paying you?</h3>
-          <div className="grid grid-cols-3 gap-2.5">
-            {([
-              { icon: '💳', title: 'Customer credit', sub: 'Settling what they owe', tab: 'receivables', tabSub: undefined },
-              { icon: '👤', title: 'From owner', sub: 'Own money into the till', tab: 'cash', tabSub: 'movement-in' },
-              { icon: '🏦', title: 'From bank', sub: 'Drawn for the float', tab: 'cash', tabSub: 'movement-in' },
-            ] as const).map(t => (
-              <button
-                key={t.title}
-                onClick={() => onNavigate(t.tab, t.tabSub)}
-                className="text-left px-3 py-3 rounded-xl border-2 border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 transition-colors"
-              >
-                <span className="text-xl leading-none">{t.icon}</span>
-                <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
-                <span className="block text-[11px] text-slate-400 leading-tight mt-0.5">{t.sub}</span>
-              </button>
-            ))}
+      {/* ── Money in · Money out · Stock ─────────────────────────────────────
+          One quiet surface, three columns, rows instead of tile soup. Every
+          row answers exactly its column's question; the in/out/goods split is
+          carried by a coloured dot and the icon tint, not by shouting boxes. */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-5 grid grid-cols-1 lg:grid-cols-[3fr_4fr_2fr] divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
+        {([
+          {
+            dot: 'bg-emerald-500', title: 'Money in', q: 'who is paying you?',
+            tint: 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100',
+            rows: [
+              { icon: 'card', title: 'Customer credit', sub: 'settling what they owe', tab: 'receivables', tabSub: undefined },
+              { icon: 'user', title: 'From owner', sub: 'own money into the till', tab: 'cash', tabSub: 'movement-in' },
+              { icon: 'bank', title: 'From bank', sub: 'drawn for the float', tab: 'cash', tabSub: 'movement-in' },
+            ],
+          },
+          {
+            dot: 'bg-orange-500', title: 'Money out', q: 'who are you paying?',
+            tint: 'bg-orange-50 text-orange-600 group-hover:bg-orange-100',
+            rows: [
+              { icon: 'receipt', title: 'Bills & expenses', sub: 'electricity, grocery, transport', tab: 'cash', tabSub: 'add-expense' },
+              { icon: 'factory', title: 'Supplier', sub: 'money we owe for stock', tab: 'suppliers', tabSub: undefined },
+              { icon: 'wallet', title: 'Staff advance', sub: 'cash before payday', tab: 'cash', tabSub: 'advance' },
+              { icon: 'bankout', title: 'Banking & drawings', sub: 'cash leaving the till', tab: 'cash', tabSub: 'movement-out' },
+            ],
+          },
+          {
+            dot: 'bg-sky-500', title: 'Stock', q: 'goods moving', 
+            tint: 'bg-sky-50 text-sky-600 group-hover:bg-sky-100',
+            rows: [
+              { icon: 'boxin', title: 'Stock arrived', sub: 'GRN — payment asked at the end', tab: 'stocktake', tabSub: 'receive' },
+              { icon: 'ship', title: 'Container', sub: 'Cusdec + import VAT', tab: 'imports', tabSub: undefined },
+            ],
+          },
+        ] as const).map(col => (
+          <div key={col.title} className="py-2">
+            <div className="flex items-baseline gap-2 px-4 pt-2 pb-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${col.dot} self-center`} />
+              <span className="text-[12px] font-bold text-slate-800 tracking-tight">{col.title}</span>
+              <span className="text-[11px] text-slate-400">{col.q}</span>
+            </div>
+            <div>
+              {col.rows.map(r => (
+                <button
+                  key={r.title}
+                  onClick={() => onNavigate(r.tab, r.tabSub)}
+                  className="group w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-slate-50 transition-colors duration-150"
+                >
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150 ${col.tint}`}>
+                    <ActionIcon name={r.icon} />
+                  </span>
+                  <span className="flex-1 min-w-0 leading-tight">
+                    <span className="block text-[13px] font-semibold text-slate-800">{r.title}</span>
+                    <span className="block text-[11px] text-slate-400 truncate">{r.sub}</span>
+                  </span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className="text-slate-300 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-150 shrink-0">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-
-        <div className="lg:col-span-4 bg-white rounded-xl border-2 border-slate-300 p-4">
-          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">💸 Money out — who are you paying?</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-            {([
-              { icon: '🧾', title: 'Bills & expenses', sub: 'Electricity, grocery…', tab: 'cash', tabSub: 'add-expense' },
-              { icon: '🏭', title: 'Supplier', sub: 'Money we owe for stock', tab: 'suppliers', tabSub: undefined },
-              { icon: '🧑\u200d🔧', title: 'Staff advance', sub: 'Cash before payday', tab: 'cash', tabSub: 'advance' },
-              { icon: '🏦', title: 'Banking & drawings', sub: 'Cash leaving the till — not an expense', tab: 'cash', tabSub: 'movement-out' },
-            ] as const).map(t => (
-              <button
-                key={t.title}
-                onClick={() => onNavigate(t.tab, t.tabSub)}
-                className="text-left px-3 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
-              >
-                <span className="text-xl leading-none">{t.icon}</span>
-                <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
-                <span className="block text-[11px] text-slate-400 leading-tight mt-0.5">{t.sub}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="lg:col-span-2 bg-white rounded-xl border-2 border-slate-300 p-4">
-          <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-3">📦 Stock — goods moving</h3>
-          <div className="grid grid-cols-2 gap-2.5">
-            {([
-              { icon: '📥', title: 'Stock arrived', sub: 'GRN — payment asked at the end', tab: 'stocktake', tabSub: 'receive' },
-              { icon: '🚢', title: 'Container', sub: 'Cusdec + import VAT', tab: 'imports', tabSub: undefined },
-            ] as const).map(t => (
-              <button
-                key={t.title}
-                onClick={() => onNavigate(t.tab, t.tabSub)}
-                className="text-left px-3 py-3 rounded-xl border-2 border-slate-200 hover:border-orange-400 hover:bg-orange-50 transition-colors"
-              >
-                <span className="text-xl leading-none">{t.icon}</span>
-                <span className="block text-[13px] font-black text-slate-800 mt-1.5 leading-tight">{t.title}</span>
-                <span className="block text-[11px] text-slate-400 leading-tight mt-0.5">{t.sub}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* Quick actions removed — everything it held lives in the sidebar and
