@@ -300,10 +300,10 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       ))}
 
       {/* ── Money in · Money out · Stock ─────────────────────────────────────
-          One quiet surface, three columns, rows instead of tile soup. Every
-          row answers exactly its column's question; the in/out/goods split is
-          carried by a coloured dot and the icon tint, not by shouting boxes. */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-5 grid grid-cols-1 lg:grid-cols-[3fr_4fr_2fr] divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
+          Three horizontal bands, not columns: 3, 4 and 2 actions can never
+          balance side-by-side, but as rows they read like lines of different
+          length — natural. Label left, actions right, one quiet surface. */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm mb-5 divide-y divide-slate-100">
         {([
           {
             dot: 'bg-emerald-500', title: 'Money in', q: 'who is paying you?',
@@ -325,38 +325,36 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             ],
           },
           {
-            dot: 'bg-sky-500', title: 'Stock', q: 'goods moving', 
+            dot: 'bg-sky-500', title: 'Stock', q: 'goods moving',
             tint: 'bg-sky-50 text-sky-600 group-hover:bg-sky-100',
             rows: [
               { icon: 'boxin', title: 'Stock arrived', sub: 'GRN — payment asked at the end', tab: 'stocktake', tabSub: 'receive' },
               { icon: 'ship', title: 'Container', sub: 'Cusdec + import VAT', tab: 'imports', tabSub: undefined },
             ],
           },
-        ] as const).map(col => (
-          <div key={col.title} className="py-2">
-            <div className="flex items-baseline gap-2 px-4 pt-2 pb-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${col.dot} self-center`} />
-              <span className="text-[12px] font-bold text-slate-800 tracking-tight">{col.title}</span>
-              <span className="text-[11px] text-slate-400">{col.q}</span>
+        ] as const).map(band => (
+          <div key={band.title} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 px-4 py-2.5">
+            <div className="flex items-baseline sm:block gap-2 w-44 shrink-0 pt-1 sm:pt-0">
+              <span className="flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full ${band.dot}`} />
+                <span className="text-[13px] font-bold text-slate-800 tracking-tight">{band.title}</span>
+              </span>
+              <span className="block text-[11px] text-slate-400 sm:pl-3.5">{band.q}</span>
             </div>
-            <div>
-              {col.rows.map(r => (
+            <div className="flex flex-wrap gap-1 flex-1">
+              {band.rows.map(r => (
                 <button
                   key={r.title}
                   onClick={() => onNavigate(r.tab, r.tabSub)}
-                  className="group w-full flex items-center gap-3 px-4 py-2 text-left hover:bg-slate-50 transition-colors duration-150"
+                  className="group flex items-center gap-2.5 pl-2 pr-3.5 py-2 rounded-lg text-left hover:bg-slate-50 transition-colors duration-150"
                 >
-                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150 ${col.tint}`}>
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150 ${band.tint}`}>
                     <ActionIcon name={r.icon} />
                   </span>
-                  <span className="flex-1 min-w-0 leading-tight">
+                  <span className="leading-tight">
                     <span className="block text-[13px] font-semibold text-slate-800">{r.title}</span>
-                    <span className="block text-[11px] text-slate-400 truncate">{r.sub}</span>
+                    <span className="block text-[11px] text-slate-400">{r.sub}</span>
                   </span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    className="text-slate-300 opacity-0 -translate-x-1 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-150 shrink-0">
-                    <path d="M9 18l6-6-6-6" />
-                  </svg>
                 </button>
               ))}
             </div>
