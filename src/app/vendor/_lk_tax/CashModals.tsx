@@ -342,6 +342,17 @@ export function QuickIncomeModal({
   initialAmount?: number
 }) {
   const PRESETS = ['Puncture repair', 'Air / nitrogen fill', 'Tube fitting', 'Quick service']
+  // Sales payments keep the POS vocabulary — 'bank' is what a transfer is
+  // stored as across every sale, and the daily report's Payment Methods
+  // breakdown counts cash/cheque/bank/card. Only the LABEL says "Online".
+  const METHODS = [
+    { v: 'cash', l: '💵 Cash' },
+    { v: 'card', l: '💳 Card' },
+    { v: 'bank', l: '🏦 Online' },
+    { v: 'cheque', l: '📝 Cheque' },
+  ] as const
+  const [method, setMethod] = useState<string>('cash')
+  const [payRef, setPayRef] = useState('')
   const [desc, setDesc] = useState('')
   const [amount, setAmount] = useState<number | ''>(initialAmount && initialAmount > 0 ? Math.round(initialAmount) : '')
   const [saving, setSaving] = useState(false)
@@ -363,6 +374,7 @@ export function QuickIncomeModal({
   async function save() {
     if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
     if (!propEntity) { showToast('No Proprietorship entity configured'); return }
+    if (method === 'cheque' && !payRef.trim()) { showToast('Enter the cheque number'); return }
     const amt = Math.round(Number(amount))
     setSaving(true)
     try {
@@ -372,7 +384,11 @@ export function QuickIncomeModal({
           action: 'create_sale',
           invoiceEntityId: propEntity.id,
           items: [{ productId: null, productName: desc.trim() || 'Service income', productSku: '', quantity: 1, unitPrice: amt, ssclStream: 'SVC' }],
-          payments: [{ method: 'cash', amount: amt }],
+          payments: [{
+            method, amount: amt,
+            chequeNumber: method === 'cheque' ? payRef.trim() : null,
+            bankRef: method === 'bank' ? (payRef.trim() || null) : null,
+          }],
           notes: 'Quick service income — no document issued',
         }),
       })
@@ -405,7 +421,7 @@ export function QuickIncomeModal({
         placeholder="Or type what the job was…"
         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 mb-3" />
 
-      <div className="relative mb-4">
+      <div className="relative mb-3">
         <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
         <input type="number" min={1} autoFocus value={amount}
           onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
@@ -413,8 +429,28 @@ export function QuickIncomeModal({
           className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-emerald-400" />
       </div>
 
+      <p className="text-xs font-bold text-slate-500 mb-1.5">How did they pay?</p>
+      <div className="grid grid-cols-4 gap-1.5 mb-2">
+        {METHODS.map(m => (
+          <button key={m.v} onClick={() => setMethod(m.v)}
+            className={`py-2 rounded-lg border-2 text-[11px] font-bold transition ${
+              method === m.v ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+            }`}>
+            {m.l}
+          </button>
+        ))}
+      </div>
+      {method !== 'cash' && (
+        <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
+          placeholder={method === 'cheque' ? 'Cheque number *' : method === 'card' ? 'Card slip / approval no. (optional)' : 'Bank reference (optional)'}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400 mb-2" />
+      )}
+
       <p className="text-[11px] text-slate-400 mb-1">
-        Cash into today&apos;s till. If the customer wants a receipt or pays later, use the POS instead.
+        {method === 'cash'
+          ? 'Goes into today’s till and the drawer count.'
+          : 'Settles to the bank — it does not change the drawer count.'}
+        {' '}If the customer wants a receipt or pays later, use the POS instead.
       </p>
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
