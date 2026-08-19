@@ -212,6 +212,10 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   // Money moved, not earned: owner top-up, bank withdrawal, banking the
   // takings, owner drawings. Changes the drawer count, never profit.
   const [showMovement, setShowMovement] = useState(false)
+  // Quick service income: a puncture or air-fill paid into the till with no
+  // document. Real INCOME of the Proprietorship — it becomes an RCP receipt
+  // (revenue, drawer, reports), just without the POS ceremony.
+  const [showQuickIncome, setShowQuickIncome] = useState(false)
   const [movementPreset, setMovementPreset] = useState<{ dir: 'in' | 'out'; type: string }>({ dir: 'in', type: 'owner_in' })
   const [dayMovements, setDayMovements] = useState<any[]>([])
   const [monthMovements, setMonthMovements] = useState<any[]>([])
@@ -331,6 +335,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
     if (initialView === 'movement-in') { setMovementPreset({ dir: 'in', type: 'owner_in' }); setShowMovement(true) }
     if (initialView === 'movement-in-bank') { setMovementPreset({ dir: 'in', type: 'bank_in' }); setShowMovement(true) }
     if (initialView === 'movement-out') { setMovementPreset({ dir: 'out', type: 'to_bank' }); setShowMovement(true) }
+    if (initialView === 'income') setShowQuickIncome(true)
     if (initialView && onInitialViewConsumed) onInitialViewConsumed()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -1825,6 +1830,17 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
         </Modal>
       )}
 
+      {showQuickIncome && (
+        <QuickIncomeModal
+          onClose={() => setShowQuickIncome(false)}
+          onSaved={async () => {
+            setShowQuickIncome(false)
+            await Promise.all([fetchTodaySession(), fetchRecentSessions()])
+          }}
+          showToast={showToast}
+        />
+      )}
+
       {showMovement && (
         <MovementModal
           onClose={() => setShowMovement(false)}
@@ -2250,6 +2266,106 @@ function MovementModal({
         <button onClick={save} disabled={saving || !type || amount === '' || Number(amount) <= 0}
           className={`px-5 py-2.5 rounded-lg text-white text-sm font-black disabled:opacity-40 ${dir === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
           {saving ? 'Saving…' : 'Record'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Quick service income (Proprietor) ────────────────────────────────────────
+// Small cash jobs with no document — puncture, air fill, a quick fit. This is
+// INCOME, not a movement: it saves as a real Proprietorship receipt (RCP
+// series, SVC line, cash payment), so revenue, profit, the drawer and the
+// daily report all see it through the one sales pipeline. No VAT — the
+// Proprietorship isn't VAT-registered — and nothing touches the Pvt Ltd.
+function QuickIncomeModal({
+  onClose, onSaved, showToast,
+}: {
+  onClose: () => void
+  onSaved: () => void
+  showToast: (m: string) => void
+}) {
+  const PRESETS = ['Puncture repair', 'Air / nitrogen fill', 'Tube fitting', 'Quick service']
+  const [desc, setDesc] = useState('')
+  const [amount, setAmount] = useState<number | ''>('')
+  const [saving, setSaving] = useState(false)
+  const [propEntity, setPropEntity] = useState<{ id: string; name: string } | null>(null)
+  const [entityLoading, setEntityLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/vendor/invoice-entities')
+      .then(r => r.json())
+      .then(j => {
+        // The Proprietorship = the entity that issues receipts, not tax invoices
+        const prop = (j.entities || []).find((e: any) => e.invoice_mode !== 'lk_tax')
+        setPropEntity(prop ? { id: prop.id, name: prop.name } : null)
+      })
+      .catch(() => {})
+      .finally(() => setEntityLoading(false))
+  }, [])
+
+  async function save() {
+    if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
+    if (!propEntity) { showToast('No Proprietorship entity configured'); return }
+    const amt = Math.round(Number(amount))
+    setSaving(true)
+    try {
+      const r = await fetch('/api/vendor/sales', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_sale',
+          invoiceEntityId: propEntity.id,
+          items: [{ productId: null, productName: desc.trim() || 'Service income', productSku: '', quantity: 1, unitPrice: amt, ssclStream: 'SVC' }],
+          payments: [{ method: 'cash', amount: amt }],
+          notes: 'Quick service income — no document issued',
+        }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error ?? 'Failed to record')
+      showToast(`✅ ${formatRs(amt)} recorded as ${propEntity.name} income${j.invoiceNo ? ` (${j.invoiceNo})` : ''}`)
+      onSaved()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setSaving(false)
+  }
+
+  return (
+    <Modal title="Service income — no invoice" onClose={onClose}>
+      <p className="text-xs text-slate-500 -mt-2 mb-4">
+        Quick cash jobs with no document. Counted as <strong>{propEntity?.name || 'Proprietor'}</strong> service
+        income — it goes into revenue and the drawer like any sale. No VAT.
+      </p>
+
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {PRESETS.map(p => (
+          <button key={p} onClick={() => setDesc(p)}
+            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 transition ${
+              desc === p ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
+            }`}>
+            {p}
+          </button>
+        ))}
+      </div>
+      <input type="text" value={desc} onChange={e => setDesc(e.target.value)}
+        placeholder="Or type what the job was…"
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 mb-3" />
+
+      <div className="relative mb-4">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
+        <input type="number" min={1} autoFocus value={amount}
+          onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
+          placeholder="0"
+          className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-emerald-400" />
+      </div>
+
+      <p className="text-[11px] text-slate-400 mb-1">
+        Cash into today&apos;s till. If the customer wants a receipt or pays later, use the POS instead.
+      </p>
+
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
+        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
+        <button onClick={save} disabled={saving || entityLoading || amount === '' || Number(amount) <= 0}
+          className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-40">
+          {saving ? 'Saving…' : amount !== '' && Number(amount) > 0 ? `Record ${formatRs(Number(amount))}` : 'Record'}
         </button>
       </div>
     </Modal>

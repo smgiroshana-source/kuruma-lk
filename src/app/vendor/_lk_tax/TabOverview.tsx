@@ -30,6 +30,7 @@ function ActionIcon({ name }: { name: string }) {
   const P = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
   switch (name) {
     case 'card': return <svg {...P}><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+    case 'spark': return <svg {...P}><path d="M13 2L4.5 13.5H11L9.5 22 19 10.5h-6.5z"/></svg>
     case 'user': return <svg {...P}><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 14 0v1"/></svg>
     case 'bank': return <svg {...P}><path d="M3 21h18M4 18h16M6 18v-7M10 18v-7M14 18v-7M18 18v-7M3 8l9-5 9 5z"/></svg>
     case 'bankout': return <svg {...P}><path d="M3 21h18M4 18h16M6 18v-7M12 18v-7M3 8l9-5 9 5z"/><path d="M17 14l3 3-3 3M20 17h-6"/></svg>
@@ -310,6 +311,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             tint: 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100',
             rows: [
               { icon: 'card', title: 'Customer credit', sub: 'settling what they owe', tab: 'receivables', tabSub: undefined },
+              { icon: 'spark', title: 'Service income', sub: 'quick job, no invoice — Proprietor', tab: 'cash', tabSub: 'income' },
               { icon: 'user', title: 'From owner', sub: 'own money into the till', tab: 'cash', tabSub: 'movement-in' },
               { icon: 'bank', title: 'From bank', sub: 'drawn for the float', tab: 'cash', tabSub: 'movement-in-bank' },
             ],
