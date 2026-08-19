@@ -476,6 +476,12 @@ export function ExpenseModal({
       showToast('Enter a valid amount')
       return
     }
+    // Every other category names itself on the report; "Other" doesn't, so the
+    // note has to say what the money was for or the line is unreadable later.
+    if (f.category === 'other' && !f.description.trim()) {
+      showToast('Say what it was for — "Other" on its own means nothing later')
+      return
+    }
     if (f.payment_method !== 'cash' && !f.reference.trim()) {
       showToast(f.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the 8-digit bank confirmation number')
       return
@@ -617,20 +623,37 @@ export function ExpenseModal({
         )}
       </div>
 
-      {/* 4 — A note. Optional: the category already says most of it. */}
+      {/* 4 — A note. Optional for named categories (they say most of it),
+             REQUIRED for "Other" — which says nothing on its own. */}
       <div>
-        <p className="text-xs font-bold text-slate-500 mb-2">4. Note <span className="font-normal text-slate-400">(optional)</span></p>
+        <p className="text-xs font-bold text-slate-500 mb-2">
+          4. Note{' '}
+          {f.category === 'other'
+            ? <span className="text-red-500">*</span>
+            : <span className="font-normal text-slate-400">(optional)</span>}
+        </p>
         <input
           type="text"
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-          placeholder={`e.g. ${f.category === 'grocery' ? 'tea and sugar for the office'
-            : f.category === 'transport' ? 'three-wheeler to Customs'
-            : f.category === 'electricity' ? 'CEB bill for July'
-            : f.category === 'commission' ? 'broker who brought the lorry job'
-            : 'what exactly was bought'}`}
+          className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 ${
+            f.category === 'other' && !f.description.trim()
+              ? 'border-amber-300 bg-amber-50/40 focus:ring-amber-400'
+              : 'border-slate-200 focus:ring-orange-400'
+          }`}
+          placeholder={f.category === 'other'
+            ? 'What was it for? e.g. new signboard for the shop'
+            : `e.g. ${f.category === 'grocery' ? 'tea and sugar for the office'
+              : f.category === 'transport' ? 'three-wheeler to Customs'
+              : f.category === 'electricity' ? 'CEB bill for July'
+              : f.category === 'commission' ? 'broker who brought the lorry job'
+              : 'what exactly was bought'}`}
           value={f.description}
           onChange={e => setF(p => ({ ...p, description: e.target.value }))}
         />
+        {f.category === 'other' && !f.description.trim() && (
+          <p className="text-[11px] text-amber-700 font-semibold mt-1">
+            Needed for &ldquo;Other&rdquo; — otherwise the report just says &ldquo;Other&rdquo;.
+          </p>
+        )}
       </div>
 
       {/* Date — almost always today, so it stays out of the way */}
@@ -746,7 +769,7 @@ export function ExpenseModal({
       </button>
       <button
         onClick={save}
-        disabled={saving || !f.category || f.amount === '' || Number(f.amount) <= 0}
+        disabled={saving || !f.category || f.amount === '' || Number(f.amount) <= 0 || (f.category === 'other' && !f.description.trim())}
         className="px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black transition-colors disabled:opacity-40"
       >
         {saving ? 'Saving…' : f.amount !== '' && Number(f.amount) > 0 ? `Save ${formatRs(Number(f.amount))}` : 'Save'}
