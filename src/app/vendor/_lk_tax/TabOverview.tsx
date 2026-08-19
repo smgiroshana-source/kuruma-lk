@@ -16,6 +16,7 @@ import { colomboToday } from '@/lib/dates'
 import {
   Modal, ExpenseModal, MovementModal, AdvanceModal, QuickIncomeModal,
   OpenDrawerModal, CloseDrawerModal, AttendanceModal,
+  SupplierPayModal, CustomerCollectModal,
 } from './CashModals'
 
 type Dashboard = {
@@ -131,6 +132,8 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
     | { kind: 'movement'; dir: 'in' | 'out'; type: string; amount?: number }
     | { kind: 'advance'; amount?: number }
     | { kind: 'expense'; amount?: number }
+    | { kind: 'paysupplier'; amount?: number }
+    | { kind: 'collect'; amount?: number }
   const [popup, setPopup] = useState<Popup | null>(null)
   const [amtIn, setAmtIn] = useState('')
   const [amtOut, setAmtOut] = useState('')
@@ -178,8 +181,10 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       case 'expense':  setPopup({ kind: 'expense', amount }); break
       case 'advance':  setPopup({ kind: 'advance', amount }); break
       case 'move_out': setPopup({ kind: 'movement', dir: 'out', type: 'to_bank', amount }); break
-      case 'credit':   setAmtIn(''); setPopup(null); onNavigate('receivables'); break
-      case 'supplier': setAmtOut(''); setPopup(null); onNavigate('suppliers'); break
+      // Both used to navigate to a list where the operator retyped the same
+      // amount. Now the list comes to them: pick who, and it's recorded.
+      case 'credit':   setPopup({ kind: 'collect', amount }); break
+      case 'supplier': setPopup({ kind: 'paysupplier', amount }); break
     }
   }
 
@@ -653,13 +658,13 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             {(popup.dir === 'in'
               ? [
                   { icon: 'spark', title: 'Service income', sub: 'quick job, no invoice — Proprietor', dest: 'income' },
-                  { icon: 'card', title: 'Customer credit', sub: 'settling what they owe — opens Receivables', dest: 'credit' },
+                  { icon: 'card', title: 'Customer credit', sub: 'settling what they owe', dest: 'credit' },
                   { icon: 'user', title: 'From owner', sub: 'own money into the till', dest: 'owner_in' },
                   { icon: 'bank', title: 'From bank', sub: 'drawn for the float', dest: 'bank_in' },
                 ]
               : [
                   { icon: 'receipt', title: 'Bills & expenses', sub: 'electricity, grocery, transport', dest: 'expense' },
-                  { icon: 'factory', title: 'Supplier', sub: 'money we owe — opens Payables', dest: 'supplier' },
+                  { icon: 'factory', title: 'Supplier', sub: 'pick the bill you are paying', dest: 'supplier' },
                   { icon: 'wallet', title: 'Staff advance', sub: 'cash before payday', dest: 'advance' },
                   { icon: 'bankout', title: 'Banking & drawings', sub: 'cash leaving the till', dest: 'move_out' },
                 ]
@@ -701,6 +706,12 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       )}
       {popup?.kind === 'advance' && (
         <AdvanceModal onClose={closePopup} onSaved={popupSaved} showToast={showToast} initialAmount={popup.amount} />
+      )}
+      {popup?.kind === 'paysupplier' && (
+        <SupplierPayModal amount={popup.amount} onClose={closePopup} onSaved={popupSaved} showToast={showToast} />
+      )}
+      {popup?.kind === 'collect' && (
+        <CustomerCollectModal amount={popup.amount} onClose={closePopup} onSaved={popupSaved} showToast={showToast} />
       )}
       {popup?.kind === 'expense' && (
         <ExpenseModal onClose={closePopup} onSaved={popupSaved} showToast={showToast}

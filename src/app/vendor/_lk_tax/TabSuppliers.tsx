@@ -168,6 +168,8 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           action: 'record_payment',
           vendor_id: vendor.id,
           invoice_id: invoice.id,
+          // Required by the API and never sent before — every payment 400'd
+          supplier_id: invoice.supplier_id || selectedSupplier?.id,
           ...newPayment,
           amount: amt,
         }),

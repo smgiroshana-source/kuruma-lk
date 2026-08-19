@@ -1013,3 +1013,311 @@ export function AttendanceModal({
     </Modal>
   )
 }
+
+// ── Pay a supplier, from the dashboard ───────────────────────────────────────
+// The amount is already known (typed in the red box), so the only question is
+// WHICH unpaid bill it settles. Sending the operator to the Payables page to
+// re-type the same number was the wrong shape — this lists the open bills,
+// they tap one, and the payment is recorded against it there and then.
+export function SupplierPayModal({
+  amount, onClose, onSaved, showToast,
+}: {
+  amount?: number
+  onClose: () => void
+  onSaved: () => void
+  showToast: (m: string) => void
+}) {
+  const [invoices, setInvoices] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [picked, setPicked] = useState<any | null>(null)
+  const [amt, setAmt] = useState<number | ''>(amount && amount > 0 ? Math.round(amount) : '')
+  const [method, setMethod] = useState<'cash' | 'online' | 'cheque'>('cash')
+  const [reference, setReference] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [slip, setSlip] = useState<{ no: string; kind: string } | null>(null)
+
+  useEffect(() => {
+    // Every supplier's open bills in one list — one tap, no drill-down
+    fetch('/api/vendor/suppliers')
+      .then(r => r.json())
+      .then(async j => {
+        const owed = (j.suppliers || []).filter((s: any) => Number(s.total_owed || s.payables_due || 0) > 0)
+        const lists = await Promise.all(owed.map((s: any) =>
+          fetch(`/api/vendor/supplier-invoices?supplier_id=${s.id}`)
+            .then(r => r.json())
+            .then(k => (k.invoices || [])
+              .filter((i: any) => i.status !== 'paid')
+              .map((i: any) => ({ ...i, supplier_name: s.name, supplier_id: s.id,
+                balance: Number(i.amount || 0) - Number(i.amount_paid || 0) })))
+            .catch(() => [])
+        ))
+        const flat = lists.flat().filter((i: any) => i.balance > 0)
+        // Oldest due first — that's the one to pay
+        flat.sort((a: any, b: any) => String(a.due_date || '').localeCompare(String(b.due_date || '')))
+        setInvoices(flat)
+        if (flat.length === 1) setPicked(flat[0])
+      })
+      .catch(() => showToast('Could not load supplier bills'))
+      .finally(() => setLoading(false))
+  }, [showToast])
+
+  const balance = picked ? Number(picked.balance) : 0
+  const over = amt !== '' && balance > 0 && Number(amt) > balance
+
+  async function save() {
+    if (!picked) { showToast('Pick the bill you are paying'); return }
+    if (amt === '' || Number(amt) <= 0) { showToast('Enter the amount'); return }
+    if (over) { showToast(`That is more than the ${formatRs(balance)} outstanding on this bill`); return }
+    if (method === 'cheque' && !reference.trim()) { showToast('Enter the cheque number'); return }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/vendor/supplier-invoices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'record_payment',
+          invoice_id: picked.id,
+          supplier_id: picked.supplier_id,
+          amount: Math.round(Number(amt)),
+          payment_date: todayStr(),
+          method,
+          reference: reference.trim() || null,
+        }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error ?? 'Failed to record payment')
+      if (j.confirm_no) { setSlip({ no: j.confirm_no, kind: j.confirm_kind }); return }
+      showToast(`✅ ${formatRs(Number(amt))} paid to ${picked.supplier_name}`)
+      onSaved()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setSaving(false)
+  }
+
+  if (slip) {
+    return (
+      <Modal title="Payment recorded" onClose={onSaved}>
+        <p className="text-xs font-bold text-slate-500 uppercase text-center">
+          {slip.kind === 'cheque' ? 'Write this on the cheque book slip' : 'Type this into the transfer remarks'}
+        </p>
+        <p className="text-4xl font-black tracking-[0.3em] text-slate-900 my-4 font-mono text-center">{slip.no}</p>
+        <p className="text-xs text-slate-400 text-center mb-4">
+          {formatRs(Number(amt))} to {picked?.supplier_name} — the owner signs only numbered slips
+        </p>
+        <button onClick={onSaved} className="w-full py-2.5 rounded-xl bg-slate-800 text-white text-sm font-black">Done</button>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal title={amount ? `${formatRs(amount)} — which bill?` : 'Pay a supplier'} onClose={onClose}>
+      {loading ? <Spinner /> : invoices.length === 0 ? (
+        <p className="text-sm text-slate-400 py-6 text-center">No unpaid supplier bills.</p>
+      ) : (
+        <>
+          <div className="space-y-1.5 max-h-64 overflow-y-auto mb-3">
+            {invoices.map(inv => {
+              const on = picked?.id === inv.id
+              const overdue = inv.due_date && inv.due_date < todayStr()
+              return (
+                <button key={inv.id} onClick={() => setPicked(inv)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition ${
+                    on ? 'border-orange-500 bg-orange-50' : 'border-slate-200 hover:border-slate-300'
+                  }`}>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-[13px] font-bold text-slate-800 truncate">{inv.supplier_name}</span>
+                    <span className="block text-[11px] text-slate-400 truncate">
+                      {inv.invoice_no}
+                      {inv.due_date && <span className={overdue ? 'text-red-600 font-bold' : ''}> · due {inv.due_date}{overdue ? ' — overdue' : ''}</span>}
+                    </span>
+                  </span>
+                  <span className="text-sm font-black text-slate-800 shrink-0">{formatRs(inv.balance)}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {picked && (
+            <div className="border-t border-slate-100 pt-3 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 shrink-0">Paying</span>
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">Rs.</span>
+                  <input type="number" min={1} value={amt}
+                    onChange={e => setAmt(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
+                    className={`w-full border-2 rounded-lg pl-11 pr-3 py-2 text-base font-black outline-none ${
+                      over ? 'border-red-300 text-red-700' : 'border-slate-200 text-slate-800 focus:border-orange-400'
+                    }`} />
+                </div>
+                <button onClick={() => setAmt(balance)}
+                  className="text-[11px] font-bold text-orange-600 shrink-0 hover:underline">full {formatRs(balance)}</button>
+              </div>
+              {over && <p className="text-[11px] font-bold text-red-600">More than this bill&apos;s {formatRs(balance)} balance.</p>}
+
+              <div className="grid grid-cols-3 gap-1.5">
+                {([{ v: 'cash', l: '💵 Cash' }, { v: 'online', l: '🏦 Online' }, { v: 'cheque', l: '📝 Cheque' }] as const).map(m => (
+                  <button key={m.v} onClick={() => setMethod(m.v)}
+                    className={`py-2 rounded-lg border-2 text-xs font-bold transition ${
+                      method === m.v ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+                    }`}>{m.l}</button>
+                ))}
+              </div>
+              {method !== 'cash' && (
+                <input type="text" value={reference} onChange={e => setReference(e.target.value)}
+                  placeholder={method === 'cheque' ? 'Cheque number *' : 'Bank reference (optional)'}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-orange-400" />
+              )}
+              <p className="text-[11px] text-slate-400">
+                {method === 'cash' ? 'Comes off today’s drawer.' : 'Does not touch the till — you’ll get an 8-digit confirmation number.'}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
+        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
+        <button onClick={save} disabled={saving || !picked || amt === '' || Number(amt) <= 0 || over}
+          className="px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black disabled:opacity-40">
+          {saving ? 'Recording…' : 'Record payment'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Collect from a credit customer, from the dashboard ───────────────────────
+// Same shape as the supplier picker: the amount is known, so the only question
+// is WHO paid. Applied oldest-invoice-first via bulk_settle.
+export function CustomerCollectModal({
+  amount, onClose, onSaved, showToast,
+}: {
+  amount?: number
+  onClose: () => void
+  onSaved: () => void
+  showToast: (m: string) => void
+}) {
+  const [customers, setCustomers] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [picked, setPicked] = useState<any | null>(null)
+  const [amt, setAmt] = useState<number | ''>(amount && amount > 0 ? Math.round(amount) : '')
+  const [method, setMethod] = useState<'cash' | 'online' | 'cheque'>('cash')
+  const [reference, setReference] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/vendor/customers?credit=true')
+      .then(r => r.json())
+      .then(j => {
+        const owing = (j.customers || [])
+          // The credit view returns { credit: { balance } } per customer
+          .map((c: any) => ({ ...c, owed: Number(c.credit?.balance ?? 0) }))
+          .filter((c: any) => c.owed > 0)
+          .sort((a: any, b: any) => b.owed - a.owed)
+        setCustomers(owing)
+        if (owing.length === 1) setPicked(owing[0])
+      })
+      .catch(() => showToast('Could not load credit customers'))
+      .finally(() => setLoading(false))
+  }, [showToast])
+
+  const owed = picked ? Number(picked.owed) : 0
+
+  async function save() {
+    if (!picked) { showToast('Pick who is paying'); return }
+    if (amt === '' || Number(amt) <= 0) { showToast('Enter the amount'); return }
+    if (method === 'cheque' && !reference.trim()) { showToast('Enter the cheque number'); return }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/vendor/customers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'bulk_settle',
+          customerId: picked.id,
+          payments: [{
+            method,
+            amount: Math.round(Number(amt)),
+            chequeNumber: method === 'cheque' ? reference.trim() : null,
+            bankRef: method === 'online' ? reference.trim() : null,
+            notes: 'Collected at the counter',
+          }],
+        }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error ?? 'Failed to record collection')
+      showToast(j.message || `✅ ${formatRs(Number(amt))} collected from ${picked.name}`)
+      onSaved()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setSaving(false)
+  }
+
+  return (
+    <Modal title={amount ? `${formatRs(amount)} — who is paying?` : 'Collect credit'} onClose={onClose}>
+      {loading ? <Spinner /> : customers.length === 0 ? (
+        <p className="text-sm text-slate-400 py-6 text-center">Nobody owes you right now.</p>
+      ) : (
+        <>
+          <div className="space-y-1.5 max-h-64 overflow-y-auto mb-3">
+            {customers.map(c => (
+              <button key={c.id} onClick={() => setPicked(c)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition ${
+                  picked?.id === c.id ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'
+                }`}>
+                <span className="flex-1 min-w-0">
+                  <span className="block text-[13px] font-bold text-slate-800 truncate">{c.name}</span>
+                  {c.phone && <span className="block text-[11px] text-slate-400">{c.phone}</span>}
+                </span>
+                <span className="text-sm font-black text-slate-800 shrink-0">{formatRs(c.owed)}</span>
+              </button>
+            ))}
+          </div>
+
+          {picked && (
+            <div className="border-t border-slate-100 pt-3 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 shrink-0">Paying</span>
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">Rs.</span>
+                  <input type="number" min={1} value={amt}
+                    onChange={e => setAmt(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
+                    className="w-full border-2 border-slate-200 rounded-lg pl-11 pr-3 py-2 text-base font-black text-slate-800 outline-none focus:border-emerald-400" />
+                </div>
+                <button onClick={() => setAmt(owed)}
+                  className="text-[11px] font-bold text-emerald-700 shrink-0 hover:underline">all {formatRs(owed)}</button>
+              </div>
+              {amt !== '' && Number(amt) > owed && (
+                <p className="text-[11px] font-bold text-amber-700">
+                  {formatRs(Number(amt) - owed)} more than owed — the excess is kept as an advance on their account.
+                </p>
+              )}
+
+              <div className="grid grid-cols-3 gap-1.5">
+                {([{ v: 'cash', l: '💵 Cash' }, { v: 'online', l: '🏦 Online' }, { v: 'cheque', l: '📝 Cheque' }] as const).map(m => (
+                  <button key={m.v} onClick={() => setMethod(m.v)}
+                    className={`py-2 rounded-lg border-2 text-xs font-bold transition ${
+                      method === m.v ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'
+                    }`}>{m.l}</button>
+                ))}
+              </div>
+              {method !== 'cash' && (
+                <input type="text" value={reference} onChange={e => setReference(e.target.value)}
+                  placeholder={method === 'cheque' ? 'Cheque number *' : 'Bank reference (optional)'}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
+              )}
+              <p className="text-[11px] text-slate-400">
+                Applied to their oldest unpaid invoices first.
+                {method === 'cash' ? ' Goes into today’s drawer.' : ' Does not touch the till.'}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
+        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
+        <button onClick={save} disabled={saving || !picked || amt === '' || Number(amt) <= 0}
+          className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-40">
+          {saving ? 'Recording…' : 'Record collection'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
