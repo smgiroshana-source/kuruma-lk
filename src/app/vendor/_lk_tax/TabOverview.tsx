@@ -11,6 +11,13 @@
 //   3. Role-aware: cashiers see only what they can act on; managers add staff
 //      and supplier duties; the owner sees everything.
 
+import { useState, useEffect, useCallback } from 'react'
+import { colomboToday } from '@/lib/dates'
+import {
+  Modal, ExpenseModal, MovementModal, AdvanceModal, QuickIncomeModal,
+  OpenDrawerModal, CloseDrawerModal, AttendanceModal,
+} from './CashModals'
+
 type Dashboard = {
   todaySales: number
   todayCount: number
@@ -58,6 +65,8 @@ type Props = {
   vendorSettings: any
   onNavigate: (tab: string, sub?: string) => void
   showToast: (msg: string) => void
+  // Opens the printable daily report directly (page.tsx owns the generator)
+  onDailyReport?: () => void
 }
 
 function formatRs(amount: number): string {
@@ -100,12 +109,79 @@ type FlowStep = {
   state: 'done' | 'now' | 'later'
   tab?: string
   tabSub?: string
+  clickable?: boolean
 }
 
-export default function TabOverview({ vendor, stats, dashboard, staffRole, products, onNavigate }: Props) {
+export default function TabOverview({ vendor, stats, dashboard, staffRole, products, onNavigate, showToast, onDailyReport }: Props) {
   const role = staffRole || 'owner'
   const isCashier = role === 'cashier'
   const seesMoney = role === 'owner' || role === 'manager'
+
+  // ── The day as a state machine ─────────────────────────────────────────────
+  // The flow strip is not a menu: each step unlocks the next, and every action
+  // happens in a popup RIGHT HERE — the operator never leaves the dashboard.
+  // flowSession is the authoritative session row (live_expected included);
+  // undefined = still loading, null = no session opened today.
+  const [flowSession, setFlowSession] = useState<any | undefined>(undefined)
+  const [attToday, setAttToday] = useState<{ marked: number; total: number } | null>(null)
+  type Popup =
+    | { kind: 'open' } | { kind: 'close' } | { kind: 'att' }
+    | { kind: 'chooser'; dir: 'in' | 'out'; amount: number }
+    | { kind: 'income'; amount?: number }
+    | { kind: 'movement'; dir: 'in' | 'out'; type: string; amount?: number }
+    | { kind: 'advance'; amount?: number }
+    | { kind: 'expense'; amount?: number }
+  const [popup, setPopup] = useState<Popup | null>(null)
+  const [amtIn, setAmtIn] = useState('')
+  const [amtOut, setAmtOut] = useState('')
+
+  const refreshFlow = useCallback(async () => {
+    try {
+      const r = await fetch('/api/vendor/cash-sessions?date=' + colomboToday())
+      if (r.ok) { const j = await r.json(); setFlowSession(j.session ?? null) }
+    } catch {}
+    if (role === 'owner' || role === 'manager') {
+      try {
+        const r = await fetch('/api/vendor/staff-hr?date=' + colomboToday())
+        if (r.ok) {
+          const j = await r.json()
+          const today = colomboToday()
+          const emps = (j.employees || []).filter((e: any) => e.active !== false && (!e.join_date || e.join_date <= today))
+          const ids = new Set(emps.map((e: any) => e.id))
+          const marked = new Set((j.attendance || []).filter((a: any) => ids.has(a.employee_id)).map((a: any) => a.employee_id)).size
+          setAttToday({ marked, total: emps.length })
+        }
+      } catch {}
+    }
+  }, [role])
+  useEffect(() => { refreshFlow() }, [refreshFlow])
+
+  const closePopup = () => setPopup(null)
+  const popupSaved = () => { setPopup(null); setAmtIn(''); setAmtOut(''); refreshFlow() }
+
+  // Green/red quick boxes: amount first, destination second
+  function submitQuick(dir: 'in' | 'out') {
+    const raw = dir === 'in' ? amtIn : amtOut
+    const amt = Math.round(Number(raw) || 0)
+    if (amt <= 0) { showToast('Type the amount first'); return }
+    setPopup({ kind: 'chooser', dir, amount: amt })
+  }
+
+  // Band rows / chooser destinations that open a popup in place. Rows whose
+  // work is genuinely page-sized (allocating a credit payment, picking a
+  // supplier invoice, a GRN) still navigate.
+  function openDest(key: string, amount?: number) {
+    switch (key) {
+      case 'income':   setPopup({ kind: 'income', amount }); break
+      case 'owner_in': setPopup({ kind: 'movement', dir: 'in', type: 'owner_in', amount }); break
+      case 'bank_in':  setPopup({ kind: 'movement', dir: 'in', type: 'bank_in', amount }); break
+      case 'expense':  setPopup({ kind: 'expense', amount }); break
+      case 'advance':  setPopup({ kind: 'advance', amount }); break
+      case 'move_out': setPopup({ kind: 'movement', dir: 'out', type: 'to_bank', amount }); break
+      case 'credit':   setAmtIn(''); setPopup(null); onNavigate('receivables'); break
+      case 'supplier': setAmtOut(''); setPopup(null); onNavigate('suppliers'); break
+    }
+  }
 
   // dashboard is undefined during the quick (phase-1) load — render placeholders
   // then, NOT zeros: zeros would flash "Rs.0 / all clear" before real data lands.
@@ -120,37 +196,59 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const lowStock = products.filter(p => p.is_active && (p.min_stock_level || 0) > 0 && p.quantity <= p.min_stock_level)
   const lowStockWorst = lowStock.slice().sort((a, b) => a.quantity - b.quantity)[0]
 
-  // ── Today's flow steps ──
+  // ── Today's flow steps — gated, popup-driven ──
   const hour = colomboHour()
-  const sess = d.cashSession
+  // Until the fresh fetch lands, fall back to the dashboard snapshot so the
+  // strip doesn't flash "open the drawer" over an already-open day.
+  const sess2: any = flowSession !== undefined ? flowSession : (d.cashSession ? { status: d.cashSession.status, opened_at: d.cashSession.openedAt } : null)
+  const sessOpen = !!sess2 && sess2.status === 'open'
+  const sessClosed = !!sess2 && sess2.status === 'closed'
+  const att = attToday ?? d.attendance ?? null
   const flow: FlowStep[] = []
   flow.push(
-    !sess
-      ? { key: 'open', icon: '🗄️', title: 'Open the drawer', sub: 'Start the cash session', state: 'now', tab: 'cash' }
-      : { key: 'open', icon: '🗄️', title: 'Drawer opened', sub: sess.openedAt ? `at ${fmtTime(sess.openedAt)}` : 'session running', state: 'done', tab: 'cash' }
+    !sess2
+      ? { key: 'open', icon: '🗄️', title: 'Open the drawer', sub: 'Count the float, start the day', state: 'now' }
+      : { key: 'open', icon: '🗄️', title: 'Drawer opened', sub: sess2.opened_at ? `at ${fmtTime(sess2.opened_at)}` : 'session running', state: 'done' }
   )
-  if (!isCashier && (d.attendance?.total || 0) > 0) {
-    const a = d.attendance!
+  if (!isCashier && (att?.total || 0) > 0) {
     flow.push(
-      a.marked >= a.total
-        ? { key: 'att', icon: '🧑‍🔧', title: 'Attendance marked', sub: `${a.marked}/${a.total} staff`, state: 'done', tab: 'staff', tabSub: 'attendance' }
-        : { key: 'att', icon: '🧑‍🔧', title: `Attendance ${a.marked}/${a.total}`, sub: a.marked === 0 ? 'Mark today’s staff' : 'Finish marking', state: 'now', tab: 'staff', tabSub: 'attendance' }
+      !sess2
+        ? { key: 'att', icon: '🧑‍🔧', title: 'Attendance', sub: 'after the drawer opens', state: 'later' }
+        : att!.marked >= att!.total
+          ? { key: 'att', icon: '🧑‍🔧', title: 'Attendance marked', sub: `${att!.marked}/${att!.total} staff — tap to edit`, state: 'done' }
+          : { key: 'att', icon: '🧑‍🔧', title: `Attendance ${att!.marked}/${att!.total}`, sub: 'Mark today’s staff', state: 'now' }
     )
   }
   flow.push(
-    sess?.status === 'closed'
-      ? { key: 'close', icon: '💵', title: 'Drawer closed', sub: 'Counted and reconciled', state: 'done', tab: 'cash' }
-      : sess && hour >= 17
-        ? { key: 'close', icon: '💵', title: 'Count and close', sub: 'End-of-day cash count', state: 'now', tab: 'cash' }
-        : { key: 'close', icon: '💵', title: 'Count and close', sub: 'this evening', state: 'later', tab: 'cash' }
+    sessClosed
+      ? { key: 'close', icon: '💵', title: 'Drawer closed', sub: 'Counted and reconciled', state: 'done' }
+      : sessOpen
+        ? { key: 'close', icon: '💵', title: 'Count and close', sub: hour >= 17 ? 'End-of-day cash count' : 'when the day ends', state: hour >= 17 ? 'now' : 'later', clickable: true }
+        : { key: 'close', icon: '💵', title: 'Count and close', sub: 'after the drawer opens', state: 'later' }
   )
   if (!isCashier) {
     flow.push(
-      sess?.status === 'closed'
-        ? { key: 'report', icon: '📄', title: 'Send daily report', sub: 'PDF for the owner', state: 'now', tab: 'reports' }
-        : { key: 'report', icon: '📄', title: 'Daily report', sub: 'after the drawer closes', state: 'later', tab: 'reports' }
+      sessClosed
+        ? { key: 'report', icon: '📄', title: 'Send daily report', sub: 'PDF for the owner', state: 'now' }
+        : { key: 'report', icon: '📄', title: 'Daily report', sub: 'after the drawer closes', state: 'later' }
     )
   }
+  function flowClick(key: string) {
+    switch (key) {
+      case 'open': sess2 ? onNavigate('cash') : setPopup({ kind: 'open' }); break
+      case 'att': if (sess2) setPopup({ kind: 'att' }); break
+      case 'close':
+        if (sessOpen) setPopup({ kind: 'close' })
+        else if (sessClosed) onNavigate('cash')
+        break
+      case 'report':
+        if (sessClosed) { if (onDailyReport) onDailyReport(); else onNavigate('reports') }
+        break
+    }
+  }
+  // A step is tappable when its moment has come (or passed)
+  const flowClickable = (st: FlowStep) =>
+    st.state !== 'later' || (st as any).clickable === true
   const flowDone = flow.every(s => s.state === 'done')
 
   // ── Needs-attention queue (red = money leaking now, amber = drifting) ──
@@ -205,8 +303,8 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
 
   const cashState =
     dashLoading ? { label: '…', sub: 'Loading', tone: 'slate' as const }
-    : !sess ? { label: 'No session', sub: 'Open the drawer', tone: 'amber' as const }
-    : sess.status === 'open' ? { label: 'Open', sub: `Float ${formatRs(sess.expected)}`, tone: 'green' as const }
+    : !sess2 ? { label: 'No session', sub: 'Open the drawer', tone: 'amber' as const }
+    : sessOpen ? { label: 'Open', sub: flowSession?.live_expected != null ? `Float ${formatRs(flowSession.live_expected)}` : 'Session running', tone: 'green' as const }
     : { label: 'Closed', sub: 'Reconciled', tone: 'slate' as const }
 
   return (
@@ -238,13 +336,14 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
           {flow.map(step => (
             <button
               key={step.key}
-              onClick={() => step.tab && onNavigate(step.tab, step.tabSub)}
-              disabled={dashLoading}
+              onClick={() => flowClick(step.key)}
+              disabled={dashLoading || !flowClickable(step)}
               className={`text-left rounded-xl border-2 px-3.5 py-3 transition-colors ${
                 dashLoading ? 'border-slate-100 bg-slate-50 opacity-60' :
                 step.state === 'done' ? 'border-emerald-200 bg-emerald-50 hover:border-emerald-300' :
                 step.state === 'now' ? 'border-amber-300 bg-amber-50 hover:border-amber-400 animate-[pulse_3s_ease-in-out_infinite]' :
-                'border-slate-100 bg-slate-50 hover:border-slate-200'
+                flowClickable(step) ? 'border-slate-100 bg-slate-50 hover:border-slate-200' :
+                'border-slate-100 bg-slate-50 opacity-55 cursor-not-allowed'
               }`}
             >
               <div className="flex items-center gap-2">
@@ -259,6 +358,41 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             </button>
           ))}
         </div>
+
+        {/* ── Quick entry: amount first, destination second ──────────────────
+            While the drawer is open, "money happened" is one number away: type
+            it in the green (came in) or red (went out) box, then pick who —
+            the destination popup opens with the amount already filled. */}
+        {sessOpen && !dashLoading && (
+          <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/60 px-3 py-1.5 focus-within:border-emerald-400 transition-colors">
+              <span className="text-xs font-black text-emerald-700 shrink-0">＋ Rs.</span>
+              <input
+                type="number" min={1} inputMode="numeric"
+                value={amtIn}
+                onChange={e => setAmtIn(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitQuick('in') }}
+                placeholder="income — money came in"
+                className="flex-1 min-w-0 bg-transparent py-1.5 text-base font-bold text-emerald-900 placeholder:text-emerald-600/50 placeholder:text-[13px] placeholder:font-semibold outline-none"
+              />
+              <button onClick={() => submitQuick('in')}
+                className="shrink-0 w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black transition-colors">→</button>
+            </div>
+            <div className="flex items-center gap-2 rounded-xl border-2 border-red-200 bg-red-50/60 px-3 py-1.5 focus-within:border-red-400 transition-colors">
+              <span className="text-xs font-black text-red-700 shrink-0">－ Rs.</span>
+              <input
+                type="number" min={1} inputMode="numeric"
+                value={amtOut}
+                onChange={e => setAmtOut(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') submitQuick('out') }}
+                placeholder="expense — money went out"
+                className="flex-1 min-w-0 bg-transparent py-1.5 text-base font-bold text-red-900 placeholder:text-red-600/50 placeholder:text-[13px] placeholder:font-semibold outline-none"
+              />
+              <button onClick={() => submitQuick('out')}
+                className="shrink-0 w-8 h-8 rounded-lg bg-red-600 hover:bg-red-700 text-white font-black transition-colors">→</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Needs attention ─────────────────────────────────────────────────── */}
@@ -310,28 +444,28 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             dot: 'bg-emerald-500', title: 'Money in', q: 'who is paying you?',
             tint: 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100',
             rows: [
-              { icon: 'card', title: 'Customer credit', sub: 'settling what they owe', tab: 'receivables', tabSub: undefined },
-              { icon: 'spark', title: 'Service income', sub: 'quick job, no invoice — Proprietor', tab: 'cash', tabSub: 'income' },
-              { icon: 'user', title: 'From owner', sub: 'own money into the till', tab: 'cash', tabSub: 'movement-in' },
-              { icon: 'bank', title: 'From bank', sub: 'drawn for the float', tab: 'cash', tabSub: 'movement-in-bank' },
+              { icon: 'card', title: 'Customer credit', sub: 'settling what they owe', dest: 'credit' },
+              { icon: 'spark', title: 'Service income', sub: 'quick job, no invoice — Proprietor', dest: 'income' },
+              { icon: 'user', title: 'From owner', sub: 'own money into the till', dest: 'owner_in' },
+              { icon: 'bank', title: 'From bank', sub: 'drawn for the float', dest: 'bank_in' },
             ],
           },
           {
             dot: 'bg-orange-500', title: 'Money out', q: 'who are you paying?',
             tint: 'bg-orange-50 text-orange-600 group-hover:bg-orange-100',
             rows: [
-              { icon: 'receipt', title: 'Bills & expenses', sub: 'electricity, grocery, transport', tab: 'cash', tabSub: 'add-expense' },
-              { icon: 'factory', title: 'Supplier', sub: 'money we owe for stock', tab: 'suppliers', tabSub: undefined },
-              { icon: 'wallet', title: 'Staff advance', sub: 'cash before payday', tab: 'cash', tabSub: 'advance' },
-              { icon: 'bankout', title: 'Banking & drawings', sub: 'cash leaving the till', tab: 'cash', tabSub: 'movement-out' },
+              { icon: 'receipt', title: 'Bills & expenses', sub: 'electricity, grocery, transport', dest: 'expense' },
+              { icon: 'factory', title: 'Supplier', sub: 'money we owe for stock', dest: 'supplier' },
+              { icon: 'wallet', title: 'Staff advance', sub: 'cash before payday', dest: 'advance' },
+              { icon: 'bankout', title: 'Banking & drawings', sub: 'cash leaving the till', dest: 'move_out' },
             ],
           },
           {
             dot: 'bg-sky-500', title: 'Stock', q: 'goods moving',
             tint: 'bg-sky-50 text-sky-600 group-hover:bg-sky-100',
             rows: [
-              { icon: 'boxin', title: 'Stock arrived', sub: 'GRN — payment asked at the end', tab: 'stocktake', tabSub: 'receive' },
-              { icon: 'ship', title: 'Container', sub: 'Cusdec + import VAT', tab: 'imports', tabSub: undefined },
+              { icon: 'boxin', title: 'Stock arrived', sub: 'GRN — payment asked at the end', dest: 'nav:stocktake:receive' },
+              { icon: 'ship', title: 'Container', sub: 'Cusdec + import VAT', dest: 'nav:imports' },
             ],
           },
         ] as const).map(band => (
@@ -347,7 +481,12 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
               {band.rows.map(r => (
                 <button
                   key={r.title}
-                  onClick={() => onNavigate(r.tab, r.tabSub)}
+                  onClick={() => {
+                    if (r.dest.startsWith('nav:')) {
+                      const [, t, sub] = r.dest.split(':')
+                      onNavigate(t, sub || undefined)
+                    } else openDest(r.dest)
+                  }}
                   className="group flex items-center gap-2.5 pl-2 pr-3.5 py-2 rounded-lg text-left hover:bg-slate-50 transition-colors duration-150"
                 >
                   <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150 ${band.tint}`}>
@@ -460,6 +599,75 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             </div>
           ))}
         </div>
+      )}
+
+      {/* ── Flow popups — everything happens here, no page-hopping ─────────── */}
+      {popup?.kind === 'open' && (
+        <OpenDrawerModal onClose={closePopup} onSaved={popupSaved} showToast={showToast} />
+      )}
+      {popup?.kind === 'close' && flowSession && (
+        <CloseDrawerModal session={flowSession} onClose={closePopup} onSaved={popupSaved} showToast={showToast} />
+      )}
+      {popup?.kind === 'att' && (
+        <AttendanceModal onClose={closePopup} showToast={showToast}
+          onSaved={(marked, total) => { setAttToday({ marked, total }); setPopup(null) }} />
+      )}
+      {popup?.kind === 'chooser' && (
+        <Modal
+          title={`${formatRs(popup.amount)} — ${popup.dir === 'in' ? 'who is paying you?' : 'who are you paying?'}`}
+          onClose={closePopup}
+        >
+          <div className="space-y-1.5">
+            {(popup.dir === 'in'
+              ? [
+                  { icon: 'spark', title: 'Service income', sub: 'quick job, no invoice — Proprietor', dest: 'income' },
+                  { icon: 'card', title: 'Customer credit', sub: 'settling what they owe — opens Receivables', dest: 'credit' },
+                  { icon: 'user', title: 'From owner', sub: 'own money into the till', dest: 'owner_in' },
+                  { icon: 'bank', title: 'From bank', sub: 'drawn for the float', dest: 'bank_in' },
+                ]
+              : [
+                  { icon: 'receipt', title: 'Bills & expenses', sub: 'electricity, grocery, transport', dest: 'expense' },
+                  { icon: 'factory', title: 'Supplier', sub: 'money we owe — opens Payables', dest: 'supplier' },
+                  { icon: 'wallet', title: 'Staff advance', sub: 'cash before payday', dest: 'advance' },
+                  { icon: 'bankout', title: 'Banking & drawings', sub: 'cash leaving the till', dest: 'move_out' },
+                ]
+            ).map(r => (
+              <button
+                key={r.dest}
+                onClick={() => openDest(r.dest, popup.amount)}
+                className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${
+                  popup.dir === 'in' ? 'border-slate-200 hover:border-emerald-400 hover:bg-emerald-50' : 'border-slate-200 hover:border-red-300 hover:bg-red-50'
+                }`}
+              >
+                <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                  popup.dir === 'in' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
+                }`}>
+                  <ActionIcon name={r.icon} />
+                </span>
+                <span className="leading-tight">
+                  <span className="block text-[13px] font-bold text-slate-800">{r.title}</span>
+                  <span className="block text-[11px] text-slate-400">{r.sub}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {popup?.kind === 'income' && (
+        <QuickIncomeModal onClose={closePopup} onSaved={popupSaved} showToast={showToast} initialAmount={popup.amount} />
+      )}
+      {popup?.kind === 'movement' && (
+        <MovementModal onClose={closePopup} onSaved={popupSaved} showToast={showToast}
+          initialDir={popup.dir} initialType={popup.type} initialAmount={popup.amount}
+          drawerExpected={flowSession?.live_expected ?? null} />
+      )}
+      {popup?.kind === 'advance' && (
+        <AdvanceModal onClose={closePopup} onSaved={popupSaved} showToast={showToast} initialAmount={popup.amount} />
+      )}
+      {popup?.kind === 'expense' && (
+        <ExpenseModal onClose={closePopup} onSaved={popupSaved} showToast={showToast}
+          initialAmount={popup.amount}
+          openSessionId={sessOpen && flowSession?.id ? flowSession.id : null} />
       )}
     </div>
   )

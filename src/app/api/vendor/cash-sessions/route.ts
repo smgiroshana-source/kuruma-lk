@@ -50,6 +50,13 @@ export async function GET(req: NextRequest) {
         ...session,
         expense_count: (expenseCounts || []).length,
       }
+      // While the day is running, the stored expected_cash is stale (it's
+      // computed at close/recompute). The dashboard close popup needs the
+      // LIVE figure so the variance preview is honest as the operator types.
+      if (session.status === 'open') {
+        const live = await computeExpected(admin, vendor.id, session)
+        sessionWithCount.live_expected = live.expectedCash
+      }
     }
 
     // Carry-forward check: yesterday's counted cash IS today's opening float.

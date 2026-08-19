@@ -1,5 +1,9 @@
 'use client'
 import { colomboToday } from '@/lib/dates'
+import {
+  Modal, Spinner, ExpenseModal, MovementModal, AdvanceModal, QuickIncomeModal,
+  blankExpenseForm, CATEGORIES, MOVEMENT_LABEL, MOVEMENT_ICON,
+} from './CashModals'
 import { useState, useEffect } from 'react'
 
 type Props = {
@@ -66,20 +70,6 @@ function formatTime(isoStr: string | null): string {
   return new Date(isoStr).toLocaleTimeString('en-LK', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' })
 }
 
-// What the operator picks. Kept short and concrete — a shop assistant should
-// find the right one without reading the whole list.
-const CATEGORIES: { v: string; l: string; icon: string }[] = [
-  { v: 'grocery',     l: 'Grocery',     icon: '🛒' },
-  { v: 'rent',        l: 'Rental',      icon: '🏠' },
-  { v: 'electricity', l: 'Electricity', icon: '💡' },
-  { v: 'water',       l: 'Water',       icon: '💧' },
-  { v: 'stationery',  l: 'Stationery',  icon: '📄' },
-  { v: 'internet',    l: 'Internet',    icon: '🌐' },
-  { v: 'transport',   l: 'Transport',   icon: '🚚' },
-  { v: 'maintenance', l: 'Maintenance', icon: '🧰' },
-  { v: 'commission',  l: 'Commission',  icon: '🤝' },
-  { v: 'other',       l: 'Other',       icon: '📌' },
-]
 
 // Display names — the picker list plus every legacy value already in the table
 // (and 'salaries', which Staff/HR writes; it is never chosen by hand).
@@ -122,13 +112,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   advertising: 'bg-pink-100 text-pink-700',
 }
 
-const MOVEMENT_LABEL: Record<string, string> = {
-  owner_in: 'Owner put money in', bank_in: 'Drawn from bank',
-  to_bank: 'Banked to account', owner_out: 'Given to owner',
-}
-const MOVEMENT_ICON: Record<string, string> = {
-  owner_in: '👤→💵', bank_in: '🏦→💵', to_bank: '💵→🏦', owner_out: '💵→👤',
-}
 
 const METHOD_BADGE: Record<string, string> = {
   cash: 'bg-emerald-100 text-emerald-700',
@@ -143,25 +126,6 @@ const METHOD_LABEL: Record<string, string> = {
   cash: 'Cash', online: 'Online', cheque: 'Cheque', bank: 'Online', card: 'Online',
 }
 
-// ── Blank form factories ──────────────────────────────────────────────────────
-
-function blankExpenseForm() {
-  return {
-    expense_date: todayStr(),
-    category: '' as ExpenseCategory,
-    description: '',
-    amount: '' as number | '',
-    payment_method: 'cash',
-    reference: '',
-    // Input VAT on the bill — only claimable with a supplier tax invoice
-    claim_vat: false,
-    supplier_name: '',
-    supplier_tin: '',
-    supplier_invoice_no: '',
-    supplier_invoice_date: '',
-    input_vat: '' as number | '',
-  }
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -201,7 +165,8 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loadingExp, setLoadingExp] = useState(false)
   const [showAddExpModal, setShowAddExpModal] = useState(false)
-  const [expForm, setExpForm] = useState(blankExpenseForm())
+  // Pre-set date when the modal is opened for a specific (usually past) day
+  const [expInitDate, setExpInitDate] = useState<string | null>(null)
   // Attaching a tax invoice to an expense already recorded (the bill usually
   // arrives after the money went out)
   const [vatFor, setVatFor] = useState<Expense | null>(null)
@@ -245,7 +210,6 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       await Promise.all([fetchDayMovements(), fetchMonthMovements(expMonth), fetchTodaySession(), fetchRecentSessions()])
     } catch (e: any) { showToast('⚠️ ' + e.message) }
   }
-  const [savingExp, setSavingExp] = useState(false)
 
   // Opening ≠ previous day's closing (reported, fixed only on confirmation)
   const [carryMismatch, setCarryMismatch] = useState<any>(null)
@@ -329,7 +293,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
 
   // Honour the dashboard deep-link once: land with the Add Expense modal open
   useEffect(() => {
-    if (initialView === 'add-expense') { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }
+    if (initialView === 'add-expense') { setExpInitDate(null); setShowAddExpModal(true) }
     if (initialView === 'advance') setShowAdvance(true)
     if (initialView === 'movement') setShowMovement(true)
     if (initialView === 'movement-in') { setMovementPreset({ dir: 'in', type: 'owner_in' }); setShowMovement(true) }
@@ -598,82 +562,6 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
     }
   }
 
-  async function handleAddExpense() {
-    if (!expForm.category) {
-      showToast('Pick what the expense was for')
-      return
-    }
-    if (expForm.amount === '' || Number(expForm.amount) <= 0) {
-      showToast('Enter a valid amount')
-      return
-    }
-    if (expForm.payment_method !== 'cash' && !expForm.reference.trim()) {
-      showToast(expForm.payment_method === 'cheque' ? 'Enter the cheque number' : 'Enter the 8-digit bank confirmation number')
-      return
-    }
-    if (expForm.claim_vat) {
-      if (!/^\d{9}$/.test(expForm.supplier_tin.trim())) { showToast('Enter the shop\'s 9-digit VAT / TIN number'); return }
-      if (!expForm.supplier_invoice_no.trim()) { showToast('Enter the bill number'); return }
-      if (Number(expForm.input_vat) <= 0) { showToast('Enter the VAT shown on the bill'); return }
-    }
-    setSavingExp(true)
-    try {
-      const res = await fetch('/api/vendor/expenses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create',
-          expense_date: expForm.expense_date,
-          category: expForm.category,
-          // The note is optional — the category name says enough on its own
-          description: expForm.description.trim() || CATEGORY_LABELS[expForm.category] || 'Expense',
-          amount: Math.round(Number(expForm.amount)),
-          payment_method: expForm.payment_method,
-          reference: expForm.reference.trim() || null,
-          supplier_name:         expForm.claim_vat ? expForm.supplier_name.trim() : null,
-          supplier_tin:          expForm.claim_vat ? expForm.supplier_tin.trim() : null,
-          supplier_invoice_no:   expForm.claim_vat ? expForm.supplier_invoice_no.trim() : null,
-          supplier_invoice_date: expForm.claim_vat ? (expForm.supplier_invoice_date || expForm.expense_date) : null,
-          input_vat:             expForm.claim_vat ? Math.round(Number(expForm.input_vat) || 0) : 0,
-          // A cash expense dated today belongs in the open till session so the
-          // expected-cash count reconciles; non-cash / back-dated stay unlinked.
-          cash_session_id:
-            expForm.payment_method === 'cash' && expForm.expense_date === todayStr() && todaySession?.status === 'open'
-              ? todaySession.id
-              : null,
-        }),
-      })
-      if (!res.ok) {
-        const d = await res.json()
-        throw new Error(d.error ?? 'Failed to add expense')
-      }
-      // A cash expense added late for an ALREADY-CLOSED day changes what the
-      // drawer should have held — recheck that session so the variance updates
-      // instead of standing as a phantom shortage.
-      if (expForm.payment_method === 'cash') {
-        const target = [todaySession, ...recentSessions].find(
-          s => s && s.session_date === expForm.expense_date && s.status === 'closed'
-        )
-        if (target) {
-          await fetch('/api/vendor/cash-sessions', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'recompute', sessionId: target.id }),
-          }).catch(() => {})
-        }
-      }
-      showToast('Expense added')
-      setShowAddExpModal(false)
-      setExpForm(blankExpenseForm())
-      await fetchExpenses()
-      await fetchTodayExpenses()
-      await fetchTodaySession()
-      await fetchRecentSessions()
-    } catch (e: any) {
-      showToast(e.message)
-    } finally {
-      setSavingExp(false)
-    }
-  }
 
   // ── Month navigation ───────────────────────────────────────────────────────
 
@@ -1139,7 +1027,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {todaySession.variance < 0 && (
-                      <button onClick={() => { setExpForm({ ...blankExpenseForm(), expense_date: todaySession.session_date }); setShowAddExpModal(true) }}
+                      <button onClick={() => { setExpInitDate(todaySession.session_date); setShowAddExpModal(true) }}
                         className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">
                         🧾 Money paid out — add the missed expense
                       </button>
@@ -1282,7 +1170,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                 🧑‍🔧 Salary Advance
               </button>
               <button
-                onClick={() => { setExpForm(blankExpenseForm()); setShowAddExpModal(true) }}
+                onClick={() => { setExpInitDate(null); setShowAddExpModal(true) }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors shadow-sm"
               >
                 <span className="text-base leading-none">+</span>
@@ -1493,7 +1381,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {pastSession.variance < 0 && (
-                    <button onClick={() => { setExpForm({ ...blankExpenseForm(), expense_date: pastSession.session_date }); setPastSession(null); setActiveTab('expenses'); setShowAddExpModal(true) }}
+                    <button onClick={() => { setExpInitDate(pastSession.session_date); setPastSession(null); setActiveTab('expenses'); setShowAddExpModal(true) }}
                       className="px-3 py-2 rounded-lg bg-white border-2 border-amber-300 text-xs font-bold text-amber-800 hover:bg-amber-100">🧾 Add the missed expense</button>
                   )}
                   {pastSession.variance > 0 && (
@@ -1597,237 +1485,19 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
       )}
 
       {/* ── ADD EXPENSE MODAL ────────────────────────────────────────────────── */}
+
       {showAddExpModal && (
-        <Modal title="Add Expense" onClose={() => setShowAddExpModal(false)}>
-          <div className="flex flex-col gap-4">
-
-            {/* 1 — What was it for. Tiles, not a dropdown: one tap, and the
-                   operator sees every option at once instead of scrolling. */}
-            <div>
-              <p className="text-xs font-bold text-slate-500 mb-2">1. What was it for?</p>
-              <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                {CATEGORIES.map(c => {
-                  const on = expForm.category === c.v
-                  return (
-                    <button
-                      key={c.v}
-                      onClick={() => setExpForm(p => ({ ...p, category: c.v }))}
-                      className={`flex flex-col items-center justify-center gap-0.5 py-2.5 rounded-xl border-2 transition min-h-[62px] ${
-                        on ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'
-                      }`}
-                    >
-                      <span className="text-lg leading-none">{c.icon}</span>
-                      <span className="text-[11px] font-bold leading-tight text-center">{c.l}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* 2 — How much. The one number that must be right, so it's big. */}
-            <div>
-              <p className="text-xs font-bold text-slate-500 mb-2">2. How much?</p>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
-                <input
-                  type="number"
-                  min={1}
-                  autoFocus
-                  className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-orange-400"
-                  placeholder="0"
-                  value={expForm.amount}
-                  onChange={e => {
-                    const amt = e.target.value === '' ? '' : Math.round(Number(e.target.value))
-                    setExpForm(p => ({
-                      ...p,
-                      amount: amt,
-                      // Keep the suggested VAT in step while they type
-                      input_vat: p.claim_vat && amt !== '' ? Math.round(Number(amt) * 18 / 118) : p.input_vat,
-                    }))
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* 3 — How it was paid. Buttons beat a select on a touchscreen. */}
-            <div>
-              <p className="text-xs font-bold text-slate-500 mb-2">3. Paid by</p>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[
-                  { v: 'cash', l: 'Cash', icon: '💵' },
-                  { v: 'online', l: 'Online', icon: '🏦' },
-                  { v: 'cheque', l: 'Cheque', icon: '📝' },
-                ].map(m => {
-                  const on = expForm.payment_method === m.v
-                  return (
-                    <button
-                      key={m.v}
-                      onClick={() => setExpForm(p => ({ ...p, payment_method: m.v }))}
-                      className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl border-2 text-sm font-bold transition min-h-[44px] ${
-                        on ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'
-                      }`}
-                    >
-                      <span>{m.icon}</span>{m.l}
-                    </button>
-                  )
-                })}
-              </div>
-              {expForm.payment_method !== 'cash' && (
-                <>
-                  <input
-                    type="text"
-                    className="mt-2 w-full border-2 border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-orange-400"
-                    placeholder={expForm.payment_method === 'cheque'
-                      ? 'Cheque number *'
-                      : 'Bank reference — the 8-digit confirmation number *'}
-                    value={expForm.reference}
-                    onChange={e => setExpForm(p => ({ ...p, reference: e.target.value }))}
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    {expForm.payment_method === 'cheque'
-                      ? 'The cheque counts as paid the day it is written. Nothing comes off the till.'
-                      : 'A bank transfer or standing order. Nothing comes off the till.'}
-                  </p>
-                </>
-              )}
-            </div>
-
-            {/* 4 — A note. Optional: the category already says most of it. */}
-            <div>
-              <p className="text-xs font-bold text-slate-500 mb-2">4. Note <span className="font-normal text-slate-400">(optional)</span></p>
-              <input
-                type="text"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                placeholder={`e.g. ${expForm.category === 'grocery' ? 'tea and sugar for the office'
-                  : expForm.category === 'transport' ? 'three-wheeler to Customs'
-                  : expForm.category === 'electricity' ? 'CEB bill for July'
-                  : expForm.category === 'commission' ? 'broker who brought the lorry job'
-                  : 'what exactly was bought'}`}
-                value={expForm.description}
-                onChange={e => setExpForm(p => ({ ...p, description: e.target.value }))}
-              />
-            </div>
-
-            {/* Date — almost always today, so it stays out of the way */}
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-bold text-slate-500">Date</span>
-              <input
-                type="date"
-                max={todayStr()}
-                className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-orange-400"
-                value={expForm.expense_date}
-                onChange={e => setExpForm(p => ({ ...p, expense_date: e.target.value }))}
-              />
-              {expForm.expense_date === todayStr()
-                ? <span className="text-slate-400">Today</span>
-                : <button onClick={() => setExpForm(p => ({ ...p, expense_date: todayStr() }))} className="text-orange-600 font-bold">back to today</button>}
-            </div>
-
-            {/* 5 — The VAT bill. Asked as a plain yes/no question about the
-                   piece of paper in the operator's hand, not as tax jargon. */}
-            <div className={`rounded-xl border-2 p-3 ${expForm.claim_vat ? 'border-violet-300 bg-violet-50' : 'border-slate-200'}`}>
-              <p className="text-xs font-bold text-slate-500 mb-2">5. Did you get a VAT bill?</p>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  { on: false, l: 'No / just a receipt' },
-                  { on: true,  l: 'Yes — VAT bill' },
-                ].map(o => (
-                  <button
-                    key={String(o.on)}
-                    onClick={() => setExpForm(p => ({
-                      ...p,
-                      claim_vat: o.on,
-                      // Bills are quoted VAT-inclusive — pull the 18% back out
-                      input_vat: o.on && p.amount !== '' ? Math.round(Number(p.amount) * 18 / 118) : '',
-                    }))}
-                    className={`py-2.5 rounded-xl border-2 text-sm font-bold transition min-h-[44px] ${
-                      expForm.claim_vat === o.on
-                        ? (o.on ? 'border-violet-500 bg-white text-violet-700' : 'border-slate-400 bg-white text-slate-700')
-                        : 'border-slate-200 text-slate-400 hover:border-slate-300'
-                    }`}
-                  >
-                    {o.l}
-                  </button>
-                ))}
-              </div>
-
-              {!expForm.claim_vat ? (
-                <p className="text-[11px] text-slate-400 mt-2">
-                  A VAT bill shows the shop&apos;s VAT number and the VAT amount. If one turns up later,
-                  add it from the list — no need to hold up the entry now.
-                </p>
-              ) : (
-                <div className="mt-3 grid grid-cols-2 gap-2.5">
-                  <div className="col-span-2 rounded-lg bg-white border border-violet-200 px-3 py-2">
-                    <p className="text-[11px] font-bold text-slate-500">VAT you can claim back</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-base font-bold text-slate-400">Rs.</span>
-                      <input
-                        type="number"
-                        min={0}
-                        className="flex-1 text-xl font-black text-violet-700 outline-none"
-                        value={expForm.input_vat}
-                        onChange={e => setExpForm(p => ({ ...p, input_vat: e.target.value === '' ? '' : Math.round(Number(e.target.value)) }))}
-                      />
-                    </div>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      Filled in as 18% of the amount. <strong>Change it to the VAT printed on the bill.</strong>
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Shop&apos;s VAT / TIN no. <span className="text-red-500">*</span></label>
-                    <input
-                      type="text" inputMode="numeric" maxLength={9}
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
-                      placeholder="9 digits"
-                      value={expForm.supplier_tin}
-                      onChange={e => setExpForm(p => ({ ...p, supplier_tin: e.target.value.replace(/\D/g, '') }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Bill no. <span className="text-red-500">*</span></label>
-                    <input
-                      type="text"
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-400"
-                      placeholder="On the bill"
-                      value={expForm.supplier_invoice_no}
-                      onChange={e => setExpForm(p => ({ ...p, supplier_invoice_no: e.target.value }))}
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="block text-[11px] font-bold text-slate-500 mb-1">Shop name</label>
-                    <input
-                      type="text"
-                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                      placeholder="e.g. Ceylon Electricity Board"
-                      value={expForm.supplier_name}
-                      onChange={e => setExpForm(p => ({ ...p, supplier_name: e.target.value }))}
-                    />
-                  </div>
-                  <p className="col-span-2 text-[11px] text-violet-700">
-                    Keep the bill in the file — the VAT office can ask for it.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
-            <button
-              onClick={() => setShowAddExpModal(false)}
-              className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleAddExpense}
-              disabled={savingExp || !expForm.category || expForm.amount === '' || Number(expForm.amount) <= 0}
-              className="px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black transition-colors disabled:opacity-40"
-            >
-              {savingExp ? 'Saving…' : expForm.amount !== '' && Number(expForm.amount) > 0 ? `Save ${formatRs(Number(expForm.amount))}` : 'Save'}
-            </button>
-          </div>
-        </Modal>
+        <ExpenseModal
+          onClose={() => setShowAddExpModal(false)}
+          onSaved={async () => {
+            setShowAddExpModal(false)
+            await fetchExpenses(); await fetchTodayExpenses()
+            await fetchTodaySession(); await fetchRecentSessions()
+          }}
+          showToast={showToast}
+          openSessionId={todaySession?.status === 'open' && todaySession.session_date === todayStr() ? todaySession.id : null}
+          initialDate={expInitDate || undefined}
+        />
       )}
 
       {showQuickIncome && (
@@ -1989,385 +1659,3 @@ function SummaryCell({ label, value }: { label: string; value: string }) {
   )
 }
 
-function Modal({
-  title,
-  onClose,
-  children,
-}: {
-  title: string
-  onClose: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-black text-slate-900">{title}</h2>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 transition-colors text-xl leading-none"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-        <div className="px-5 py-4">{children}</div>
-      </div>
-    </div>
-  )
-}
-
-function Spinner() {
-  return (
-    <div className="flex items-center justify-center py-16">
-      <div className="w-8 h-8 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin" />
-    </div>
-  )
-}
-
-// ── Salary advance ───────────────────────────────────────────────────────────
-// Cash handed to a staff member before payday. It is NOT an ordinary expense
-// the cashier types by hand: recorded here it lands against the person in
-// Staff, so payroll can deduct it, AND posts a salaries expense tied to the
-// open session, so the drawer still balances at close. Typing it as a plain
-// expense instead would count the money twice come payroll.
-function AdvanceModal({
-  onClose, onSaved, showToast,
-}: {
-  onClose: () => void
-  onSaved: () => void
-  showToast: (m: string) => void
-}) {
-  const [people, setPeople] = useState<{ id: string; name: string; branch?: string | null }[]>([])
-  const [loading, setLoading] = useState(true)
-  const [employeeId, setEmployeeId] = useState('')
-  const [amount, setAmount] = useState<number | ''>('')
-  const [note, setNote] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    fetch('/api/vendor/staff-hr?mode=names')
-      .then(r => r.json())
-      .then(j => setPeople(j.employees || []))
-      .catch(() => showToast('Could not load staff list'))
-      .finally(() => setLoading(false))
-  }, [showToast])
-
-  async function save() {
-    if (!employeeId) { showToast('Pick who is taking the advance'); return }
-    if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
-    setSaving(true)
-    try {
-      const res = await fetch('/api/vendor/staff-hr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'add_advance',
-          employee_id: employeeId,
-          amount: Math.round(Number(amount)),
-          date: todayStr(),
-          source: 'drawer',
-          note: note.trim() || null,
-        }),
-      })
-      const j = await res.json()
-      if (!res.ok) throw new Error(j.error ?? 'Failed to record advance')
-      showToast('Advance recorded — it will be deducted at payroll')
-      onSaved()
-    } catch (e: any) { showToast('⚠️ ' + e.message) }
-    setSaving(false)
-  }
-
-  return (
-    <Modal title="Salary Advance" onClose={onClose}>
-      <p className="text-xs text-slate-500 -mt-2 mb-4">
-        Cash out of the till, before payday. It comes off what they are paid at the end of the month.
-      </p>
-
-      {loading ? (
-        <Spinner />
-      ) : people.length === 0 ? (
-        <p className="text-sm text-slate-400 py-6 text-center">No staff on the system yet.</p>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <div>
-            <p className="text-xs font-bold text-slate-500 mb-2">1. Who is taking it?</p>
-            <div className="grid grid-cols-2 gap-1.5 max-h-52 overflow-y-auto">
-              {people.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => setEmployeeId(p.id)}
-                  className={`text-left px-3 py-2.5 rounded-xl border-2 transition min-h-[44px] ${
-                    employeeId === p.id ? 'border-indigo-500 bg-indigo-50 text-indigo-800' : 'border-slate-200 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  <span className="block text-sm font-bold leading-tight">{p.name}</span>
-                  {p.branch && <span className="block text-[10px] text-slate-400 capitalize">{p.branch}</span>}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <p className="text-xs font-bold text-slate-500 mb-2">2. How much?</p>
-            <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
-              <input
-                type="number"
-                min={1}
-                className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-indigo-400"
-                placeholder="0"
-                value={amount}
-                onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
-              />
-            </div>
-          </div>
-
-          <div>
-            <p className="text-xs font-bold text-slate-500 mb-2">3. Note <span className="font-normal text-slate-400">(optional)</span></p>
-            <input
-              type="text"
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              placeholder="e.g. for hospital"
-              value={note}
-              onChange={e => setNote(e.target.value)}
-            />
-          </div>
-
-          <p className="text-[11px] text-slate-400">
-            Paid from today&apos;s till. The drawer will expect {amount !== '' ? formatRs(Number(amount)) : 'this amount'} less at closing.
-          </p>
-        </div>
-      )}
-
-      <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
-        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button
-          onClick={save}
-          disabled={saving || !employeeId || amount === '' || Number(amount) <= 0}
-          className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-black disabled:opacity-40"
-        >
-          {saving ? 'Saving…' : amount !== '' && Number(amount) > 0 ? `Pay ${formatRs(Number(amount))}` : 'Pay'}
-        </button>
-      </div>
-    </Modal>
-  )
-}
-
-// ── Money in / out (not a sale) ──────────────────────────────────────────────
-// Owner tops up the float, cash is drawn from the bank, the takings are
-// banked, the owner takes drawings. Money MOVED, not earned or spent: the
-// drawer count follows it, profit never sees it. The direction is decided by
-// whichever button opened the modal — it is never asked twice.
-function MovementModal({
-  onClose, onSaved, showToast, drawerExpected, todayMovements, initialDir, initialType,
-}: {
-  onClose: () => void
-  onSaved: () => void
-  showToast: (m: string) => void
-  drawerExpected?: number | null
-  todayMovements?: any[]
-  initialDir: 'in' | 'out'
-  initialType?: string
-}) {
-  const TYPES = [
-    { v: 'owner_in',  icon: '👤', l: 'From owner',  d: 'Owner’s own money into the till', dir: 'in' },
-    { v: 'bank_in',   icon: '🏦', l: 'From bank',   d: 'Cash drawn from the business account', dir: 'in' },
-    { v: 'to_bank',   icon: '🏦', l: 'To bank',     d: 'Banking the day’s cash', dir: 'out' },
-    { v: 'owner_out', icon: '👤', l: 'To owner',    d: 'Excess cash / drawings handed to the owner', dir: 'out' },
-  ] as const
-  const dir = initialDir
-  const [type, setType] = useState<string>(initialType || (dir === 'in' ? 'owner_in' : 'to_bank'))
-  const [amount, setAmount] = useState<number | ''>('')
-  const [date, setDate] = useState(todayStr())
-  const [note, setNote] = useState('')
-  const [saving, setSaving] = useState(false)
-  const picked = TYPES.find(t => t.v === type)
-  const visible = TYPES.filter(t => t.dir === dir)
-
-  async function save() {
-    if (!type) { showToast(dir === 'in' ? 'Pick where the money came from' : 'Pick where the money went'); return }
-    if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
-    const amt = Math.round(Number(amount))
-    // Guardrail 1: taking out more than the drawer holds is usually a typo
-    if (picked?.dir === 'out' && date === todayStr() && drawerExpected != null && amt > drawerExpected) {
-      if (!confirm(`The drawer only expects ${formatRs(drawerExpected)} right now — taking out ${formatRs(amt)} would leave it negative.\n\nRecord anyway?`)) return
-    }
-    // Guardrail 2: the same movement twice in a day is usually a double-entry
-    const dupe = (todayMovements || []).find(m => m.type === type && Number(m.amount) === amt && date === todayStr())
-    if (dupe) {
-      if (!confirm(`${MOVEMENT_LABEL[type]} of ${formatRs(amt)} is already recorded today.\n\nRecord it a second time?`)) return
-    }
-    setSaving(true)
-    try {
-      const r = await fetch('/api/vendor/cash-movements', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', movement_date: date, type, amount: amt, note: note.trim() || null }),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.error ?? 'Failed to record')
-      showToast(picked?.dir === 'in'
-        ? `✅ Recorded — the drawer expects ${formatRs(amt)} more`
-        : `✅ Recorded — the drawer expects ${formatRs(amt)} less`)
-      onSaved()
-    } catch (e: any) { showToast('⚠️ ' + e.message) }
-    setSaving(false)
-  }
-
-  return (
-    <Modal title={dir === 'in' ? 'Money into the till' : 'Money out of the till'} onClose={onClose}>
-      <p className="text-xs text-slate-500 -mt-2 mb-4">
-        {dir === 'in' ? 'Not a sale — ' : 'Not an expense — '}
-        the drawer count follows it, profit never sees it.
-      </p>
-
-      <div className="grid grid-cols-2 gap-1.5 mb-4">
-        {visible.map(t => (
-          <button key={t.v} onClick={() => setType(t.v)}
-            className={`text-left px-3 py-2.5 rounded-xl border-2 transition ${
-              type === t.v
-                ? (dir === 'in' ? 'border-emerald-500 bg-emerald-50' : 'border-amber-500 bg-amber-50')
-                : 'border-slate-200 hover:border-slate-300'
-            }`}>
-            <span className="text-lg leading-none">{t.icon}</span>
-            <span className="block text-xs font-black text-slate-800 mt-1">{t.l}</span>
-            <span className="block text-[10px] text-slate-400 leading-tight mt-0.5">{t.d}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="relative mb-3">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
-        <input type="number" min={1} value={amount}
-          onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
-          placeholder="0"
-          className={`w-full border-2 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none ${dir === 'in' ? 'border-slate-200 focus:border-emerald-400' : 'border-slate-200 focus:border-amber-400'}`} />
-      </div>
-      {picked && amount !== '' && Number(amount) > 0 && (
-        <p className={`text-[11px] font-bold mb-3 ${dir === 'in' ? 'text-emerald-700' : 'text-amber-700'}`}>
-          {MOVEMENT_LABEL[picked.v]} — the drawer will expect {formatRs(Number(amount))} {dir === 'in' ? 'more' : 'less'}. Profit is untouched.
-        </p>
-      )}
-
-      <div className="flex items-center gap-2 text-xs mb-3">
-        <span className="font-bold text-slate-500">Date</span>
-        <input type="date" max={todayStr()} value={date} onChange={e => setDate(e.target.value)}
-          className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-sky-400" />
-        {date === todayStr() ? <span className="text-slate-400">Today</span> : null}
-      </div>
-
-      <input type="text" value={note} onChange={e => setNote(e.target.value)}
-        placeholder="Note (optional) — e.g. float top-up for the long weekend"
-        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400" />
-
-      <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
-        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || !type || amount === '' || Number(amount) <= 0}
-          className={`px-5 py-2.5 rounded-lg text-white text-sm font-black disabled:opacity-40 ${dir === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
-          {saving ? 'Saving…' : 'Record'}
-        </button>
-      </div>
-    </Modal>
-  )
-}
-
-// ── Quick service income (Proprietor) ────────────────────────────────────────
-// Small cash jobs with no document — puncture, air fill, a quick fit. This is
-// INCOME, not a movement: it saves as a real Proprietorship receipt (RCP
-// series, SVC line, cash payment), so revenue, profit, the drawer and the
-// daily report all see it through the one sales pipeline. No VAT — the
-// Proprietorship isn't VAT-registered — and nothing touches the Pvt Ltd.
-function QuickIncomeModal({
-  onClose, onSaved, showToast,
-}: {
-  onClose: () => void
-  onSaved: () => void
-  showToast: (m: string) => void
-}) {
-  const PRESETS = ['Puncture repair', 'Air / nitrogen fill', 'Tube fitting', 'Quick service']
-  const [desc, setDesc] = useState('')
-  const [amount, setAmount] = useState<number | ''>('')
-  const [saving, setSaving] = useState(false)
-  const [propEntity, setPropEntity] = useState<{ id: string; name: string } | null>(null)
-  const [entityLoading, setEntityLoading] = useState(true)
-
-  useEffect(() => {
-    fetch('/api/vendor/invoice-entities')
-      .then(r => r.json())
-      .then(j => {
-        // The Proprietorship = the entity that issues receipts, not tax invoices
-        const prop = (j.entities || []).find((e: any) => e.invoice_mode !== 'lk_tax')
-        setPropEntity(prop ? { id: prop.id, name: prop.name } : null)
-      })
-      .catch(() => {})
-      .finally(() => setEntityLoading(false))
-  }, [])
-
-  async function save() {
-    if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
-    if (!propEntity) { showToast('No Proprietorship entity configured'); return }
-    const amt = Math.round(Number(amount))
-    setSaving(true)
-    try {
-      const r = await fetch('/api/vendor/sales', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create_sale',
-          invoiceEntityId: propEntity.id,
-          items: [{ productId: null, productName: desc.trim() || 'Service income', productSku: '', quantity: 1, unitPrice: amt, ssclStream: 'SVC' }],
-          payments: [{ method: 'cash', amount: amt }],
-          notes: 'Quick service income — no document issued',
-        }),
-      })
-      const j = await r.json()
-      if (!r.ok) throw new Error(j.error ?? 'Failed to record')
-      showToast(`✅ ${formatRs(amt)} recorded as ${propEntity.name} income${j.invoiceNo ? ` (${j.invoiceNo})` : ''}`)
-      onSaved()
-    } catch (e: any) { showToast('⚠️ ' + e.message) }
-    setSaving(false)
-  }
-
-  return (
-    <Modal title="Service income — no invoice" onClose={onClose}>
-      <p className="text-xs text-slate-500 -mt-2 mb-4">
-        Quick cash jobs with no document. Counted as <strong>{propEntity?.name || 'Proprietor'}</strong> service
-        income — it goes into revenue and the drawer like any sale. No VAT.
-      </p>
-
-      <div className="flex flex-wrap gap-1.5 mb-2">
-        {PRESETS.map(p => (
-          <button key={p} onClick={() => setDesc(p)}
-            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 transition ${
-              desc === p ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
-            }`}>
-            {p}
-          </button>
-        ))}
-      </div>
-      <input type="text" value={desc} onChange={e => setDesc(e.target.value)}
-        placeholder="Or type what the job was…"
-        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 mb-3" />
-
-      <div className="relative mb-4">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
-        <input type="number" min={1} autoFocus value={amount}
-          onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
-          placeholder="0"
-          className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-emerald-400" />
-      </div>
-
-      <p className="text-[11px] text-slate-400 mb-1">
-        Cash into today&apos;s till. If the customer wants a receipt or pays later, use the POS instead.
-      </p>
-
-      <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
-        <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || entityLoading || amount === '' || Number(amount) <= 0}
-          className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-40">
-          {saving ? 'Saving…' : amount !== '' && Number(amount) > 0 ? `Record ${formatRs(Number(amount))}` : 'Record'}
-        </button>
-      </div>
-    </Modal>
-  )
-}
