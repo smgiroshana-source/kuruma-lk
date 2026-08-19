@@ -1099,8 +1099,15 @@ export function SupplierPayModal({
           {slip.kind === 'cheque' ? 'Write this on the cheque book slip' : 'Type this into the transfer remarks'}
         </p>
         <p className="text-4xl font-black tracking-[0.3em] text-slate-900 my-4 font-mono text-center">{slip.no}</p>
-        <p className="text-xs text-slate-400 text-center mb-4">
-          {formatRs(Number(amt))} to {picked?.supplier_name} — the owner signs only numbered slips
+        <p className="text-xs text-slate-400 text-center mb-1">
+          {formatRs(Number(amt))} to {picked?.supplier_name}
+        </p>
+        {/* The control differs by method: a cheque is authorised by the slip,
+            a transfer by the number reaching the bank statement. */}
+        <p className="text-[11px] font-bold text-red-600 text-center mb-4">
+          {slip.kind === 'cheque'
+            ? 'The owner signs ONLY cheques whose slip carries a confirmation number.'
+            : 'Transfers without this number in the remarks are treated as unauthorised.'}
         </p>
         <button onClick={onSaved} className="w-full py-2.5 rounded-xl bg-slate-800 text-white text-sm font-black">Done</button>
       </Modal>
