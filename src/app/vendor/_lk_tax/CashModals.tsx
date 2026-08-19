@@ -455,7 +455,7 @@ export function QuickIncomeModal({
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || entityLoading || amount === '' || Number(amount) <= 0}
+        <button onClick={save} disabled={saving || entityLoading || amount === '' || Number(amount) <= 0 || (method === 'cheque' && !payRef.trim())}
           className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-40">
           {saving ? 'Saving…' : amount !== '' && Number(amount) > 0 ? `Record ${formatRs(Number(amount))}` : 'Record'}
         </button>
@@ -1218,7 +1218,7 @@ export function SupplierPayModal({
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || !picked || amt === '' || Number(amt) <= 0 || over}
+        <button onClick={save} disabled={saving || !picked || amt === '' || Number(amt) <= 0 || over || (method === 'cheque' && !reference.trim())}
           className="px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black disabled:opacity-40">
           {saving ? 'Recording…' : 'Record payment'}
         </button>
@@ -1356,7 +1356,7 @@ export function CustomerCollectModal({
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || !picked || amt === '' || Number(amt) <= 0}
+        <button onClick={save} disabled={saving || !picked || amt === '' || Number(amt) <= 0 || (method === 'cheque' && !reference.trim())}
           className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-40">
           {saving ? 'Recording…' : 'Record collection'}
         </button>

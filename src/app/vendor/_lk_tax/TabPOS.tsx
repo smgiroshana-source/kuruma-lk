@@ -741,6 +741,14 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       return
     }
     setPosErrors({})
+    // A cheque with no number cannot be chased, matched to the bank, or proved
+    // if it bounces — the number is the only handle on it.
+    const chequeNoNumber = posPayments.filter(p =>
+      p.method === 'cheque' && parseFloat(p.amount) > 0 && !String(p.chequeNumber || '').trim())
+    if (chequeNoNumber.length > 0) {
+      showToast('⚠️ Enter the cheque number — a cheque without one cannot be traced')
+      return
+    }
     // Below-cost warning — ONLY for items that have a cost (real or rough).
     // Items without any cost sell silently (owner rule): no errors, no noise.
     const belowCost = posCart.filter(it => Number(it.cost) > 0 && isBelowCost(posMarginBase(it.unitPrice), it.cost))
@@ -1280,7 +1288,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                       </select>
                       <input type="text" inputMode="numeric" pattern="[0-9]*" value={line.amount} onChange={e => { const val = e.target.value.replace(/[^0-9]/g, ''); const u = [...posPayments]; u[i] = { ...u[i], amount: val }; setPosPayments(u) }} className="flex-1 sm:w-28 sm:flex-none min-w-0 px-2 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Amount" />
                       {line.method === 'cheque' && (<>
-                        <input type="text" value={line.chequeNumber} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeNumber: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Cheque #" />
+                        <input type="text" value={line.chequeNumber} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeNumber: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Cheque # *" />
                         <input type="date" value={line.chequeDate} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeDate: e.target.value }; setPosPayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
                       </>)}
                       {line.method === 'bank' && <input type="text" value={line.bankRef} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], bankRef: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Ref #" />}

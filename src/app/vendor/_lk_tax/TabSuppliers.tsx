@@ -158,7 +158,9 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
     const amt = Math.round(Number(newPayment.amount))
     if (!amt || amt <= 0) { showToast('Payment amount must be > 0'); return }
     if (amt > balance) { showToast(`Amount exceeds balance of ${formatRs(balance)}`); return }
-    if (newPayment.method === 'Cheque' && !newPayment.reference.trim()) { showToast('⚠️ Enter the cheque number first'); return }
+    if (String(newPayment.method).toLowerCase().includes('cheque') && !newPayment.reference.trim()) {
+      showToast('⚠️ Enter the cheque number — a cheque without one cannot be traced'); return
+    }
     setSaving(true)
     try {
       const res = await fetch('/api/vendor/supplier-invoices', {
@@ -468,7 +470,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                     <label className="block text-xs font-bold text-slate-500 mb-1">Reference</label>
                     <input
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                      placeholder="Cheque no. / transfer ref"
+                      placeholder={String(newPayment.method).toLowerCase().includes('cheque') ? 'Cheque number *' : 'Transfer reference'}
                       value={newPayment.reference}
                       onChange={e => setNewPayment(p => ({ ...p, reference: e.target.value }))}
                     />
