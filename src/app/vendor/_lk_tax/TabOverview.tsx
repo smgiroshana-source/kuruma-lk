@@ -196,6 +196,18 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const lowStock = products.filter(p => p.is_active && (p.min_stock_level || 0) > 0 && p.quantity <= p.min_stock_level)
   const lowStockWorst = lowStock.slice().sort((a, b) => a.quantity - b.quantity)[0]
 
+  // Two destinations lead to a LIST, and a list with nothing in it is a dead
+  // end — the operator taps, lands on an empty screen and has to find their
+  // own way back. Gate them on there actually being something to settle.
+  // (Never while the dashboard is still loading: zeros would gate wrongly.)
+  const noCredit = !dashLoading && (d.creditOwed || 0) <= 0
+  const noPayables = !dashLoading && (d.payables?.due || 0) <= 0
+  const destBlocked = (dest: string) =>
+    (dest === 'credit' && noCredit) || (dest === 'supplier' && noPayables)
+  const destBlockedWhy = (dest: string) =>
+    dest === 'credit' ? 'nobody owes you right now' : 'no unpaid supplier bills'
+
+
   // ── Today's flow steps — gated, popup-driven ──
   const hour = colomboHour()
   // Until the fresh fetch lands, fall back to the dashboard snapshot so the
@@ -493,20 +505,28 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
               {band.rows.map(r => (
                 <button
                   key={r.title}
+                  disabled={destBlocked(r.dest)}
+                  title={destBlocked(r.dest) ? destBlockedWhy(r.dest) : undefined}
                   onClick={() => {
                     if (r.dest.startsWith('nav:')) {
                       const [, t, sub] = r.dest.split(':')
                       onNavigate(t, sub || undefined)
                     } else openDest(r.dest)
                   }}
-                  className="group flex items-center gap-2.5 pl-2 pr-3.5 py-2 rounded-lg text-left hover:bg-slate-50 transition-colors duration-150"
+                  className={`group flex items-center gap-2.5 pl-2 pr-3.5 py-2 rounded-lg text-left transition-colors duration-150 ${
+                    destBlocked(r.dest) ? 'opacity-45 cursor-not-allowed' : 'hover:bg-slate-50'
+                  }`}
                 >
-                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150 ${band.tint}`}>
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors duration-150 ${
+                    destBlocked(r.dest) ? 'bg-slate-100 text-slate-400' : band.tint
+                  }`}>
                     <ActionIcon name={r.icon} />
                   </span>
                   <span className="leading-tight">
                     <span className="block text-[13px] font-semibold text-slate-800">{r.title}</span>
-                    <span className="block text-[11px] text-slate-400">{r.sub}</span>
+                    <span className="block text-[11px] text-slate-400">
+                      {destBlocked(r.dest) ? destBlockedWhy(r.dest) : r.sub}
+                    </span>
                   </span>
                 </button>
               ))}
@@ -646,19 +666,25 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             ).map(r => (
               <button
                 key={r.dest}
+                disabled={destBlocked(r.dest)}
                 onClick={() => openDest(r.dest, popup.amount)}
                 className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left transition-colors ${
-                  popup.dir === 'in' ? 'border-slate-200 hover:border-emerald-400 hover:bg-emerald-50' : 'border-slate-200 hover:border-red-300 hover:bg-red-50'
+                  destBlocked(r.dest) ? 'border-slate-200 opacity-45 cursor-not-allowed'
+                    : popup.dir === 'in' ? 'border-slate-200 hover:border-emerald-400 hover:bg-emerald-50'
+                    : 'border-slate-200 hover:border-red-300 hover:bg-red-50'
                 }`}
               >
                 <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                  popup.dir === 'in' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
+                  destBlocked(r.dest) ? 'bg-slate-100 text-slate-400'
+                    : popup.dir === 'in' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
                 }`}>
                   <ActionIcon name={r.icon} />
                 </span>
                 <span className="leading-tight">
                   <span className="block text-[13px] font-bold text-slate-800">{r.title}</span>
-                  <span className="block text-[11px] text-slate-400">{r.sub}</span>
+                  <span className="block text-[11px] text-slate-400">
+                    {destBlocked(r.dest) ? destBlockedWhy(r.dest) : r.sub}
+                  </span>
                 </span>
               </button>
             ))}
