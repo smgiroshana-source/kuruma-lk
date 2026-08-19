@@ -365,7 +365,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
             the destination popup opens with the amount already filled. */}
         {sessOpen && !dashLoading && (
           <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/60 px-3 py-1.5 focus-within:border-emerald-400 transition-colors">
+            <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-200 bg-emerald-50/60 pl-3 pr-1.5 py-1 focus-within:border-emerald-400 transition-colors">
               <span className="text-xs font-black text-emerald-700 shrink-0">＋ Rs.</span>
               <input
                 type="number" min={1} inputMode="numeric"
@@ -373,12 +373,18 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
                 onChange={e => setAmtIn(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') submitQuick('in') }}
                 placeholder="income — money came in"
-                className="flex-1 min-w-0 bg-transparent py-1.5 text-base font-bold text-emerald-900 placeholder:text-emerald-600/50 placeholder:text-[13px] placeholder:font-semibold outline-none"
+                className="flex-1 min-w-0 bg-transparent py-1.5 text-base font-bold text-emerald-900 placeholder:text-emerald-600/50 placeholder:text-[13px] placeholder:font-semibold outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
-              <button onClick={() => submitQuick('in')}
-                className="shrink-0 w-8 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black transition-colors">→</button>
+              <button onClick={() => submitQuick('in')} aria-label="Record money in"
+                className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center text-white transition-all duration-150 ${
+                  Number(amtIn) > 0 ? 'bg-emerald-600 hover:bg-emerald-700 shadow-sm hover:shadow active:scale-95' : 'bg-emerald-300'
+                }`}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h13M13 6l6 6-6 6" />
+                </svg>
+              </button>
             </div>
-            <div className="flex items-center gap-2 rounded-xl border-2 border-red-200 bg-red-50/60 px-3 py-1.5 focus-within:border-red-400 transition-colors">
+            <div className="flex items-center gap-2 rounded-xl border-2 border-red-200 bg-red-50/60 pl-3 pr-1.5 py-1 focus-within:border-red-400 transition-colors">
               <span className="text-xs font-black text-red-700 shrink-0">－ Rs.</span>
               <input
                 type="number" min={1} inputMode="numeric"
@@ -386,10 +392,16 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
                 onChange={e => setAmtOut(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') submitQuick('out') }}
                 placeholder="expense — money went out"
-                className="flex-1 min-w-0 bg-transparent py-1.5 text-base font-bold text-red-900 placeholder:text-red-600/50 placeholder:text-[13px] placeholder:font-semibold outline-none"
+                className="flex-1 min-w-0 bg-transparent py-1.5 text-base font-bold text-red-900 placeholder:text-red-600/50 placeholder:text-[13px] placeholder:font-semibold outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
-              <button onClick={() => submitQuick('out')}
-                className="shrink-0 w-8 h-8 rounded-lg bg-red-600 hover:bg-red-700 text-white font-black transition-colors">→</button>
+              <button onClick={() => submitQuick('out')} aria-label="Record money out"
+                className={`shrink-0 w-12 h-12 rounded-xl flex items-center justify-center text-white transition-all duration-150 ${
+                  Number(amtOut) > 0 ? 'bg-red-600 hover:bg-red-700 shadow-sm hover:shadow active:scale-95' : 'bg-red-300'
+                }`}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h13M13 6l6 6-6 6" />
+                </svg>
+              </button>
             </div>
           </div>
         )}
