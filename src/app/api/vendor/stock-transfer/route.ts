@@ -12,10 +12,16 @@ import { generateProductSlug } from '@/lib/slug'
  * tenant's catalog.
  */
 async function getLinkedVendors(admin: ReturnType<typeof createAdminClient>, sourceVendor: any, userId: string) {
-  const [bySourceOwner, byCallerOwner, byStaff] = await Promise.all([
+  const [bySourceOwner, byCallerOwner, byStaff, byLink] = await Promise.all([
     admin.from('vendors').select('id, name').eq('status', 'approved').eq('user_id', sourceVendor.user_id),
     admin.from('vendors').select('id, name').eq('status', 'approved').eq('user_id', userId),
     admin.from('vendor_staff').select('vendor:vendors(id, name, status)').eq('user_id', userId).eq('active', true),
+    // Explicit links: two shops that are the same business but registered
+    // under different logins (WHEEL MART ↔ Sakura). Mutual — one row works
+    // both ways, so check the pairing from either side.
+    admin.from('vendor_transfer_links')
+      .select('a:vendors!vendor_transfer_links_vendor_id_fkey(id, name, status), b:vendors!vendor_transfer_links_linked_vendor_id_fkey(id, name, status)')
+      .or(`vendor_id.eq.${sourceVendor.id},linked_vendor_id.eq.${sourceVendor.id}`),
   ])
   const map = new Map<string, { id: string; name: string }>()
   for (const v of (bySourceOwner.data || [])) map.set(v.id, v)
@@ -23,6 +29,11 @@ async function getLinkedVendors(admin: ReturnType<typeof createAdminClient>, sou
   for (const row of (byStaff.data || []) as any[]) {
     const v = row.vendor
     if (v && v.status === 'approved') map.set(v.id, { id: v.id, name: v.name })
+  }
+  for (const row of (byLink.data || []) as any[]) {
+    for (const v of [row.a, row.b]) {
+      if (v && v.status === 'approved') map.set(v.id, { id: v.id, name: v.name })
+    }
   }
   map.delete(sourceVendor.id)
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name))
