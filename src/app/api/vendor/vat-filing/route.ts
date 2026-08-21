@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { missingVatPaperwork } from '@/lib/vatPaperwork'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -129,7 +130,8 @@ export async function GET(req: NextRequest) {
         // we received the goods when the invoice date wasn't captured.
         invoiceDate: g.supplier_invoice_date || String(g.received_at).slice(0, 10),
         invoiceNo: g.supplier_invoice_no || '',
-        missingInvoiceInfo: !g.supplier_invoice_no || !g.supplier_invoice_date,
+        missingInvoiceInfo: missingVatPaperwork(g).length > 0,
+        missingFields: missingVatPaperwork(g),
         partyTin: g.supplier_tin || '', partyName: g.supplier_name || '',
         value: parseInt(g.net_cost || 0), vat: parseInt(g.input_vat || 0),
         disallowedVat: parseInt(g.disallowed_vat || 0),
@@ -167,6 +169,7 @@ export async function GET(req: NextRequest) {
       ref: e.supplier_invoice_no || e.description,
       invoiceDate, invoiceNo: e.supplier_invoice_no || '',
       missingInvoiceInfo: !e.supplier_invoice_no || !e.supplier_tin,
+      missingFields: missingVatPaperwork(e),
       partyTin: e.supplier_tin || '', partyName: e.supplier_name || e.description || '',
       // The amount paid is VAT-inclusive; Schedule 02 wants the value excluding it
       value: Math.round(parseInt(e.amount || 0) - vat), vat,

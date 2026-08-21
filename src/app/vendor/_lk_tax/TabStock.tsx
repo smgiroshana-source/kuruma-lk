@@ -108,6 +108,13 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   // shortcut — a half record silently zeroes the GRN's VAT and empties
   // Schedule 02, and nobody is left to remember the gap.
   const [newSupplierOpen, setNewSupplierOpen] = useState(false)
+  // When set, the GRN supplier modal edits this supplier instead of adding one
+  // — used to fill in a missing TIN without leaving the half-typed GRN.
+  const [grnSupplierEditId, setGrnSupplierEditId] = useState<string | null>(null)
+  // Filling in Schedule 02 details on an already-posted GRN
+  const [fixInvoiceGrn, setFixInvoiceGrn] = useState<any>(null)
+  const [fixInvoiceForm, setFixInvoiceForm] = useState({ supplierInvoiceNo: '', supplierInvoiceDate: '', supplierTin: '' })
+  const [fixInvoiceSaving, setFixInvoiceSaving] = useState(false)
   // Supplier management
   const [supplierFormOpen, setSupplierFormOpen] = useState(false)
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null)
@@ -202,6 +209,24 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       } else showToast('⚠️ ' + j.error)
     } catch { showToast('Network error') }
     setGrnLoading(false)
+  }
+
+  // Correcting the record of the SUPPLIER's document — no amount, no stock and
+  // no cost layer moves, which is why this is allowed after posting when a
+  // normal edit isn't.
+  async function saveInvoiceInfo() {
+    if (!fixInvoiceGrn) return
+    setFixInvoiceSaving(true)
+    try {
+      const r = await fetch('/api/vendor/grns', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_grn_invoice_info', grnId: fixInvoiceGrn.id, ...fixInvoiceForm }),
+      })
+      const j = await r.json()
+      if (r.ok) { showToast('✅ ' + j.message); setFixInvoiceGrn(null); fetchGrnList() }
+      else showToast('⚠️ ' + j.error)
+    } catch { showToast('Network error') }
+    setFixInvoiceSaving(false)
   }
 
   async function postGrn(grnId: string) {
@@ -761,6 +786,17 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         const grnInputVat = grnItems.reduce((s, i) => s + Math.round(i.quantity * i.unitCost * i.vatRate / 100), 0)
         const grnTotal    = grnNetCost + grnInputVat
 
+        // Input VAT is only claimable against the supplier's tax invoice, and
+        // IRD Schedule 02 lists three things off it. Ask while the delivery
+        // note is still in the operator's hand — chasing it at filing time is
+        // how a credit gets lost.
+        const grnSupplier: any = suppliers.find((x: any) => x.id === grnForm.supplierId)
+        const grnVatGaps: string[] = grnInputVat > 0 ? ([
+          !grnForm.supplierInvoiceNo.trim()   && 'invoice number',
+          !grnForm.supplierInvoiceDate        && 'invoice date',
+          !String(grnSupplier?.tin || '').trim() && 'supplier TIN',
+        ].filter(Boolean) as string[]) : []
+
         return (
           <div className="space-y-4">
             {/* Header fields */}
@@ -792,24 +828,40 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       ? <p className="text-[10px] font-bold text-emerald-600 mt-1">VAT-registered — lines default to {vatRate}%, claimable as input VAT</p>
                       : <p className="text-[10px] font-bold text-slate-400 mt-1">Not VAT-registered — no input VAT to claim on this purchase</p>
                   )}
-                  <button onClick={() => setNewSupplierOpen(true)}
+                  {grnVatGaps.includes('supplier TIN') && (
+                    <p className="text-[10px] font-bold text-red-600 mt-1">
+                      No TIN on record for {grnSupplier?.name || 'this supplier'} — Schedule 02 can&apos;t list the claim without it.{' '}
+                      <button onClick={() => { setGrnSupplierEditId(grnForm.supplierId); setNewSupplierOpen(true) }}
+                        className="underline">Add TIN</button>
+                    </p>
+                  )}
+                  <button onClick={() => { setGrnSupplierEditId(null); setNewSupplierOpen(true) }}
                     className="mt-2 text-xs font-bold text-orange-600 px-3 py-1.5 rounded border border-orange-200 hover:bg-orange-50">
                     + New supplier
                   </button>
                 </div>
                 {/* Supplier invoice no */}
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier Invoice No.</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                    Supplier Invoice No.{grnInputVat > 0 && <span className="text-red-500"> * required for VAT</span>}
+                  </label>
                   <input type="text" value={grnForm.supplierInvoiceNo} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceNo: e.target.value }))}
-                    placeholder="e.g. INV-2026-1234" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                    placeholder="e.g. INV-2026-1234"
+                    className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice number') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
                 </div>
                 {/* Supplier invoice date — VAT Schedule 02 lists the supplier's
                     invoice date, which isn't always the day we received goods */}
                 <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier Invoice Date</label>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                    Supplier Invoice Date{grnInputVat > 0 && <span className="text-red-500"> * required for VAT</span>}
+                  </label>
                   <input type="date" value={grnForm.supplierInvoiceDate} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceDate: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                  <p className="text-[10px] text-slate-400 mt-1">Needed for the VAT input schedule — leave blank if same as received</p>
+                    className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice date') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {grnInputVat > 0
+                      ? 'The date on the supplier\u2019s invoice \u2014 not always the day the goods arrived.'
+                      : 'Only needed when claiming input VAT.'}
+                  </p>
                 </div>
                 {/* Date */}
                 <div>
@@ -1181,13 +1233,26 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     <div className="flex gap-8"><span className="text-slate-400">Input VAT</span><span className="font-semibold w-32 text-right text-orange-600">Rs.{grnInputVat.toLocaleString()}</span></div>
                     <div className="flex gap-8 border-t border-slate-200 pt-1 mt-1"><span className="font-bold text-slate-700">Total Cost</span><span className="font-black w-32 text-right">Rs.{grnTotal.toLocaleString()}</span></div>
                   </div>
+                  {grnVatGaps.length > 0 && (
+                    <div className="mb-3 text-[11px] bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                      <p className="font-bold text-red-700">
+                        Can&apos;t post: missing the {grnVatGaps.join(', ')}.
+                      </p>
+                      <p className="text-red-600 mt-0.5">
+                        You&apos;re claiming Rs.{grnInputVat.toLocaleString()} of input VAT, and VAT Schedule 02 lists these off the
+                        supplier&apos;s invoice. Add them now, or set the lines to 0% if you aren&apos;t claiming on this purchase.
+                        Save as draft if the invoice is still coming.
+                      </p>
+                    </div>
+                  )}
                   <div className="flex gap-3">
                     <button onClick={() => createGrn(false)} disabled={grnLoading}
                       className="bg-white border-2 border-slate-300 hover:bg-slate-50 disabled:opacity-50 text-slate-700 font-bold text-sm py-3 px-5 rounded-xl">
                       {grnLoading ? '⏳' : '💾 Save as Draft'}
                     </button>
-                    <button onClick={() => createGrn(true)} disabled={grnLoading}
-                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-black text-sm py-3 rounded-xl">
+                    <button onClick={() => createGrn(true)} disabled={grnLoading || grnVatGaps.length > 0}
+                      title={grnVatGaps.length > 0 ? `Missing the ${grnVatGaps.join(', ')}` : ''}
+                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-sm py-3 rounded-xl">
                       {grnLoading ? '⏳ Saving…' : '✅ Post & Update Stock'}
                     </button>
                   </div>
@@ -1211,6 +1276,13 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           ) : grnList.map((grn: any) => {
             const isPosted = grn.status === 'posted'
             const totalQty = (grn.items || []).reduce((s: number, i: any) => s + i.quantity, 0)
+            // Schedule 02 gaps — flagged on the GRN itself so they get fixed
+            // here, not discovered by the accountant on filing day.
+            const vatGaps: string[] = parseInt(grn.input_vat || 0) > 0 && grn.status !== 'reversed' ? ([
+              !grn.supplier_invoice_no   && 'invoice number',
+              !grn.supplier_invoice_date && 'invoice date',
+              !grn.supplier_tin          && 'supplier TIN',
+            ].filter(Boolean) as string[]) : []
             return (
               <div key={grn.id} className={`bg-white rounded-xl border ${isPosted ? 'border-green-200' : 'border-amber-200'} p-4`}>
                 <div className="flex items-start justify-between gap-2 flex-wrap">
@@ -1239,11 +1311,29 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   ))}
                   {(grn.items || []).length > 5 && <p className="text-[10px] text-slate-400">…+{(grn.items || []).length - 5} more</p>}
                 </div>
+                {vatGaps.length > 0 && (
+                  <div className="mt-3 flex items-center gap-2 flex-wrap bg-red-50 border border-red-200 rounded-lg px-2.5 py-2">
+                    <span className="text-[11px] font-bold text-red-700 flex-1">
+                      VAT claim not filable — missing the {vatGaps.join(', ')}.
+                    </span>
+                    <button onClick={() => {
+                      setFixInvoiceGrn(grn)
+                      setFixInvoiceForm({
+                        supplierInvoiceNo:   grn.supplier_invoice_no || '',
+                        supplierInvoiceDate: grn.supplier_invoice_date ? String(grn.supplier_invoice_date).slice(0, 10) : '',
+                        supplierTin:         grn.supplier_tin || '',
+                      })
+                    }} className="text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 px-2.5 py-1.5 rounded-lg">
+                      Add details
+                    </button>
+                  </div>
+                )}
                 {/* Actions */}
                 {!isPosted && grn.status !== 'reversed' && (
                   <div className="mt-3 pt-3 border-t border-slate-100 flex gap-2 flex-wrap">
-                    <button onClick={() => postGrn(grn.id)} disabled={grnPosting === grn.id}
-                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs font-bold py-2 rounded-lg">
+                    <button onClick={() => postGrn(grn.id)} disabled={grnPosting === grn.id || vatGaps.length > 0}
+                      title={vatGaps.length > 0 ? `Missing the ${vatGaps.join(', ')}` : ''}
+                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold py-2 rounded-lg">
                       {grnPosting === grn.id ? '⏳ Posting…' : '✅ Post & Update Stock'}
                     </button>
                     <button onClick={() => {
@@ -1730,27 +1820,77 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       )}
 
       {/* ── Did you pay for this now? (after posting a GRN) ── */}
+      {fixInvoiceGrn && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setFixInvoiceGrn(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-black text-slate-900">Supplier invoice details</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">
+              {fixInvoiceGrn.grn_number} · {fixInvoiceGrn.supplier_name || 'No supplier'} · input VAT Rs.
+              {parseInt(fixInvoiceGrn.input_vat || 0).toLocaleString()}. Copy these off the supplier&apos;s tax invoice —
+              VAT Schedule 02 lists them against the claim. Amounts and stock are not touched.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Invoice No.</label>
+                <input type="text" value={fixInvoiceForm.supplierInvoiceNo} autoFocus
+                  onChange={e => setFixInvoiceForm(f => ({ ...f, supplierInvoiceNo: e.target.value }))}
+                  placeholder="e.g. INV-2026-1234"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Invoice Date</label>
+                <input type="date" value={fixInvoiceForm.supplierInvoiceDate}
+                  onChange={e => setFixInvoiceForm(f => ({ ...f, supplierInvoiceDate: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier TIN</label>
+                <input type="text" inputMode="numeric" value={fixInvoiceForm.supplierTin}
+                  onChange={e => setFixInvoiceForm(f => ({ ...f, supplierTin: e.target.value }))}
+                  placeholder="9 digits"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                <p className="text-[10px] text-slate-400 mt-1">Saved to the supplier too, so the next GRN already has it.</p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setFixInvoiceGrn(null)}
+                className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-500">Cancel</button>
+              <button onClick={saveInvoiceInfo} disabled={fixInvoiceSaving}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-black text-sm py-2.5 rounded-xl">
+                {fixInvoiceSaving ? '⏳ Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {newSupplierOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setNewSupplierOpen(false)}>
           <div className="bg-white rounded-2xl w-full max-w-lg p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-black text-slate-900 mb-1">New supplier</h3>
+            <h3 className="text-lg font-black text-slate-900 mb-1">{grnSupplierEditId ? 'Edit supplier' : 'New supplier'}</h3>
             <p className="text-xs text-slate-500 mb-4">
-              Their VAT status decides the VAT on every line of this GRN, so it&apos;s captured here rather than left for later.
+              {grnSupplierEditId
+                ? 'The TIN is what VAT Schedule 02 lists against every input claim from this supplier — saved here once, reused on every GRN.'
+                : 'Their VAT status decides the VAT on every line of this GRN, so it\u2019s captured here rather than left for later.'}
             </p>
             <SupplierForm
+              initial={grnSupplierEditId ? suppliers.find(x => x.id === grnSupplierEditId) : null}
               showToast={showToast}
               onSaved={saved => {
-                setSuppliers(prev => [...prev, saved].sort((a, b) => a.name.localeCompare(b.name)))
+                setSuppliers(prev => [...prev.filter(x => x.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name)))
                 // Select it, and re-rate the lines to its VAT status
                 const rate = saved?.vat_registered ? vatRate : 0
                 setGrnForm(f => ({ ...f, supplierId: saved.id, supplierName: saved.name }))
                 setGrnItems(prev => prev.map(it => ({ ...it, vatRate: rate })))
-                setNewSupplierOpen(false)
-                showToast(saved?.vat_registered
-                  ? `${saved.name} added — lines set to ${rate}%`
-                  : `${saved.name} added — not VAT-registered`)
+                const wasEdit = !!grnSupplierEditId
+                setNewSupplierOpen(false); setGrnSupplierEditId(null)
+                showToast(wasEdit
+                  ? `${saved.name} updated${saved?.tin ? ` — TIN ${saved.tin}` : ''}`
+                  : saved?.vat_registered
+                    ? `${saved.name} added — lines set to ${rate}%`
+                    : `${saved.name} added — not VAT-registered`)
               }}
-              onCancel={() => setNewSupplierOpen(false)}
+              onCancel={() => { setNewSupplierOpen(false); setGrnSupplierEditId(null) }}
             />
           </div>
         </div>

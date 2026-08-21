@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { missingVatPaperwork, vatPaperworkMessage } from '@/lib/vatPaperwork'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
@@ -157,6 +158,21 @@ export async function POST(req: NextRequest) {
 
     const items = grn.items || []
     if (items.length === 0) return NextResponse.json({ error: 'GRN has no items' }, { status: 400 })
+
+    // Claiming input VAT? Then the supplier's tax-invoice details must be on
+    // record BEFORE the purchase enters the VAT ledger. Chasing them at filing
+    // time, weeks later, is how a credit gets lost. Nothing is blocked when
+    // there's no VAT to claim — that purchase never reaches Schedule 02.
+    if (parseInt(grn.input_vat || 0) > 0) {
+      const gaps = missingVatPaperwork(grn)
+      if (gaps.length > 0) {
+        return NextResponse.json({
+          error: `${grn.grn_number} can't be posted. ${vatPaperworkMessage(gaps)}`,
+          missingVatPaperwork: gaps,
+          hint: 'Add the details to the draft, or set the VAT rate to 0% if you are not claiming input VAT on this purchase.',
+        }, { status: 400 })
+      }
+    }
 
     // 0. Atomically claim the GRN (guards against double-posting from two tabs/clicks)
     const { data: claimed } = await admin.from('grns')
@@ -327,6 +343,49 @@ export async function POST(req: NextRequest) {
     if (grn.status === 'posted') return NextResponse.json({ error: 'Cannot delete a posted GRN' }, { status: 400 })
     await admin.from('grns').delete().eq('id', grnId)
     return NextResponse.json({ success: true, message: `${grn.grn_number} deleted` })
+  }
+
+  // ── FIX PAPERWORK on an already-posted GRN ────────────────────────────────
+  // The three Schedule 02 fields are a record of the SUPPLIER's document, not
+  // our own figures — correcting them changes no amount, no stock and no cost
+  // layer, so unlike a normal edit this is allowed after posting. Without it
+  // the older GRNs that predate the posting gate could never be made filable.
+  if (action === 'update_grn_invoice_info') {
+    const { grnId, supplierInvoiceNo, supplierInvoiceDate, supplierTin } = body
+    if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
+
+    const { data: grn } = await admin.from('grns')
+      .select('id, grn_number, supplier_id, input_vat').eq('id', grnId).eq('vendor_id', vendor.id).single()
+    if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
+
+    const patch = {
+      supplier_invoice_no:   (supplierInvoiceNo   || '').trim() || null,
+      supplier_invoice_date: (supplierInvoiceDate || '').trim() || null,
+      supplier_tin:          (supplierTin         || '').trim() || null,
+      updated_at:            new Date().toISOString(),
+    }
+    if (parseInt(grn.input_vat || 0) > 0) {
+      const gaps = missingVatPaperwork(patch)
+      if (gaps.length > 0) {
+        return NextResponse.json({ error: vatPaperworkMessage(gaps), missingVatPaperwork: gaps }, { status: 400 })
+      }
+    }
+
+    const { error: upErr } = await admin.from('grns').update(patch).eq('id', grnId).eq('vendor_id', vendor.id)
+    if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 })
+
+    // Carry the TIN back to the supplier record so the next GRN inherits it
+    // instead of asking the operator for the same number again.
+    if (patch.supplier_tin && grn.supplier_id) {
+      const { data: sup } = await admin.from('suppliers')
+        .select('tin').eq('id', grn.supplier_id).eq('vendor_id', vendor.id).single()
+      if (sup && !sup.tin) {
+        await admin.from('suppliers').update({ tin: patch.supplier_tin })
+          .eq('id', grn.supplier_id).eq('vendor_id', vendor.id)
+      }
+    }
+
+    return NextResponse.json({ success: true, message: `${grn.grn_number} invoice details saved` })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
