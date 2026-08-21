@@ -30,6 +30,49 @@ function generateSKU() {
   return id
 }
 
+
+// ── Why a product won't delete ───────────────────────────────────────────────
+// A product that appears on a sale, a GRN or a transfer is referenced by those
+// records, and Postgres refuses to delete it — correctly, since removing it
+// would leave that history pointing at nothing. Postgres words this as:
+//   Key (id)=(…) is still referenced from table "sale_items".
+// which means nothing to a shop, so translate it and point at Hide, which is
+// what the operator actually wants.
+const DELETE_BLOCKERS: Record<string, string> = {
+  sale_items:        'it appears on a sale',
+  credit_note_items: 'it appears on a credit note',
+  grn_items:         'it appears on a goods-received note',
+  stock_transfers:   'it was transferred between shops',
+  cost_layers:       'it still has stock cost layers',
+  stock_writeoffs:   'it appears on a write-off',
+  supplier_returns:  'it appears on a supplier return',
+}
+
+function blockedTable(err: any): string | null {
+  return (String(err?.details || err?.message || '').match(/table "([a-z_]+)"/) || [])[1] || null
+}
+
+/**
+ * Remove one product row, and only its own photos. Nothing is destroyed unless
+ * the product itself can go — photos are cleared only when they turn out to be
+ * the one thing holding the delete up.
+ */
+async function deleteProductRow(admin: ReturnType<typeof createAdminClient>, productId: string) {
+  let { error } = await admin.from('products').delete().eq('id', productId)
+  if (error && blockedTable(error) === 'product_images') {
+    await admin.from('product_images').delete().eq('product_id', productId)
+    ;({ error } = await admin.from('products').delete().eq('id', productId))
+  }
+  if (!error) await admin.from('product_images').delete().eq('product_id', productId)
+  return error
+}
+
+function explainBlockedDelete(name: string, err: any): string {
+  const table = blockedTable(err)
+  const why = (table && DELETE_BLOCKERS[table]) || 'other records still refer to it'
+  return `"${name}" can't be deleted because ${why} — removing it would break that record. Use Hide instead: it disappears from the shop and the POS, and the history stays intact.`
+}
+
 export async function POST(req: NextRequest) {
   const vendor = await getVendor()
   if (!vendor) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
@@ -283,17 +326,31 @@ export async function POST(req: NextRequest) {
   // ─── DELETE SINGLE PRODUCT ───
   if (action === 'delete') {
     const { productId } = body
-    const { data: existing } = await admin.from('products').select('vendor_id').eq('id', productId).single()
+    const { data: existing } = await admin.from('products').select('vendor_id, name').eq('id', productId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
+
+    // Read the photo list BEFORE anything is removed — once the product row is
+    // gone the URLs are unrecoverable and the storage files would be orphaned.
     const { data: images } = await admin.from('product_images').select('url').eq('product_id', productId)
+
+    // Delete the PRODUCT first, and check whether it worked. The old order
+    // wiped the photos and the storage files up front, then discarded the
+    // result of the product delete and answered "Product deleted" either way —
+    // so a product held by a sale went on existing while its pictures did not.
+    const delErr = await deleteProductRow(admin, productId)
+
+    if (delErr) {
+      // Nothing was destroyed — the product and its photos are as they were.
+      return NextResponse.json({ success: false, error: explainBlockedDelete(existing.name, delErr) }, { status: 409 })
+    }
+
+    // Gone for real; now clean up the storage files it owned.
     if (images && images.length > 0) {
       const paths = images.map((img: any) => {
         try { const u = new URL(img.url); return u.pathname.split('/product-images/')[1] || null } catch { return null }
       }).filter((p): p is string => !!p)
       if (paths.length > 0) await admin.storage.from('product-images').remove(paths)
     }
-    await admin.from('product_images').delete().eq('product_id', productId)
-    await admin.from('products').delete().eq('id', productId)
     revalidatePath('/')
     return NextResponse.json({ success: true, message: 'Product deleted' })
   }
@@ -309,41 +366,66 @@ export async function POST(req: NextRequest) {
     function chunk(arr: any[]) { const chunks = []; for (let i = 0; i < arr.length; i += BATCH) chunks.push(arr.slice(i, i + BATCH)); return chunks }
 
     // Verify all products belong to this vendor (batched)
-    const ownedIds: string[] = []
+    const owned: Array<{ id: string; name: string }> = []
     for (const batch of chunk(productIds)) {
-      const { data } = await admin.from('products').select('id, vendor_id').in('id', batch)
-      if (data) ownedIds.push(...data.filter((p: any) => p.vendor_id === vendor.id).map((p: any) => p.id))
+      const { data } = await admin.from('products').select('id, name, vendor_id').in('id', batch)
+      if (data) owned.push(...data.filter((p: any) => p.vendor_id === vendor.id).map((p: any) => ({ id: p.id, name: p.name })))
     }
 
-    if (ownedIds.length === 0)
+    if (owned.length === 0)
       return NextResponse.json({ success: false, error: 'No matching products found' }, { status: 404 })
 
-    // Delete images from storage (batched)
-    for (const batch of chunk(ownedIds)) {
-      const { data: images } = await admin.from('product_images').select('url').in('product_id', batch)
-      if (images && images.length > 0) {
-        const paths = images.map((img: any) => {
-          try { const u = new URL(img.url); return u.pathname.split('/product-images/')[1] || null } catch { return null }
-        }).filter((p): p is string => !!p)
-        // Storage remove also has limits — batch by 100
-        for (let i = 0; i < paths.length; i += 100) {
-          await admin.storage.from('product-images').remove(paths.slice(i, i + 100))
-        }
+    // Collect the photo URLs up front — after the rows go, the storage files
+    // can no longer be found.
+    const pathsByProduct = new Map<string, string[]>()
+    for (const batch of chunk(owned.map(p => p.id))) {
+      const { data: images } = await admin.from('product_images').select('product_id, url').in('product_id', batch)
+      for (const img of (images || []) as any[]) {
+        let path: string | null = null
+        try { path = new URL(img.url).pathname.split('/product-images/')[1] || null } catch {}
+        if (path) pathsByProduct.set(img.product_id, [...(pathsByProduct.get(img.product_id) || []), path])
       }
     }
 
-    // Delete image records then products (batched)
-    for (const batch of chunk(ownedIds)) {
-      await admin.from('product_images').delete().in('product_id', batch)
+    // Try each batch as one statement, then fall back to one-by-one if it
+    // fails. A batch delete is all-or-nothing: a single product held by a sale
+    // would otherwise take the whole selection down with it, and the old code
+    // ignored the error and reported every one as deleted.
+    const deleted: string[] = []
+    const blocked: string[] = []
+    for (const batch of chunk(owned.map(p => p.id))) {
+      const { error: batchErr } = await admin.from('products').delete().in('id', batch)
+      if (!batchErr) {
+        deleted.push(...batch)
+        await admin.from('product_images').delete().in('product_id', batch)
+        continue
+      }
+      // The batch is all-or-nothing, so one product held by a sale would take
+      // the whole selection with it. Retry individually to keep the rest.
+      for (const id of batch) {
+        const oneErr = await deleteProductRow(admin, id)
+        if (oneErr) blocked.push(explainBlockedDelete(owned.find(p => p.id === id)?.name || 'A product', oneErr))
+        else deleted.push(id)
+      }
     }
-    for (const batch of chunk(ownedIds)) {
-      await admin.from('products').delete().in('id', batch)
+
+    // Only remove storage files for products that actually went
+    const paths = deleted.flatMap(id => pathsByProduct.get(id) || [])
+    for (let i = 0; i < paths.length; i += 100) {
+      await admin.storage.from('product-images').remove(paths.slice(i, i + 100))
     }
+
+    revalidatePath('/')
+    if (deleted.length === 0)
+      return NextResponse.json({ success: false, error: blocked[0] || 'Nothing could be deleted' }, { status: 409 })
 
     return NextResponse.json({
       success: true,
-      deletedCount: ownedIds.length,
-      message: `${ownedIds.length} product${ownedIds.length > 1 ? 's' : ''} deleted`
+      deletedCount: deleted.length,
+      blocked: blocked.length > 0 ? blocked : undefined,
+      message: blocked.length > 0
+        ? `${deleted.length} deleted · ${blocked.length} kept because they appear in your records — hide those instead`
+        : `${deleted.length} product${deleted.length > 1 ? 's' : ''} deleted`
     })
   }
 
