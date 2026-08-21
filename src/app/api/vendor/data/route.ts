@@ -81,9 +81,33 @@ export async function GET(req: NextRequest) {
     from += PAGE_SIZE
   }
 
+  // ── Which products can still be deleted ──────────────────────────────────
+  // A product named on a sale, a GRN or a transfer cannot be removed —
+  // Postgres refuses, because that record would be left pointing at nothing.
+  // Work it out here so the Products table can offer Delete only where it can
+  // actually work, instead of presenting a button that always fails.
+  const [saleRefs, grnRefs, xferRefs] = await Promise.all([
+    admin.from('sale_items').select('product_id, sales!inner(vendor_id)')
+      .eq('sales.vendor_id', vendor.id).not('product_id', 'is', null),
+    admin.from('grn_items').select('product_id, grns!inner(vendor_id)')
+      .eq('grns.vendor_id', vendor.id).not('product_id', 'is', null),
+    admin.from('stock_transfers').select('from_product_id, to_product_id')
+      .or(`from_vendor_id.eq.${vendor.id},to_vendor_id.eq.${vendor.id}`),
+  ])
+  const inHistory = new Set<string>()
+  for (const r of (saleRefs.data || []) as any[]) inHistory.add(r.product_id)
+  for (const r of (grnRefs.data  || []) as any[]) inHistory.add(r.product_id)
+  for (const r of (xferRefs.data || []) as any[]) {
+    if (r.from_product_id) inHistory.add(r.from_product_id)
+    if (r.to_product_id)   inHistory.add(r.to_product_id)
+  }
+
   // Trim images: only keep up to 6 per product
   products = products.map((p: any) => ({
     ...p,
+    // One flag rather than a separate id list — the products array is already
+    // being sent, so this costs a boolean per row.
+    in_history: inHistory.has(p.id),
     images: (p.images || [])
       .sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
       .slice(0, 6)
