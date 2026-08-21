@@ -3,6 +3,7 @@ import { colomboToday } from '@/lib/dates'
 import SupplierForm from './SupplierForm'
 import { useState, useEffect, useRef } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
+import { useIncomingTransferCount } from '../_shared/useIncomingTransfers'
 import DamageCapture from '../_shared/DamageCapture'
 
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
@@ -40,6 +41,9 @@ const STOCK_VIEWS: StockMainView[] = ['stocktake', 'suppliers', 'receive', 'hist
 
 export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed }: TabStockLkTaxProps) {
   const [stockMainView, setStockMainView] = useState<StockMainView>('stocktake')
+  // Stock sent by the other shop waits for an answer here — say so on the tab,
+  // otherwise the only notice is opening the tab and finding it.
+  const incomingTransfers = useIncomingTransferCount()
 
   // Honour a dashboard deep-link (Receive Stock → 'receive', Post GRN → 'history').
   useEffect(() => {
@@ -695,6 +699,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
             className={`flex-none px-3 py-2 text-xs font-bold rounded-lg transition whitespace-nowrap ${stockMainView === t.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'}`}>
             <span className="sm:hidden">{t.l} {t.lf}</span>
             <span className="hidden sm:inline">{t.l} {t.lf}</span>
+            {t.v === 'transfer' && incomingTransfers > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-600 text-white text-[10px] font-black align-middle">
+                {incomingTransfers}
+              </span>
+            )}
           </button>
         ))}
       </div>
