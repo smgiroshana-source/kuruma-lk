@@ -173,7 +173,7 @@ function PreviewTable({ rows }: { rows: PreviewRow[] }) {
                 {row.transferPrice != null ? `Rs. ${row.transferPrice.toLocaleString()}` : '—'}
               </td>
               <td className="px-3 py-2 text-slate-600 text-xs">
-                {row.destProduct ? row.destProduct.name : (row.willCreate ? 'New product' : '—')}
+                {row.destProduct ? row.destProduct.name : (row.willCreate ? 'Not stocked there yet' : '—')}
               </td>
               <td className="px-3 py-2">
                 {row.error ? (
@@ -181,12 +181,13 @@ function PreviewTable({ rows }: { rows: PreviewRow[] }) {
                     ❌ {row.error}
                   </span>
                 ) : row.willCreate ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                    ★ Will create new product
+                  <span title="The destination shop has no product with this SKU, so the transfer creates one there — same SKU, name and photos, stocked with the quantity you send."
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+                    ★ Adds it to their catalogue
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">
-                    ✓ Will add to existing
+                    ✓ Tops up their existing stock
                   </span>
                 )}
               </td>
@@ -844,6 +845,12 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
               <h3 className="font-bold text-indigo-800">Transfer Preview</h3>
               <p className="text-sm text-slate-500">
                 {previewRows.length} item(s) → <span className="font-semibold text-slate-700">{destVendorName}</span>
+              </p>
+              {/* The status column is the one thing operators ask about, and a
+                  tooltip is no use on the shop's touchscreen. */}
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Matched by SKU: if {destVendorName} already stocks it, the quantity is added to what they have —
+                otherwise the product is created in their catalogue with the same SKU, name and photos.
               </p>
             </div>
             {previewHasErrors && (

@@ -259,7 +259,14 @@ export async function POST(req: NextRequest) {
               p_received_at: new Date().toISOString().slice(0, 10),
             })
           }
-          errors.push(`Failed to create ${src.name} at destination: ${createErr?.message}`)
+          // A raw Postgres constraint name tells the operator nothing about
+          // what to do next — say which field clashed and with what.
+          const msg = /products_vendor_sku_key|products_sku_key/.test(createErr?.message || '')
+            ? `${src.name}: SKU ${src.sku} is already used by another product at the destination shop — give one of them a different SKU.`
+            : /products_slug_key|slug/.test(createErr?.message || '')
+              ? `${src.name}: the destination already lists a product under the same web address. Rename it slightly and try again.`
+              : `Failed to create ${src.name} at destination: ${createErr?.message}`
+          errors.push(msg)
           continue
         }
         destProductId   = created.id
