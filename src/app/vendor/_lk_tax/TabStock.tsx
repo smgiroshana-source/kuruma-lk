@@ -104,8 +104,10 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [grnList, setGrnList] = useState<any[]>([])
   const [grnListLoading, setGrnListLoading] = useState(false)
   const [grnPosting, setGrnPosting] = useState<string | null>(null)
-  const [newSupplierName, setNewSupplierName] = useState('')
-  const [addingSupplier, setAddingSupplier] = useState(false)
+  // Adding a supplier mid-GRN opens THE supplier form, never a name-only
+  // shortcut — a half record silently zeroes the GRN's VAT and empties
+  // Schedule 02, and nobody is left to remember the gap.
+  const [newSupplierOpen, setNewSupplierOpen] = useState(false)
   // Supplier management
   const [supplierFormOpen, setSupplierFormOpen] = useState(false)
   const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null)
@@ -269,20 +271,6 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     } catch { showToast('Network error') }
   }
 
-  async function addQuickSupplier() {
-    if (!newSupplierName.trim()) return
-    setAddingSupplier(true)
-    try {
-      const r = await fetch('/api/vendor/suppliers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', name: newSupplierName }) })
-      const j = await r.json()
-      if (r.ok) {
-        setSuppliers(prev => [...prev, j.supplier].sort((a, b) => a.name.localeCompare(b.name)))
-        setGrnForm(f => ({ ...f, supplierId: j.supplier.id, supplierName: j.supplier.name }))
-        setNewSupplierName('')
-      } else showToast('⚠️ ' + j.error)
-    } catch {}
-    setAddingSupplier(false)
-  }
 
   // ── GRN CSV helpers ─────────────────────────────────────────────────────────
   function parseGrnCsv(text: string) {
@@ -804,16 +792,10 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       ? <p className="text-[10px] font-bold text-emerald-600 mt-1">VAT-registered — lines default to {vatRate}%, claimable as input VAT</p>
                       : <p className="text-[10px] font-bold text-slate-400 mt-1">Not VAT-registered — no input VAT to claim on this purchase</p>
                   )}
-                  {/* Quick-add supplier */}
-                  <div className="flex gap-2 mt-2">
-                    <input type="text" value={newSupplierName} onChange={e => setNewSupplierName(e.target.value)}
-                      placeholder="New supplier name…" onKeyDown={e => { if (e.key === 'Enter') addQuickSupplier() }}
-                      className="flex-1 px-2 py-1.5 rounded border border-slate-200 text-xs outline-none focus:border-orange-300" />
-                    <button onClick={addQuickSupplier} disabled={addingSupplier || !newSupplierName.trim()}
-                      className="text-xs font-bold text-orange-600 px-3 py-1.5 rounded border border-orange-200 disabled:opacity-40 active:bg-orange-50">
-                      + Add
-                    </button>
-                  </div>
+                  <button onClick={() => setNewSupplierOpen(true)}
+                    className="mt-2 text-xs font-bold text-orange-600 px-3 py-1.5 rounded border border-orange-200 hover:bg-orange-50">
+                    + New supplier
+                  </button>
                 </div>
                 {/* Supplier invoice no */}
                 <div>
@@ -1748,6 +1730,32 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       )}
 
       {/* ── Did you pay for this now? (after posting a GRN) ── */}
+      {newSupplierOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setNewSupplierOpen(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-lg p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-black text-slate-900 mb-1">New supplier</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Their VAT status decides the VAT on every line of this GRN, so it&apos;s captured here rather than left for later.
+            </p>
+            <SupplierForm
+              showToast={showToast}
+              onSaved={saved => {
+                setSuppliers(prev => [...prev, saved].sort((a, b) => a.name.localeCompare(b.name)))
+                // Select it, and re-rate the lines to its VAT status
+                const rate = saved?.vat_registered ? vatRate : 0
+                setGrnForm(f => ({ ...f, supplierId: saved.id, supplierName: saved.name }))
+                setGrnItems(prev => prev.map(it => ({ ...it, vatRate: rate })))
+                setNewSupplierOpen(false)
+                showToast(saved?.vat_registered
+                  ? `${saved.name} added — lines set to ${rate}%`
+                  : `${saved.name} added — not VAT-registered`)
+              }}
+              onCancel={() => setNewSupplierOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
       {payNow && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm p-5">
