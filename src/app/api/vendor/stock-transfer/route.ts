@@ -260,12 +260,21 @@ export async function POST(req: NextRequest) {
             })
           }
           // A raw Postgres constraint name tells the operator nothing about
-          // what to do next — say which field clashed and with what.
-          const msg = /products_vendor_sku_key|products_sku_key/.test(createErr?.message || '')
-            ? `${src.name}: SKU ${src.sku} is already used by another product at the destination shop — give one of them a different SKU.`
-            : /products_slug_key|slug/.test(createErr?.message || '')
-              ? `${src.name}: the destination already lists a product under the same web address. Rename it slightly and try again.`
-              : `Failed to create ${src.name} at destination: ${createErr?.message}`
+          // what to do next. A SKU clash has two very different causes, so
+          // check which one it is rather than guessing — the destination not
+          // holding the SKU means the old marketplace-wide unique index is
+          // still in place and the transfer cannot succeed for ANY product
+          // until it's replaced.
+          let msg = `Failed to create ${src.name} at destination: ${createErr?.message}`
+          if (/sku/i.test(createErr?.message || '')) {
+            const { data: holder } = await admin.from('products')
+              .select('id, name').eq('vendor_id', toVendorId).eq('sku', src.sku).maybeSingle()
+            msg = holder
+              ? `${src.name}: the destination already lists "${holder.name}" under SKU ${src.sku} — give one of them a different SKU.`
+              : `${src.name}: the database still requires every SKU to be unique across ALL shops, so ${src.sku} can't exist in two places at once. No transfer can succeed until supabase-product-sku-per-vendor.sql is run.`
+          } else if (/slug/i.test(createErr?.message || '')) {
+            msg = `${src.name}: the destination already lists a product under the same web address. Rename it slightly and try again.`
+          }
           errors.push(msg)
           continue
         }
