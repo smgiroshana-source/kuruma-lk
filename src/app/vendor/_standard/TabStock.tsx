@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
+import { useIncomingTransferCount } from '../_shared/useIncomingTransfers'
 import DamageCapture from '../_shared/DamageCapture'
 import { colomboToday } from '@/lib/dates'
 
@@ -24,6 +25,10 @@ interface TabStockStandardProps {
 
 export default function TabStockStandard({ vendor, products, vendorSettings, showToast, onDataChanged }: TabStockStandardProps) {
   const [stockView, setStockView] = useState<'browse' | 'assign' | 'transfer'>('browse')
+  // Stock sent by the other shop waits for an answer here — say so on the tab,
+  // otherwise the only notice is opening the tab and finding it.
+  // (Named apart from `pendingCount`, which is unsaved stocktake edits.)
+  const incomingTransfers = useIncomingTransferCount()
   const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [stocktakeSearch, setStocktakeSearch] = useState('')
   const [stockQtyEdits, setStockQtyEdits] = useState<Record<string, number>>({})
@@ -330,6 +335,11 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
         <button onClick={() => setStockView('transfer')}
           className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-sm font-bold border-2 transition ${stockView === 'transfer' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200'}`}>
           🔀 Transfer Stock
+          {incomingTransfers > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-600 text-white text-[10px] font-black align-middle">
+              {incomingTransfers}
+            </span>
+          )}
         </button>
         {pendingCount > 0 && stockView === 'browse' && (
           <button onClick={() => saveAllStockChanges()} disabled={stocktakeSaving}
