@@ -3,7 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows } from '@/lib/fetchAll'
-import { branchEntityIds, resolveBranch, applyBranchFilter } from '@/lib/branchScope'
+import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnSales } from '@/lib/branchScope'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -208,9 +208,12 @@ export async function GET(req: NextRequest) {
   let dateFilter: string | null = null
   const now = new Date()
   if (!fromDate) {
-    if (period === 'today') { dateFilter = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString() }
-    else if (period === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); dateFilter = d.toISOString() }
-    else if (period === 'month') { const d = new Date(now); d.setMonth(d.getMonth() - 1); dateFilter = d.toISOString() }
+    // Colombo day boundaries (+05:30), not the server's zone — on Vercel that
+    // is UTC, so "today" used to start at 5:30am Colombo.
+    const colomboDay = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+    if (period === 'today') { dateFilter = new Date(`${colomboDay}T00:00:00+05:30`).toISOString() }
+    else if (period === 'week') { const d = new Date(`${colomboDay}T00:00:00+05:30`); d.setDate(d.getDate() - 7); dateFilter = d.toISOString() }
+    else if (period === 'month') { const d = new Date(`${colomboDay}T00:00:00+05:30`); d.setMonth(d.getMonth() - 1); dateFilter = d.toISOString() }
   }
 
   // Paginate the full result set. The dashboard sums these into all-time
@@ -305,6 +308,8 @@ export async function GET(req: NextRequest) {
       .select('id, amount, payment_method, cheque_number, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
       .eq('sales.vendor_id', vendor.id)
       .gte('created_at', periodStart)
+    // Collections belong to the branch of the invoice they settle
+    pQuery = applyBranchFilterOnSales(pQuery, branch, branchIds)
     if (periodEnd) pQuery = pQuery.lt('created_at', periodEnd)
     const { data: periodPayments } = await pQuery.limit(500)
     // Filter to: payments on older invoices (credit collections) OR payments on Opening Balance invoices
@@ -318,7 +323,8 @@ export async function GET(req: NextRequest) {
       // Check if this is an Opening Balance invoice
       const isOpeningBalance = (p.sales?.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
       if (isOpeningBalance) return true // Opening balance payments always count as collections
-      if (saleDate < periodStart) return true // Payment on older sale
+      // Compare instants, never ISO strings: '…+00:00' sorts before '…000Z'
+      if (new Date(saleDate).getTime() < new Date(periodStart).getTime()) return true
       return false
     }).map((p: any) => ({
       id: p.id,
@@ -349,6 +355,7 @@ export async function GET(req: NextRequest) {
       .eq('sales.vendor_id', vendor.id)
       .lt('amount', 0)
       .gte('created_at', periodStart)
+    rQuery = applyBranchFilterOnSales(rQuery, branch, branchIds)
     if (periodEnd) rQuery = rQuery.lt('created_at', periodEnd)
     const { data: returnPayments } = await rQuery.limit(200)
     const existingIds = new Set(returnsInPeriod.map((r: any) => r.id))

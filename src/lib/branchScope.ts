@@ -42,3 +42,22 @@ export function applyBranchFilter(query: any, branch: Branch | null, entityIds: 
     ? query.or(`invoice_entity_id.in.(${entityIds.join(',')}),invoice_entity_id.is.null`)
     : query.is('invoice_entity_id', null)
 }
+
+/**
+ * Same rule, applied through an EMBEDDED sales relation — for queries that
+ * start at `payments` and join `sales!inner`. Without this a payments-based
+ * figure (credit collections, returns) ignores the branch filter entirely and
+ * shows the SAME total under Shop, Workshop and All, so the two sides appear
+ * to sum to double the real amount.
+ */
+export function applyBranchFilterOnSales(query: any, branch: Branch | null, entityIds: string[]) {
+  if (!branch) return query
+  if (branch === 'workshop') {
+    return entityIds.length > 0
+      ? query.in('sales.invoice_entity_id', entityIds)
+      : query.eq('sales.invoice_entity_id', '00000000-0000-0000-0000-000000000000')
+  }
+  return entityIds.length > 0
+    ? query.or(`invoice_entity_id.in.(${entityIds.join(',')}),invoice_entity_id.is.null`, { foreignTable: 'sales' })
+    : query.is('sales.invoice_entity_id', null)
+}
