@@ -85,9 +85,8 @@ export async function POST(req: NextRequest) {
       invoiceNo, invoiceDate, reason, remarks, netAmount, vatAmount,
     } = body
 
-    if (!supplierId) return NextResponse.json({ error: 'Pick the supplier who issued the note' }, { status: 400 })
-    if (!String(creditNoteNo || '').trim()) return NextResponse.json({ error: 'The credit note number is required — it goes on VAT Schedule 04' }, { status: 400 })
-    if (!creditNoteDate) return NextResponse.json({ error: 'The credit note date is required — it decides which VAT period the claim is reduced in' }, { status: 400 })
+    if (!supplierId) return NextResponse.json({ error: 'Pick the supplier who gave the credit' }, { status: 400 })
+    if (!creditNoteDate) return NextResponse.json({ error: 'The date is required' }, { status: 400 })
 
     const net = r0(netAmount)
     const vat = r0(vatAmount)
@@ -96,18 +95,41 @@ export async function POST(req: NextRequest) {
     if (vat > net) return NextResponse.json({ error: `VAT (${vat}) is larger than the credited value (${net}) — check the note` }, { status: 400 })
 
     const { data: sup } = await admin.from('suppliers')
-      .select('id, name').eq('id', supplierId).eq('vendor_id', vendor.id).single()
+      .select('id, name, vat_registered').eq('id', supplierId).eq('vendor_id', vendor.id).single()
     if (!sup) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
+
+    // A VAT-registered supplier's credit note is a legal document with its own
+    // number, and Schedule 04 lists it — so it has to be entered.
+    //
+    // A supplier who isn't registered often gives a discount with no paperwork
+    // at all: "take 5% off". Demanding a note number there is asking for a
+    // thing that doesn't exist, so an internal reference is issued instead —
+    // the record still needs an identifier to be quotable and auditable.
+    let noteNo = String(creditNoteNo || '').trim()
+    if (!noteNo) {
+      if (sup.vat_registered) {
+        return NextResponse.json({
+          error: `${sup.name} is VAT-registered, so their credit note has a number on it — Schedule 04 lists it. Copy it off the note.`,
+        }, { status: 400 })
+      }
+      const { data: prior } = await admin.from('supplier_credit_notes')
+        .select('credit_note_no').eq('vendor_id', vendor.id).like('credit_note_no', 'DISC-%')
+      const highest = (prior || []).reduce((m: number, r: any) => {
+        const n = parseInt(String(r.credit_note_no).replace('DISC-', ''), 10)
+        return Number.isFinite(n) && n > m ? n : m
+      }, 0)
+      noteNo = `DISC-${String(highest + 1).padStart(5, '0')}`
+    }
 
     // A goods return records its own supplier credit note. The same note
     // number arriving here too would double the Schedule 04 reduction and
     // double-credit the payable.
     const { data: onReturn } = await admin.from('supplier_returns')
       .select('return_no').eq('vendor_id', vendor.id).eq('supplier_id', supplierId)
-      .eq('supplier_credit_note_no', String(creditNoteNo).trim()).maybeSingle()
+      .eq('supplier_credit_note_no', noteNo).maybeSingle()
     if (onReturn) {
       return NextResponse.json({
-        error: `${creditNoteNo} is already recorded against supplier return ${onReturn.return_no}. Entering it again would claim the VAT reduction twice.`,
+        error: `${noteNo} is already recorded against supplier return ${onReturn.return_no}. Entering it again would claim the VAT reduction twice.`,
       }, { status: 409 })
     }
 
@@ -129,7 +151,7 @@ export async function POST(req: NextRequest) {
       vendor_id:           vendor.id,
       supplier_id:         supplierId,
       supplier_invoice_id: supplierInvoiceId || null,
-      credit_note_no:      String(creditNoteNo).trim(),
+      credit_note_no:      noteNo,
       credit_note_date:    creditNoteDate,
       invoice_no:          String(invoiceNo || '').trim() || null,
       invoice_date:        invoiceDate || null,
@@ -143,7 +165,7 @@ export async function POST(req: NextRequest) {
 
     if (error) {
       if (/supplier_credit_notes_unique_no/.test(error.message)) {
-        return NextResponse.json({ error: `${creditNoteNo} has already been recorded for ${sup.name}.` }, { status: 409 })
+        return NextResponse.json({ error: `${noteNo} has already been recorded for ${sup.name}.` }, { status: 409 })
       }
       return NextResponse.json({ error: error.message }, { status: 500 })
     }

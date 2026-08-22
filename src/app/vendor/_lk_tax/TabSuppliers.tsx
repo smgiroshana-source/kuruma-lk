@@ -346,7 +346,8 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           onBack={() => { setView('list'); setSelectedSupplier(null); setInvoices([]) }}
           onAddInvoice={openAddInvoiceModal}
           onPay={(inv) => { setShowRecordPayment(inv); setNewPayment({ ...BLANK_PAYMENT }) }}
-          onCreditNote={(inv) => { setCreditNoteFor(inv); setCreditForm({ ...BLANK_CREDIT_NOTE, invoiceNo: inv.invoice_no || '', invoiceDate: inv.invoice_date || '' }) }}
+          onCreditNote={(inv) => { setVatTouched(false); setCreditNoteFor(inv); setCreditForm({ ...BLANK_CREDIT_NOTE, invoiceNo: inv.invoice_no || '', invoiceDate: inv.invoice_date || '' }) }}
+          supplierIsVat={!!selectedSupplier?.vat_registered}
           onDelete={handleDeleteInvoice}
           hasUnpaid={hasUnpaid}
           aging={aging}
@@ -378,25 +379,28 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
         const outstanding = (creditNoteFor.amount ?? 0) - (creditNoteFor.amount_paid ?? 0) - (creditNoteFor.credit_total ?? 0)
         const tooBig = net + vat > outstanding
         return (
-          <Modal title={`Credit note against ${creditNoteFor.invoice_no}`} onClose={() => setCreditNoteFor(null)}>
+          <Modal title={`${supplierVat ? 'Credit note' : 'Discount'} against ${creditNoteFor.invoice_no}`} onClose={() => setCreditNoteFor(null)}>
             <p className="text-xs text-slate-500 mb-3">
-              Copy the figures straight off the supplier&apos;s note. Don&apos;t work the discount out yourself —
-              your VAT claim has to match their document, because that is what IRD cross-checks.
+              {supplierVat
+                ? 'Copy the figures straight off the supplier\u2019s note. Don\u2019t work the discount out yourself — your VAT claim has to match their document, because that is what IRD cross-checks.'
+                : `${selectedSupplier?.name} is not VAT-registered, so there is no VAT and nothing goes on the VAT return. If they gave you a note, put its number in — otherwise leave it blank and one is issued for your own records.`}
             </p>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Credit note no. *</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">
+                  {supplierVat ? 'Credit note no. *' : 'Their note no. (if any)'}
+                </label>
                 <input value={creditForm.creditNoteNo} autoFocus
                   onChange={e => setCreditForm(f => ({ ...f, creditNoteNo: e.target.value }))}
-                  placeholder="e.g. CRN/046637"
+                  placeholder={supplierVat ? 'e.g. CRN/046637' : 'leave blank if none'}
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Credit note date *</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">{supplierVat ? 'Credit note date *' : 'Date *'}</label>
                 <input type="date" value={creditForm.creditNoteDate}
                   onChange={e => setCreditForm(f => ({ ...f, creditNoteDate: e.target.value }))}
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                <p className="text-[10px] text-slate-400 mt-1">Decides which VAT period the claim drops in.</p>
+                {supplierVat && <p className="text-[10px] text-slate-400 mt-1">Decides which VAT period the claim drops in.</p>}
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Their invoice no.</label>
@@ -413,7 +417,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Sub total (excl VAT) *</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">{supplierVat ? 'Sub total (excl VAT) *' : 'Discount amount *'}</label>
                 <input type="number" step="0.01" value={creditForm.netAmount}
                   onChange={e => {
                     const v = e.target.value
@@ -429,18 +433,29 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                   placeholder="7575.44"
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">VAT on the note</label>
-                <input type="number" step="0.01" value={creditForm.vatAmount}
-                  onChange={e => { setVatTouched(true); setCreditForm(f => ({ ...f, vatAmount: e.target.value })) }}
-                  placeholder="1363.58"
-                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                <p className={`text-[10px] mt-1 ${supplierVat ? 'text-slate-400' : 'text-slate-500 font-semibold'}`}>
-                  {supplierVat
-                    ? `Filled in at ${vatRate}% — change it to whatever the note actually shows.`
-                    : `${selectedSupplier?.name || 'This supplier'} is not VAT-registered, so leave this at zero.`}
-                </p>
-              </div>
+              {/* No VAT box for an unregistered supplier — there is nothing to
+                  put in it. Say why, and what to do if their note disagrees,
+                  rather than showing a field that must stay at zero. */}
+              {supplierVat ? (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">VAT on the note</label>
+                  <input type="number" step="0.01" value={creditForm.vatAmount}
+                    onChange={e => { setVatTouched(true); setCreditForm(f => ({ ...f, vatAmount: e.target.value })) }}
+                    placeholder="1363.58"
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Filled in at {vatRate}% — change it to whatever the note actually shows.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-end">
+                  <p className="text-[11px] text-slate-500 leading-snug">
+                    <span className="font-bold">No VAT.</span> {selectedSupplier?.name} is not registered, so nothing
+                    reaches the VAT return. If their note does show VAT, fix the supplier record first — you may be
+                    missing input VAT on their GRNs too.
+                  </p>
+                </div>
+              )}
               <div className="col-span-2">
                 <label className="block text-xs font-bold text-slate-500 mb-1">Reason</label>
                 <select value={creditForm.reason}
@@ -496,9 +511,9 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
               <button onClick={() => setCreditNoteFor(null)}
                 className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
               <button onClick={saveCreditNote}
-                disabled={creditSaving || !creditForm.creditNoteNo.trim() || !creditForm.creditNoteDate || net <= 0 || tooBig}
+                disabled={creditSaving || (supplierVat && !creditForm.creditNoteNo.trim()) || !creditForm.creditNoteDate || net <= 0 || tooBig}
                 className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-sm py-2.5 rounded-xl">
-                {creditSaving ? 'Saving…' : 'Record credit note'}
+                {creditSaving ? 'Saving…' : supplierVat ? 'Record credit note' : 'Record discount'}
               </button>
             </div>
           </Modal>
@@ -894,6 +909,7 @@ function InvoiceListView({
   onPay,
   onCreditNote,
   onDelete,
+  supplierIsVat,
   hasUnpaid,
   aging,
 }: {
@@ -907,6 +923,7 @@ function InvoiceListView({
   onPay: (inv: any) => void
   onCreditNote: (inv: any) => void
   onDelete: (inv: any) => void
+  supplierIsVat: boolean
   hasUnpaid: boolean
   aging: { current: number; b30: number; b60: number; b60plus: number }
 }) {
@@ -1039,10 +1056,12 @@ function InvoiceListView({
                           {inv.status !== 'paid' && (
                             <button
                               onClick={() => onCreditNote(inv)}
-                              title="The supplier sent a credit note — a discount, price adjustment or overcharge"
+                              title={supplierIsVat
+                                ? 'The supplier sent a credit note — discount, price adjustment or overcharge'
+                                : 'Record a discount the supplier gave on this bill'}
                               className="px-2.5 py-1 rounded-lg border border-blue-200 text-[11px] font-bold text-blue-600 hover:bg-blue-50 transition-colors"
                             >
-                              Credit Note
+                              {supplierIsVat ? 'Credit Note' : 'Discount'}
                             </button>
                           )}
                           {amtPaid === 0 && credited === 0 && (
