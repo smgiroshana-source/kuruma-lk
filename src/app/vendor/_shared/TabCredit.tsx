@@ -31,6 +31,8 @@ export interface CommonTabProps {
 // Omitted (Sakura) = the original combined screen with the Show All checkbox.
 export default function TabCredit({ vendor, vendorSettings, showToast, onDataChanged, mode }: CommonTabProps & { mode?: 'credit' | 'registry' }) {
   const registry = mode === 'registry'
+  // TIN and VAT status only mean anything where tax invoices are issued.
+  const isLkTax = vendorSettings?.invoice_mode === 'lk_tax'
   const creditOnly = mode === 'credit'
   const [creditCustomers, setCreditCustomers] = useState<any[]>([])
   const [creditLoading, setCreditLoading] = useState(false)
@@ -173,11 +175,28 @@ export default function TabCredit({ vendor, vendorSettings, showToast, onDataCha
     if (!editingCustomer) return
     if (editingCustomer.phone?.trim() && !isValidSLPhone(editingCustomer.phone)) { showToast('⚠️ ' + PHONE_FORMAT_MSG); return }
     if (editingCustomer.whatsapp?.trim() && !isValidSLPhone(editingCustomer.whatsapp)) { showToast('⚠️ WhatsApp: ' + PHONE_FORMAT_MSG); return }
+    // Same rule as suppliers: the gazette wants 9 digits, and a short one
+    // silently produces an invalid tax invoice for the customer to bounce back.
+    if (isLkTax && editingCustomer.vat_registered && !/^\d{9}$/.test(String(editingCustomer.tin || ''))) {
+      showToast('⚠️ A VAT-registered customer needs a 9-digit TIN — it is printed on their tax invoice')
+      return
+    }
     setEditCustomerLoading(true)
     try {
       const r = await fetch('/api/vendor/customers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         action: 'update', customerId: editingCustomer.id,
-        data: { name: editingCustomer.name, phone: editingCustomer.phone, whatsapp: editingCustomer.whatsapp, email: editingCustomer.email, address: editingCustomer.address, notes: editingCustomer.notes, require_vehicle_no: editingCustomer.require_vehicle_no || false },
+        data: {
+          name: editingCustomer.name, phone: editingCustomer.phone, whatsapp: editingCustomer.whatsapp,
+          email: editingCustomer.email, address: editingCustomer.address, notes: editingCustomer.notes,
+          require_vehicle_no: editingCustomer.require_vehicle_no || false,
+          // Only sent where they mean something; clearing VAT clears the TIN
+          // with it, so a stale number can't linger on a de-registered customer.
+          ...(isLkTax ? {
+            vat_registered: !!editingCustomer.vat_registered,
+            tin: editingCustomer.vat_registered ? (editingCustomer.tin || null) : null,
+            is_insurance: !!editingCustomer.is_insurance,
+          } : {}),
+        },
       }) })
       const j = await r.json()
       if (j.success) { showToast('Customer updated'); setEditingCustomer(null); fetchCreditCustomers(); if (selectedCreditCustomer?.id === editingCustomer.id) setSelectedCreditCustomer({ ...selectedCreditCustomer, ...editingCustomer }) }
@@ -445,6 +464,46 @@ ${advanceBalance > 0 ? `
                 <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingCustomer.require_vehicle_no ? 'translate-x-6' : 'translate-x-1')} />
               </button>
             </div>
+            {isLkTax && (
+              <div className="border border-slate-200 rounded-lg p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-700">VAT-registered</p>
+                    <p className="text-[10px] text-slate-400">Their TIN is printed on the tax invoice</p>
+                  </div>
+                  <button type="button"
+                    onClick={() => setEditingCustomer({ ...editingCustomer, vat_registered: !editingCustomer.vat_registered })}
+                    className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (editingCustomer.vat_registered ? 'bg-emerald-500' : 'bg-slate-300')}>
+                    <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingCustomer.vat_registered ? 'translate-x-6' : 'translate-x-1')} />
+                  </button>
+                </div>
+                {editingCustomer.vat_registered && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">VAT / TIN (9 digits)</label>
+                    <input type="text" inputMode="numeric" value={editingCustomer.tin || ''}
+                      onChange={e => setEditingCustomer({ ...editingCustomer, tin: e.target.value.replace(/\D/g, '').slice(0, 9) })}
+                      placeholder="134007958"
+                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none font-mono focus:border-orange-400" />
+                    {/* 999999999 is the placeholder used while a real number is
+                        awaited — it must never reach a gazette invoice. */}
+                    {editingCustomer.tin === '999999999' && (
+                      <p className="text-[10px] font-bold text-red-600 mt-1">Placeholder number — replace before issuing a tax invoice.</p>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-700">Insurance company</p>
+                    <p className="text-[10px] text-slate-400">POS enters prices EXCLUDING VAT for these</p>
+                  </div>
+                  <button type="button"
+                    onClick={() => setEditingCustomer({ ...editingCustomer, is_insurance: !editingCustomer.is_insurance })}
+                    className={'relative inline-flex h-6 w-11 items-center rounded-full transition-colors ' + (editingCustomer.is_insurance ? 'bg-indigo-500' : 'bg-slate-300')}>
+                    <span className={'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ' + (editingCustomer.is_insurance ? 'translate-x-6' : 'translate-x-1')} />
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="border-t border-slate-200 pt-3 mt-3">
               <label className="block text-xs font-bold text-slate-700 mb-2">Advance Balance: <span className="text-emerald-600">Rs.{parseFloat(editingCustomer.advance_balance || 0).toLocaleString()}</span></label>
               <div className="flex gap-2">
@@ -473,7 +532,19 @@ ${advanceBalance > 0 ? `
               <button key={c.id} onClick={() => loadOutstanding(c)} className={'w-full text-left bg-white rounded-xl border px-4 py-3 hover:shadow-md transition ' + (selectedCreditCustomer?.id === c.id ? 'border-orange-500 bg-orange-50' : 'border-slate-200')}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-bold text-sm">{c.name}</p>
+                    <p className="font-bold text-sm">
+                      {c.name}
+                      {isLkTax && c.is_insurance && (
+                        <span className="ml-1.5 text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 align-middle">INSURANCE</span>
+                      )}
+                    </p>
+                    {/* Visible without opening the form — it is the field most
+                        often checked before raising a tax invoice. */}
+                    {isLkTax && c.vat_registered && (
+                      <p className={'text-[10px] font-mono font-bold ' + (c.tin === '999999999' ? 'text-red-600' : 'text-slate-500')}>
+                        VAT {c.tin || '— missing'}{c.tin === '999999999' ? ' (placeholder)' : ''}
+                      </p>
+                    )}
                     {c.phone && <p className="text-xs text-slate-400">{c.phone}</p>}
                     {(() => { const age = creditAge(c.credit?.oldestDueDate); return age ? <span className={'inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded mt-1 ' + age.pill}><span className={'w-1.5 h-1.5 rounded-full ' + age.dot} />{age.label}</span> : null })()}
                   </div>
