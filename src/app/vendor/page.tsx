@@ -356,13 +356,6 @@ tbody tr:last-child td{border-bottom:2px solid #000}
       <div class="ic-dval">${vehicleNo}</div>
     </div>` : ''}
   </div>
-  ${sale.promoted_from_receipt_no ? `
-  <div class="irow">
-    <div class="ic" style="flex:1">
-      <div class="ic-dlbl">Replaces</div>
-      <div class="ic-dval" style="font-size:12px">Receipt ${escapeHtml(sale.promoted_from_receipt_no)} of ${supplyDate} — same supply, re-issued as a tax invoice</div>
-    </div>
-  </div>` : ''}
 </div>
 
 <!-- Line items -->
