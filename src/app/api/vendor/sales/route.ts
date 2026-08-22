@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { colomboDayOf } from '@/lib/dates'
 import { checkPromotable, checkReversible, mayReversePromotion, PROMOTE_WINDOW_DAYS } from '@/lib/promoteReceipt'
 import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows } from '@/lib/fetchAll'
@@ -386,9 +387,16 @@ export async function GET(req: NextRequest) {
       // Check if this is an Opening Balance invoice
       const isOpeningBalance = (p.sales?.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
       if (isOpeningBalance) return true // Opening balance payments always count as collections
-      // Compare instants, never ISO strings: '…+00:00' sorts before '…000Z'
-      if (new Date(saleDate).getTime() < new Date(periodStart).getTime()) return true
-      return false
+      // A collection is money received on a LATER DAY than the sale — a fact
+      // about the two events, not about the window they were fetched in.
+      //
+      // Comparing the sale against periodStart made the answer depend on the
+      // caller: the Sales tab starts at Colombo midnight today and counted
+      // yesterday's sale as a collection, while the daily report widens the
+      // fetch to the previous UTC day (to catch early-morning Colombo sales)
+      // and so swallowed the very same payment. Same money, two screens, two
+      // answers. Colombo days settle it for both.
+      return colomboDayOf(saleDate) < colomboDayOf(p.created_at)
     }).map((p: any) => ({
       id: p.id,
       amount: parseFloat(p.amount || 0),
