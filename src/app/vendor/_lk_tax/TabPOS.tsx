@@ -659,9 +659,23 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ex-VAT slice, so GP%/below-cost must compare cost against that, not the
   // sticker price — otherwise a loss-making sale can pass the warning.
   const posMarginBase = (p: number | null | undefined) => posIsVatEntity ? netOfVat(p, posVatRate) : (Number(p) || 0)
-  // The lowest VAT-INCLUSIVE price that still breaks even — the same currency
-  // the operator quotes in, so the net cost is never mistaken for a floor.
-  const posCostFloor = (c: number | null | undefined) => posIsVatEntity ? costIncVat(c, posVatRate) : (Number(c) || 0)
+  // What the goods actually cost, in the same currency as the price being
+  // compared against them.
+  //
+  // Cost is stored net because the Pvt Ltd reclaims the input VAT. Sell through
+  // the PROPRIETORSHIP and no VAT is remitted on the sale, so the price is not
+  // reduced either — which means the cost it must clear is the full amount paid
+  // for the goods, VAT included. Comparing a gross price against a net cost
+  // would let a tube go out Rs.184 light and call it profit.
+  const posCostBasis = (c: number | null | undefined) =>
+    isLkTax && !posIsVatEntity ? costIncVat(c, posVatRate) : (Number(c) || 0)
+
+  // The floor comes out the SAME on both entities, which is the point: Rs.1,207
+  // either way for a tube that cost Rs.1,207. On the VAT entity the price is
+  // taken net and compared to the net cost; on the proprietorship both sides
+  // stay gross. One number for the operator to remember.
+  const posCostFloor = (c: number | null | undefined) =>
+    isLkTax ? costIncVat(c, posVatRate) : (Number(c) || 0)
   // Ex-VAT price entry (insurance quotes): only meaningful on the VAT entity.
   const posEntryExcl = posIsVatEntity && posPriceMode === 'excl'
   const grossOfNet = (p: number) => Math.round((Number(p) || 0) * (100 + posVatRate) / 100)
@@ -758,9 +772,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     }
     // Below-cost warning — ONLY for items that have a cost (real or rough).
     // Items without any cost sell silently (owner rule): no errors, no noise.
-    const belowCost = posCart.filter(it => Number(it.cost) > 0 && isBelowCost(posMarginBase(it.unitPrice), it.cost))
+    const belowCost = posCart.filter(it => Number(it.cost) > 0 && isBelowCost(posMarginBase(it.unitPrice), posCostBasis(it.cost)))
     if (belowCost.length > 0) {
-      const lines = belowCost.map(it => `• ${it.productName}: Rs.${posMarginBase(it.unitPrice).toLocaleString()}${posIsVatEntity ? ' excl. VAT' : ''} vs cost Rs.${Number(it.cost).toLocaleString()}`).join('\n')
+      const lines = belowCost.map(it => `• ${it.productName}: Rs.${Number(it.unitPrice).toLocaleString()} — needs Rs.${posCostFloor(it.cost).toLocaleString()} or more`).join('\n')
       if (!confirm(`⚠️ SELLING BELOW COST:\n\n${lines}\n\nContinue with this sale?`)) return
     }
     setPosPreview(true)
@@ -1114,12 +1128,12 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), item.cost) ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
+                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), posCostBasis(item.cost)) ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
                             {posEntryExcl && Number(item.unitPrice) > 0 && <p className="text-[9px] font-bold text-amber-700 mt-0.5 leading-none">= Rs.{Number(item.unitPrice).toLocaleString()} with VAT</p>}
                             {Number(item.cost) > 0 && (isBelowCost(posMarginBase(item.unitPrice), item.cost)
                               ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{posCostFloor(item.cost).toLocaleString()} or more{posIsVatEntity ? ` (cost Rs.${Number(item.cost).toLocaleString()} excl VAT)` : ''}</p>
                               : Number(item.unitPrice) > 0
-                                ? <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), item.cost)}%{posIsVatEntity ? ' net' : ''}</p>
+                                ? <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), posCostBasis(item.cost))}%{posIsVatEntity ? ' net' : ''}</p>
                                 : <p className="text-[9px] text-slate-400 mt-0.5 leading-none">min Rs.{posCostFloor(item.cost).toLocaleString()}</p>)}
                           </td>
                           <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td>
