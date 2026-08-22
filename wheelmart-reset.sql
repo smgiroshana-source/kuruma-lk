@@ -102,15 +102,18 @@ commit;
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Verify: WHEEL MART empty, setup intact, Sakura untouched
 -- ═══════════════════════════════════════════════════════════════════════════
-select 'sales'          as table_name, count(*) from public.sales     where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select 'products',  count(*) from public.products  where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select 'suppliers', count(*) from public.suppliers where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select 'customers', count(*) from public.customers where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select 'grns',      count(*) from public.grns      where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select 'expenses',  count(*) from public.expenses  where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select '-- KEPT: entities', count(*) from public.invoice_entities where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select '-- KEPT: staff',    count(*) from public.vendor_staff     where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select '-- KEPT: tax_config', count(*) from public.tax_config     where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
-union all select '** SAKURA products (must stay 7266)', count(*) from public.products where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
-union all select '** SAKURA sales (must be unchanged)', count(*) from public.sales    where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
-union all select '** transfers kept (should be 8)',     count(*) from public.stock_transfers;
+select 'sales'      as table_name, count(*) from public.sales     where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'products',     count(*) from public.products     where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'suppliers',    count(*) from public.suppliers    where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'customers',    count(*) from public.customers    where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'grns',         count(*) from public.grns         where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'expenses',     count(*) from public.expenses     where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'payroll_runs', count(*) from public.payroll_runs where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'KEPT entities',      count(*) from public.invoice_entities      where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'KEPT staff',         count(*) from public.vendor_staff          where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'KEPT tax_config',    count(*) from public.tax_config            where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'KEPT transfer link', count(*) from public.vendor_transfer_links where vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+union all select 'SAKURA products (must be 7308)',  count(*) from public.products  where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
+union all select 'SAKURA sales (must be 816)',      count(*) from public.sales     where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
+union all select 'SAKURA customers (must be 74)',   count(*) from public.customers where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
+union all select 'transfers kept (must be 8)',      count(*) from public.stock_transfers;
