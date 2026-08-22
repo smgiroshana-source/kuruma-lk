@@ -31,8 +31,17 @@ begin
   end if;
 end $$;
 
+-- Transfers Sakura SENT us: keep the row (it is their outgoing history),
+-- clear only the pointer to the destination product being deleted.
 update public.stock_transfers set to_product_id = null
  where to_product_id in
+   (select id from public.products where vendor_id = (select id from _wm));
+
+-- Transfers WE sent Sakura: from_product_id is NOT NULL, so the row cannot
+-- survive its source product. One row today, the WM -> Sakura "test transfer".
+-- The product Sakura created by accepting it is theirs and is unaffected.
+delete from public.stock_transfers
+ where from_product_id in
    (select id from public.products where vendor_id = (select id from _wm));
 
 delete from public.credit_note_items where credit_note_id in
