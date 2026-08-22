@@ -48,7 +48,10 @@ async function getLinkedVendors(admin: ReturnType<typeof createAdminClient>, sou
 async function landAtDestination(
   admin: ReturnType<typeof createAdminClient>,
   row: any,
-): Promise<{ productId: string; productName: string; error?: undefined } | { error: string; productId?: undefined; productName?: undefined }> {
+): Promise<
+  | { productId: string; productName: string; created: boolean; error?: undefined }
+  | { error: string; productId?: undefined; productName?: undefined; created?: undefined }
+> {
   const toVendorId = row.to_vendor_id
   const sku = row.from_product_sku
   const qty = row.quantity
@@ -59,13 +62,14 @@ async function landAtDestination(
 
   if (destExisting) {
     await adjustProductQuantity(admin, destExisting.id, toVendorId, qty)
+    // topped up something they already stocked — a reversal must not remove it
     const destUpdate: any = {}
     if (row.transfer_cost  != null) destUpdate.cost  = row.transfer_cost
     if (row.transfer_price != null) destUpdate.price = row.transfer_price
     if (Object.keys(destUpdate).length > 0) {
       await admin.from('products').update(destUpdate).eq('id', destExisting.id).eq('vendor_id', toVendorId)
     }
-    return { productId: destExisting.id as string, productName: row.from_product_name as string }
+    return { productId: destExisting.id as string, productName: row.from_product_name as string, created: false }
   }
 
   const { images, ...fields } = snap
@@ -111,7 +115,7 @@ async function landAtDestination(
       images.map((img: any) => ({ product_id: created.id, url: img.url, sort_order: img.sort_order }))
     )
   }
-  return { productId: created.id as string, productName: created.name as string }
+  return { productId: created.id as string, productName: created.name as string, created: true }
 }
 
 /** Send an in-transit line back to where it came from, cost layer intact. */
@@ -168,7 +172,7 @@ export async function GET(req: NextRequest) {
       .select(`
         id, batch_id, status, from_product_name, from_product_sku, to_product_name,
         quantity, transfer_cost, transfer_price, notes, transferred_at,
-        accepted_at, rejected_at, reject_reason,
+        accepted_at, rejected_at, reject_reason, reversed_at,
         to_vendor:vendors!stock_transfers_to_vendor_id_fkey(name)
       `)
       .eq('from_vendor_id', vendor.id)
@@ -474,7 +478,11 @@ export async function POST(req: NextRequest) {
         })
       }
       await admin.from('stock_transfers')
-        .update({ to_product_id: landed.productId, to_product_name: landed.productName })
+        .update({
+          to_product_id: landed.productId,
+          to_product_name: landed.productName,
+          created_dest_product: landed.created,
+        })
         .eq('id', row.id)
       settled++
     }
@@ -490,6 +498,92 @@ export async function POST(req: NextRequest) {
       message: action === 'accept'
         ? `Accepted ${settled} product${settled !== 1 ? 's' : ''} — ${units} unit${units !== 1 ? 's' : ''} added to your stock`
         : `Rejected — ${units} unit${units !== 1 ? 's' : ''} returned to the sending shop`,
+    })
+  }
+
+  // ── REVERSE — the SENDING shop undoes a transfer ──────────────────────────
+  // Covers both "sent by mistake, they haven't looked yet" (cancel) and "it
+  // landed and shouldn't have" (pull it back). Mirrors Reverse GRN.
+  //
+  // A reversal is refused once the goods have moved on — if the receiving shop
+  // has sold any of them there is nothing to pull back, and quietly deducting
+  // stock they no longer have would put their count into fiction.
+  if (action === 'reverse') {
+    const { batchId } = body as { batchId: string }
+    if (!batchId) return NextResponse.json({ success: false, error: 'batchId required' }, { status: 400 })
+    if (!(await callerMayTransfer(admin, vendor, userId))) {
+      return NextResponse.json({ success: false, error: 'Reversing a transfer requires owner or manager access' }, { status: 403 })
+    }
+
+    const { data: rows } = await admin.from('stock_transfers').select('*')
+      .eq('batch_id', batchId).eq('from_vendor_id', vendor.id).in('status', ['pending', 'accepted'])
+    if (!rows || rows.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: 'Nothing to reverse in this shipment — it may already have been reversed or sent back.',
+      }, { status: 409 })
+    }
+
+    // Check every accepted line BEFORE undoing any of them. Half a reversed
+    // shipment is worse than none.
+    for (const row of rows) {
+      if (row.status !== 'accepted' || !row.to_product_id) continue
+      const { data: destProd } = await admin.from('products')
+        .select('quantity, name').eq('id', row.to_product_id).eq('vendor_id', row.to_vendor_id).maybeSingle()
+      if (!destProd) {
+        return NextResponse.json({ success: false, error: `${row.from_product_name} no longer exists at the receiving shop — this transfer can't be reversed.` }, { status: 409 })
+      }
+      if (destProd.quantity < row.quantity) {
+        return NextResponse.json({
+          success: false,
+          error: `The receiving shop has only ${destProd.quantity} of ${row.from_product_name} left, not the ${row.quantity} sent — some has been sold, so this can't be reversed. Transfer the remainder back instead.`,
+        }, { status: 409 })
+      }
+    }
+
+    const reversedAt = new Date().toISOString()
+    for (const row of rows) {
+      if (row.status === 'accepted' && row.to_product_id) {
+        // Take it off their shelf with a conditional update so a sale landing
+        // mid-reversal isn't silently overwritten.
+        const { data: destProd } = await admin.from('products')
+          .select('quantity').eq('id', row.to_product_id).single()
+        const { data: claimed } = await admin.from('products')
+          .update({ quantity: destProd!.quantity - row.quantity })
+          .eq('id', row.to_product_id).eq('quantity', destProd!.quantity)
+          .select('id, quantity')
+        if (!claimed || claimed.length === 0) {
+          return NextResponse.json({ success: false, error: `${row.from_product_name}: their stock changed just now — please try again.` }, { status: 409 })
+        }
+        await admin.rpc('consume_fifo_cost', {
+          p_vendor_id: row.to_vendor_id, p_product_id: row.to_product_id, p_quantity: row.quantity,
+        })
+        // A product that only ever existed because of this transfer should not
+        // survive its reversal — but only if it is empty and untouched.
+        if (row.created_dest_product && claimed[0].quantity === 0) {
+          const { data: sold } = await admin.from('sale_items').select('id').eq('product_id', row.to_product_id).limit(1)
+          if (!sold || sold.length === 0) {
+            await admin.from('product_images').delete().eq('product_id', row.to_product_id)
+            await admin.from('products').delete().eq('id', row.to_product_id)
+          }
+        }
+      }
+      // Back onto the sender's shelf, cost layer intact
+      await returnToSender(admin, row)
+      await admin.from('stock_transfers')
+        .update({ status: 'reversed', reversed_at: reversedAt, reversed_by: userId })
+        .eq('id', row.id)
+    }
+
+    revalidatePath('/')
+    const units = rows.reduce((t: number, r: any) => t + r.quantity, 0)
+    const wasPending = rows.every((r: any) => r.status === 'pending')
+    return NextResponse.json({
+      success: true,
+      reversed: rows.length,
+      message: wasPending
+        ? `Cancelled — ${units} unit${units !== 1 ? 's' : ''} back in your stock`
+        : `Reversed — ${units} unit${units !== 1 ? 's' : ''} pulled back into your stock`,
     })
   }
 

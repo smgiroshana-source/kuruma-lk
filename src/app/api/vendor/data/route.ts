@@ -91,7 +91,10 @@ export async function GET(req: NextRequest) {
       .eq('sales.vendor_id', vendor.id).not('product_id', 'is', null),
     admin.from('grn_items').select('product_id, grns!inner(vendor_id)')
       .eq('grns.vendor_id', vendor.id).not('product_id', 'is', null),
+    // A reversed transfer undid itself — it is not history and must not lock
+    // the product, or a reversal would leave the operator no better off.
     admin.from('stock_transfers').select('from_product_id, to_product_id')
+      .neq('status', 'reversed')
       .or(`from_vendor_id.eq.${vendor.id},to_vendor_id.eq.${vendor.id}`),
   ])
   const inHistory = new Set<string>()

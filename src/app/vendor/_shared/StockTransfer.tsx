@@ -52,7 +52,8 @@ interface HistoryRow {
   transfer_price: number | null
   notes: string | null
   transferred_at: string
-  status?: 'pending' | 'accepted' | 'rejected'
+  batch_id?: string | null
+  status?: 'pending' | 'accepted' | 'rejected' | 'reversed'
   reject_reason?: string | null
 }
 
@@ -260,6 +261,7 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
   const [historyOpen, setHistoryOpen] = useState(false)
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [reversingBatch, setReversingBatch] = useState<string | null>(null)
 
   // ── Load vendors on mount ──────────────────────────────────────────────────
 
@@ -321,6 +323,27 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
       }
     } catch {}
     setHistoryLoading(false)
+  }
+
+  // Undo a transfer from the sending side. Covers both "they haven't looked at
+  // it yet" (cancel) and "it landed and shouldn't have" (pull it back).
+  async function reverseTransfer(row: HistoryRow) {
+    if (!row.batch_id) { showToast('This transfer predates shipment tracking and can\u2019t be reversed automatically'); return }
+    const pending = row.status === 'pending'
+    if (!confirm(pending
+      ? `Cancel this shipment? ${row.from_product_name} \u00d7${row.quantity} comes back into your stock and ${row.to_vendor_name} never sees it.`
+      : `Reverse this transfer? ${row.from_product_name} \u00d7${row.quantity} is taken back off ${row.to_vendor_name}'s shelf and returned to yours.`)) return
+    setReversingBatch(row.batch_id)
+    try {
+      const r = await fetch('/api/vendor/stock-transfer', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reverse', batchId: row.batch_id }),
+      })
+      const j = await r.json()
+      if (j.success) { showToast('\u21a9 ' + j.message); fetchHistory(); onDataChanged() }
+      else showToast('\u26a0\ufe0f ' + (j.error || 'Could not reverse'))
+    } catch { showToast('Network error') }
+    setReversingBatch(null)
   }
 
   function handleHistoryToggle() {
@@ -1072,6 +1095,7 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
                       <th className="pb-2 text-right font-semibold">Qty</th>
                       <th className="pb-2 text-left font-semibold">To</th>
                       <th className="pb-2 text-left font-semibold">Status</th>
+                      <th className="pb-2 text-right font-semibold"></th>
                       <th className="pb-2 text-right font-semibold">Transfer Price</th>
                       <th className="pb-2 text-left font-semibold">Notes</th>
                     </tr>
@@ -1093,10 +1117,26 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
                             <span className="text-xs font-bold text-red-600" title={row.reject_reason || ''}>
                               ↩ Sent back{row.reject_reason ? ` — ${row.reject_reason}` : ''}
                             </span>
+                          ) : row.status === 'reversed' ? (
+                            <span className="text-xs font-bold text-slate-400">⊘ Reversed</span>
                           ) : row.status === 'pending' ? (
                             <span className="text-xs font-bold text-amber-600">⏳ Awaiting their acceptance</span>
                           ) : (
                             <span className="text-xs font-bold text-emerald-600">✓ Accepted</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-right whitespace-nowrap">
+                          {(row.status === 'pending' || row.status === 'accepted' || !row.status) && (
+                            <button
+                              onClick={() => reverseTransfer(row)}
+                              disabled={reversingBatch === row.batch_id}
+                              title={row.status === 'pending'
+                                ? 'Cancel — they have not accepted it yet'
+                                : 'Take it back off their shelf and return it to yours'}
+                              className="text-[11px] font-semibold text-amber-600 border border-amber-200 px-2 py-1 rounded hover:bg-amber-50 disabled:opacity-40"
+                            >
+                              {reversingBatch === row.batch_id ? '…' : row.status === 'pending' ? 'Cancel' : '↩ Reverse'}
+                            </button>
                           )}
                         </td>
                         <td className="py-2 pr-3 text-right text-slate-700">

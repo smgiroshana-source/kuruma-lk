@@ -63,6 +63,20 @@ async function deleteProductRow(admin: ReturnType<typeof createAdminClient>, pro
     await admin.from('product_images').delete().eq('product_id', productId)
     ;({ error } = await admin.from('products').delete().eq('id', productId))
   }
+  // A REVERSED transfer records a movement that was undone — nothing went
+  // anywhere, so there is no history for it to protect. Clear those rows and
+  // try again. A live transfer still blocks, and rightly so.
+  if (error && blockedTable(error) === 'stock_transfers') {
+    const { data: live } = await admin.from('stock_transfers')
+      .select('id').neq('status', 'reversed')
+      .or(`from_product_id.eq.${productId},to_product_id.eq.${productId}`)
+      .limit(1)
+    if (!live || live.length === 0) {
+      await admin.from('stock_transfers').delete().eq('status', 'reversed')
+        .or(`from_product_id.eq.${productId},to_product_id.eq.${productId}`)
+      ;({ error } = await admin.from('products').delete().eq('id', productId))
+    }
+  }
   if (!error) await admin.from('product_images').delete().eq('product_id', productId)
   return error
 }

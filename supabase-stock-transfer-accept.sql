@@ -29,7 +29,13 @@ alter table public.stock_transfers
   add column if not exists accepted_by      uuid references auth.users(id),
   add column if not exists rejected_at      timestamptz,
   add column if not exists rejected_by      uuid references auth.users(id),
-  add column if not exists reject_reason    text;
+  add column if not exists reject_reason    text,
+  add column if not exists reversed_at      timestamptz,
+  add column if not exists reversed_by      uuid references auth.users(id),
+  -- Set at accept time: did accepting CREATE the destination product, or top
+  -- up one they already stocked? A reversal removes a product that only ever
+  -- existed because of this transfer, but must never remove one they had.
+  add column if not exists created_dest_product boolean;
 
 -- Any row written under the old straight-through behaviour already reached the
 -- destination, so it is accepted, not pending. (There are none today — the
@@ -41,7 +47,7 @@ update public.stock_transfers
 
 alter table public.stock_transfers drop constraint if exists stock_transfers_status_check;
 alter table public.stock_transfers add constraint stock_transfers_status_check
-  check (status in ('pending', 'accepted', 'rejected'));
+  check (status in ('pending', 'accepted', 'rejected', 'reversed'));
 
 -- The receiving shop's "what's waiting for me" query
 create index if not exists idx_stock_transfers_incoming
@@ -51,7 +57,7 @@ create index if not exists idx_stock_transfers_batch
   on public.stock_transfers (batch_id);
 
 comment on column public.stock_transfers.status is
-  'pending = in transit, off the sender''s shelf and not yet on the receiver''s. accepted = landed. rejected = returned to sender.';
+  'pending = in transit, off the sender''s shelf and not yet on the receiver''s. accepted = landed. rejected = the receiver sent it back. reversed = the sender undid it; nothing moved.';
 
 -- ── Verify ──
 select status, count(*) from public.stock_transfers group by status;
