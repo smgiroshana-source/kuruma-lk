@@ -7,8 +7,10 @@
 -- Sakura Auto Parts (0ae910a5-…) is NOT touched. Every statement below is
 -- scoped either by that vendor_id directly or through a parent row that is.
 --
--- KEPT: invoice_entities, vendor_staff, tax_config, vendor_settings — the
--- things that would have to be reconfigured from scratch.
+-- KEPT: invoice_entities, vendor_staff (logins and roles), tax_config,
+-- vendor_settings and vendor_transfer_links — the things that would have to be
+-- reconfigured from scratch. Staff are NOT deleted; only their attendance and
+-- payroll runs, which are transactions.
 --
 -- DELETED: every transaction, all products, all suppliers, all customers.
 --
@@ -70,6 +72,12 @@ delete from public.stock_writeoff_items where writeoff_id in
 delete from public.stock_writeoffs where vendor_id = (select id from _wm);
 delete from public.stock_movements  where vendor_id = (select id from _wm);
 delete from public.import_vat_entries where vendor_id = (select id from _wm);
+
+-- ── 4b. Payroll ───────────────────────────────────────────────────────────
+-- Attendance and payroll runs are transactions, not setup. vendor_staff (the
+-- logins and roles) is NOT touched — that is configuration.
+delete from public.attendance   where vendor_id = (select id from _wm);
+delete from public.payroll_runs where vendor_id = (select id from _wm);
 
 -- ── 5. Cash and expenses ──────────────────────────────────────────────────
 delete from public.cash_movements where vendor_id = (select id from _wm);
