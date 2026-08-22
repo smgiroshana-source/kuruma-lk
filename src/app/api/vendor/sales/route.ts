@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { checkPromotable, PROMOTE_WINDOW_DAYS } from '@/lib/promoteReceipt'
+import { checkPromotable, checkReversible, mayReversePromotion, PROMOTE_WINDOW_DAYS } from '@/lib/promoteReceipt'
 import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows } from '@/lib/fetchAll'
 import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnSales } from '@/lib/branchScope'
@@ -12,11 +12,13 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  // branchScope rides on the vendor object so existing callers keep working
-  if (vendor) return { ...vendor, branchScope: 'both' }
+  // branchScope and the caller's own id ride on the vendor object so existing
+  // callers keep working; the audit log and the reversal permission need to
+  // know WHO is acting, not just which shop.
+  if (vendor) return { ...vendor, branchScope: 'both', callerUserId: user.id }
   // Check if staff member
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop' }
+  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop', callerUserId: user.id }
   return null
 }
 
@@ -193,6 +195,31 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const period = url.searchParams.get('period') || 'all'
   const saleId = url.searchParams.get('id')
+
+  // Can this tax invoice be un-promoted, and may THIS person do it?
+  if (url.searchParams.get('action') === 'reverse_check' && saleId) {
+    const perm = await mayReversePromotion(admin, vendor, (vendor as any).callerUserId)
+    if (!perm.allowed) {
+      return NextResponse.json({
+        eligible: false,
+        reason: 'Reversing a tax invoice is limited to the owner and managers authorised for both stores.',
+        allowed: false,
+      })
+    }
+    const check = await checkReversible(admin, vendor.id, saleId)
+    return NextResponse.json({ ...check, allowed: true, actorRole: perm.role })
+  }
+
+  // The promotion history. Same gate as the action itself — if you may not
+  // reverse, you may not read who did.
+  if (url.searchParams.get('action') === 'promotion_log') {
+    const perm = await mayReversePromotion(admin, vendor, (vendor as any).callerUserId)
+    if (!perm.allowed) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
+    const { data, error } = await admin.from('invoice_promotion_log')
+      .select('*').eq('vendor_id', vendor.id).order('created_at', { ascending: false }).limit(200)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ log: data || [], allowed: true })
+  }
 
   // Pre-flight: can this receipt be promoted, and what will it disturb?
   // Answered before the operator commits, so the numbering consequences are a
@@ -804,8 +831,9 @@ export async function POST(req: NextRequest) {
     }
 
     const { data: sale } = await admin.from('sales')
-      .select('id, receipt_no, total, date_supply, created_at').eq('id', saleId).eq('vendor_id', vendor.id).single()
+      .select('id, receipt_no, total, date_supply, created_at, invoice_entity_id').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!sale) return NextResponse.json({ success: false, error: 'Sale not found' }, { status: 404 })
+    const fromEntityId = sale.invoice_entity_id
 
     const target = check.targetEntity!
     const { data: targetRow } = await admin.from('invoice_entities')
@@ -858,12 +886,108 @@ export async function POST(req: NextRequest) {
       }, { status: 500 })
     }
 
+    await admin.from('invoice_promotion_log').insert({
+      vendor_id: vendor.id, sale_id: saleId, action: 'promote',
+      receipt_no: sale.receipt_no, tax_serial: serial.taxSerial,
+      from_entity_id: fromEntityId, to_entity_id: target.id,
+      total, net_amount: net, vat_amount: vat,
+      stamped_date: check.supplyDate, sale_date: check.originalSaleDate,
+      actor_id: (vendor as any).callerUserId || null, actor_role: 'promoter',
+    })
+
     return NextResponse.json({
       success: true,
       taxSerial: serial.taxSerial,
       net, vat, total,
       warnings: check.warnings,
       message: `${sale.receipt_no} is now ${serial.taxSerial} — Rs.${net.toLocaleString()} + VAT Rs.${vat.toLocaleString()}, total unchanged at Rs.${total.toLocaleString()}`,
+    })
+  }
+
+  // ── REVERSE a promotion: tax invoice back to its receipt ──────────────────
+  // Owner, or a manager authorised for both stores. Withdrawing a tax invoice
+  // moves output VAT out of a period that may already be filed, so it sits
+  // above the single-branch manager who runs one shop's day.
+  if (action === 'reverse_promotion') {
+    const { saleId, reason } = body
+    if (!saleId) return NextResponse.json({ success: false, error: 'saleId required' }, { status: 400 })
+
+    const admin = createAdminClient()
+    const userId = (vendor as any).callerUserId
+    const perm = await mayReversePromotion(admin, vendor, userId)
+    if (!perm.allowed) {
+      return NextResponse.json({
+        success: false,
+        error: 'Reversing a tax invoice is limited to the owner and managers authorised for both stores.',
+      }, { status: 403 })
+    }
+    if (!String(reason || '').trim()) {
+      return NextResponse.json({ success: false, error: 'A reason is required — this withdraws a tax invoice and moves output VAT' }, { status: 400 })
+    }
+
+    const check = await checkReversible(admin, vendor.id, saleId)
+    if (!check.eligible) return NextResponse.json({ success: false, error: check.reason }, { status: 400 })
+
+    const { data: sale } = await admin.from('sales')
+      .select('*').eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!sale) return NextResponse.json({ success: false, error: 'Sale not found' }, { status: 404 })
+
+    // Where it goes back to: the proprietor entity of the same branch.
+    const { data: toEntity } = await admin.from('invoice_entities')
+      .select('id, name, branch').eq('id', sale.invoice_entity_id).single()
+    const { data: propEntity } = await admin.from('invoice_entities')
+      .select('id, name').eq('vendor_id', vendor.id)
+      .eq('invoice_mode', 'simple').eq('branch', toEntity?.branch).maybeSingle()
+    if (!propEntity) {
+      return NextResponse.json({ success: false, error: `No proprietor entity for the ${toEntity?.branch} branch to send it back to` }, { status: 400 })
+    }
+
+    const receiptNo = sale.promoted_from_receipt_no || sale.receipt_no
+    const deadSerial = sale.tax_serial
+
+    // The serial is NOT handed back. A printed invoice may already be with the
+    // customer, and the sequence must never issue the same number twice — so
+    // it is voided into the ledger instead, which keeps the run gapless
+    // without any chance of a duplicate.
+    const { error: voidErr } = await admin.from('sales').insert({
+      vendor_id: vendor.id, invoice_no: deadSerial, customer_name: 'VOID — promotion reversed',
+      subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
+      paid_amount: 0, balance_due: 0, total_amount_due: 0,
+      payment_method: 'cash', payment_status: 'voided', voided_at: new Date().toISOString(),
+      invoice_entity_id: sale.invoice_entity_id, document_type: 'tax_invoice',
+      tax_serial: deadSerial,
+      date_supply: sale.date_supply,
+      notes: `VOID — promotion of ${receiptNo} reversed. Reason: ${String(reason).trim()}`,
+    })
+    if (voidErr) return NextResponse.json({ success: false, error: 'Could not void the serial: ' + voidErr.message }, { status: 500 })
+
+    // The sale itself goes back to being the receipt it was.
+    const { error: upErr } = await admin.from('sales').update({
+      invoice_entity_id: propEntity.id,
+      document_type:     'receipt',
+      tax_serial:        null,
+      invoice_no:        receiptNo,
+      receipt_no:        receiptNo,
+      net_amount:        Math.round(Number(sale.total || 0)),
+      vat_amount:        0,
+      date_supply:       String(sale.created_at).slice(0, 10),
+      promoted_at:       null,
+      promoted_from_receipt_no: null,
+    }).eq('id', saleId).eq('vendor_id', vendor.id)
+    if (upErr) return NextResponse.json({ success: false, error: upErr.message }, { status: 500 })
+
+    await admin.from('invoice_promotion_log').insert({
+      vendor_id: vendor.id, sale_id: saleId, action: 'reverse',
+      receipt_no: receiptNo, tax_serial: deadSerial,
+      from_entity_id: sale.invoice_entity_id, to_entity_id: propEntity.id,
+      total: Math.round(Number(sale.total || 0)), net_amount: Math.round(Number(sale.total || 0)), vat_amount: 0,
+      stamped_date: String(sale.created_at).slice(0, 10), sale_date: String(sale.created_at).slice(0, 10),
+      reason: String(reason).trim(), actor_id: userId, actor_role: perm.role,
+    })
+
+    return NextResponse.json({
+      success: true,
+      message: `${deadSerial} withdrawn and voided — the sale is ${receiptNo} again. Output VAT of Rs.${(check.vatAmount || 0).toLocaleString()} is removed.`,
     })
   }
 

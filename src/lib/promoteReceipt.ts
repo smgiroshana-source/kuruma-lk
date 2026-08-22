@@ -216,3 +216,85 @@ export async function checkPromotable(
     warnings,
   }
 }
+
+export type ReverseCheck = {
+  eligible: boolean
+  reason?: string
+  taxSerial?: string
+  receiptNo?: string | null
+  originalSaleDate?: string
+  total?: number
+  vatAmount?: number
+}
+
+/**
+ * May this promoted tax invoice be un-promoted back to its receipt?
+ *
+ * Narrow by design (owner rule): the newest tax invoice of its entity, a sale
+ * that was promoted rather than raised as a tax invoice at the till, and a
+ * customer who is not VAT-registered. Reaching an older one means reversing
+ * the newer ones first — later invoices carry their date forward from this
+ * one, so unpicking a middle invoice would leave the ones above it dated from
+ * a document that no longer exists.
+ */
+export async function checkReversible(
+  admin: SupabaseClient,
+  vendorId: string,
+  saleId: string,
+): Promise<ReverseCheck> {
+  const no = (reason: string): ReverseCheck => ({ eligible: false, reason })
+
+  const { data: sale } = await admin.from('sales')
+    .select('id, tax_serial, receipt_no, promoted_at, promoted_from_receipt_no, payment_status, total, vat_amount, customer_id, customer_tin, created_at, invoice_entity_id')
+    .eq('id', saleId).eq('vendor_id', vendorId).single()
+  if (!sale) return no('Sale not found')
+  if (!sale.tax_serial) return no('This is not a tax invoice')
+  if (!sale.promoted_at) {
+    return no('This invoice was raised as a tax invoice at the till, not promoted from a receipt — void it instead of reversing it')
+  }
+  if (sale.payment_status === 'voided') return no('This sale is already voided')
+
+  let customerIsVatReg = !!String(sale.customer_tin || '').trim()
+  if (!customerIsVatReg && sale.customer_id) {
+    const { data: cust } = await admin.from('customers')
+      .select('vat_registered, tin').eq('id', sale.customer_id).maybeSingle()
+    if (cust?.vat_registered || String(cust?.tin || '').trim()) customerIsVatReg = true
+  }
+  if (customerIsVatReg) {
+    return no('This customer is VAT-registered — withdrawing their tax invoice would strip an input-VAT claim they may already have filed')
+  }
+
+  const last = await lastTaxInvoiceDate(admin, vendorId, sale.invoice_entity_id)
+  if (!last) return no('No tax invoices found for this entity')
+  if (last.serial !== sale.tax_serial) {
+    return no(`${last.serial} was issued after this one. Reverse the newer invoices first, then re-promote whichever are still wanted.`)
+  }
+
+  return {
+    eligible: true,
+    taxSerial: sale.tax_serial,
+    receiptNo: sale.promoted_from_receipt_no || sale.receipt_no,
+    originalSaleDate: String(sale.created_at).slice(0, 10),
+    total: Math.round(Number(sale.total || 0)),
+    vatAmount: Math.round(Number(sale.vat_amount || 0)),
+  }
+}
+
+/**
+ * Owner, or a manager authorised for BOTH stores. Withdrawing a tax invoice
+ * moves output VAT out of a filed or filable period, so it sits above the
+ * single-branch manager who runs one shop's day.
+ */
+export async function mayReversePromotion(
+  admin: SupabaseClient,
+  vendor: any,
+  userId: string,
+): Promise<{ allowed: boolean; role: string }> {
+  if (vendor.user_id === userId) return { allowed: true, role: 'owner' }
+  const { data: staff } = await admin.from('vendor_staff')
+    .select('role, branch_scope').eq('vendor_id', vendor.id).eq('user_id', userId)
+    .eq('active', true).maybeSingle()
+  if (!staff) return { allowed: false, role: 'unknown' }
+  const allowed = staff.role === 'manager' && staff.branch_scope === 'both'
+  return { allowed, role: `${staff.role}/${staff.branch_scope}` }
+}

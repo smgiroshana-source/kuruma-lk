@@ -655,6 +655,13 @@ export default function VendorDashboard() {
   const [promoteSale, setPromoteSale] = useState<any>(null)
   const [promoteCheck, setPromoteCheck] = useState<any>(null)
   const [promoting, setPromoting] = useState(false)
+  const [reverseSale, setReverseSale] = useState<any>(null)
+  const [reverseCheck, setReverseCheck] = useState<any>(null)
+  const [reverseReason, setReverseReason] = useState('')
+  const [reversing, setReversing] = useState(false)
+  // Whether THIS user may withdraw a tax invoice at all — owner, or a manager
+  // authorised for both stores. Decides whether the button exists.
+  const [mayReverse, setMayReverse] = useState(false)
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
   const [dailyReportLoading, setDailyReportLoading] = useState(false)
   const [returnModal, setReturnModal] = useState<any>(null)
@@ -1430,6 +1437,39 @@ export default function VendorDashboard() {
       const r = await fetch(`/api/vendor/sales?action=promote_check&id=${sale.id}`)
       setPromoteCheck(await r.json())
     } catch { showToast('Network error'); setPromoteSale(null) }
+  }
+
+  // Asked once per session rather than per row: the answer is about the user,
+  // not the sale.
+  useEffect(() => {
+    if (!isLkTax) return
+    fetch('/api/vendor/sales?action=promotion_log')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setMayReverse(!!j?.allowed))
+      .catch(() => {})
+  }, [isLkTax])
+
+  async function openReverse(sale: any) {
+    setReverseSale(sale); setReverseCheck(null); setReverseReason('')
+    try {
+      const r = await fetch(`/api/vendor/sales?action=reverse_check&id=${sale.id}`)
+      setReverseCheck(await r.json())
+    } catch { showToast('Network error'); setReverseSale(null) }
+  }
+
+  async function confirmReverse() {
+    if (!reverseSale) return
+    setReversing(true)
+    try {
+      const r = await fetch('/api/vendor/sales', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reverse_promotion', saleId: reverseSale.id, reason: reverseReason }),
+      })
+      const j = await r.json()
+      if (j.success) { showToast('↩ ' + j.message); setReverseSale(null); fetchSales(); fetchData() }
+      else showToast('⚠️ ' + (j.error || 'Could not reverse'))
+    } catch { showToast('Network error') }
+    setReversing(false)
   }
 
   async function confirmPromote() {
@@ -3664,6 +3704,12 @@ ${customerRows.map(c => `<tr>
                                       {sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && !isLkTax && (
                                         <button onClick={e => { e.stopPropagation(); setVoidModal({ saleId: sale.id, total: parseFloat(sale.total || 0), paid: parseFloat(sale.paid_amount || 0), customerName: sale.customer?.name || sale.customer_name || 'Walk-in' }) }} className="text-[11px] font-semibold text-red-600 px-3 py-1.5 rounded border border-red-200 active:bg-red-50">🚫 Void</button>
                                       )}
+                                      {isLkTax && mayReverse && sale.promoted_at && sale.tax_serial && sale.payment_status !== 'voided' && (
+                                        <button onClick={e => { e.stopPropagation(); openReverse(sale) }}
+                                          className="text-[11px] font-semibold text-amber-700 px-3 py-1.5 rounded border border-amber-300 active:bg-amber-50">
+                                          ↩ Withdraw Tax Invoice
+                                        </button>
+                                      )}
                                       {isLkTax && !sale.tax_serial && sale.receipt_no && sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && (
                                         <button onClick={e => { e.stopPropagation(); openPromote(sale) }}
                                           className="text-[11px] font-semibold text-indigo-600 px-3 py-1.5 rounded border border-indigo-200 active:bg-indigo-50">
@@ -4140,7 +4186,48 @@ ${customerRows.map(c => `<tr>
         )}
 
         {/* VOID SALE MODAL */}
-        {promoteSale && (
+        {reverseSale && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setReverseSale(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-black text-slate-900">Withdraw this tax invoice</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">{reverseSale.tax_serial} · Rs.{parseFloat(reverseSale.total || 0).toLocaleString()}</p>
+
+            {!reverseCheck ? (
+              <p className="text-sm text-slate-400 py-4 text-center">Checking…</p>
+            ) : !reverseCheck.eligible ? (
+              <>
+                <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-sm text-red-700 font-semibold">
+                  {reverseCheck.reason}
+                </div>
+                <button onClick={() => setReverseSale(null)}
+                  className="w-full mt-4 px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600">Close</button>
+              </>
+            ) : (
+              <>
+                <div className="bg-amber-50 border-2 border-amber-300 rounded-lg px-3 py-2.5 text-xs text-amber-900 space-y-1">
+                  <p><strong>{reverseCheck.taxSerial}</strong> is voided and stays in the ledger — the number is never reissued, because a printed copy may be with the customer.</p>
+                  <p>The sale goes back to receipt <strong>{reverseCheck.receiptNo}</strong>, dated {reverseCheck.originalSaleDate}.</p>
+                  <p>Output VAT of <strong>Rs.{(reverseCheck.vatAmount || 0).toLocaleString()}</strong> is removed. The total stays Rs.{(reverseCheck.total || 0).toLocaleString()}.</p>
+                </div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mt-3 mb-1">Reason (recorded against your name) *</label>
+                <input value={reverseReason} autoFocus onChange={e => setReverseReason(e.target.value)}
+                  placeholder="e.g. promoted in error, wrong customer"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-amber-400" />
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setReverseSale(null)}
+                    className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
+                  <button onClick={confirmReverse} disabled={reversing || !reverseReason.trim()}
+                    className="flex-1 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white font-black text-sm py-2.5 rounded-xl">
+                    {reversing ? 'Working…' : 'Withdraw'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {promoteSale && (
         <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setPromoteSale(null)}>
           <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-black text-slate-900">Re-issue as a Pvt Ltd tax invoice</h3>
