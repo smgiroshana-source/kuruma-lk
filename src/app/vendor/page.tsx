@@ -356,6 +356,13 @@ tbody tr:last-child td{border-bottom:2px solid #000}
       <div class="ic-dval">${vehicleNo}</div>
     </div>` : ''}
   </div>
+  ${sale.promoted_from_receipt_no ? `
+  <div class="irow">
+    <div class="ic" style="flex:1">
+      <div class="ic-dlbl">Replaces</div>
+      <div class="ic-dval" style="font-size:12px">Receipt ${escapeHtml(sale.promoted_from_receipt_no)} of ${supplyDate} — same supply, re-issued as a tax invoice</div>
+    </div>
+  </div>` : ''}
 </div>
 
 <!-- Line items -->
@@ -3558,7 +3565,10 @@ ${customerRows.map(c => `<tr>
     // Unified search: invoice, product name/sku, customer name, phone, vehicle
                     if (salesSearch) {
                       const sq = salesSearch.toLowerCase()
-                      const invoice = (sale.invoice_no || '').toLowerCase()
+                      // A promoted sale answers to BOTH numbers: the gazette
+                      // serial we now file under, and the receipt the customer
+                      // walked out with and will quote on the phone.
+                      const invoice = `${sale.invoice_no || ''} ${sale.receipt_no || ''} ${sale.promoted_from_receipt_no || ''}`.toLowerCase()
                       const items = (sale.items || []).map((i: any) => `${i.product_sku || ''} ${i.product_name || ''}`).join(' ').toLowerCase()
                       const name = (sale.customer?.name || sale.customer_name || '').toLowerCase()
                       const phone = (sale.customer_phone || sale.customer?.phone || '').toLowerCase()
@@ -3624,7 +3634,7 @@ ${customerRows.map(c => `<tr>
                               return (<Fragment key={sale.id}>
                                 <tr key={sale.id} onClick={() => setExpandedSale(isExpanded ? null : sale.id)} className={'border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition ' + (sale.payment_status === 'voided' ? 'opacity-50' : '') + (hasReturns && sale.payment_status !== 'voided' ? ' bg-red-50/30' : '') + (isExpanded ? ' bg-orange-50/50' : '')}>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatDateShort(sale.created_at)}</td>
-                                  <td className="px-2 sm:px-3 py-2.5"><span className="font-mono text-[10px] font-bold bg-slate-100 px-1.5 py-0.5 rounded">{sale.invoice_no}</span>{hasReturns && <span className="block text-[8px] font-bold text-red-500 mt-0.5">↩ RETURN</span>}</td>
+                                  <td className="px-2 sm:px-3 py-2.5"><span className="font-mono text-[10px] font-bold bg-slate-100 px-1.5 py-0.5 rounded">{sale.invoice_no}</span>{sale.promoted_from_receipt_no && <span className="block text-[8px] font-bold text-indigo-500 mt-0.5" title={`Re-issued from receipt ${sale.promoted_from_receipt_no}`}>⬆ was {sale.promoted_from_receipt_no}</span>}{hasReturns && <span className="block text-[8px] font-bold text-red-500 mt-0.5">↩ RETURN</span>}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs max-w-[300px] hidden md:table-cell">
                                     {(sale.items || []).map((i: any) => (
                                       <div key={i.id} className="truncate"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span>{i.product_name} <span className="text-slate-400">x{i.quantity}</span></div>
@@ -3818,6 +3828,12 @@ ${customerRows.map(c => `<tr>
                               <div>
                                 <span className="font-mono text-[10px] font-bold bg-white px-1.5 py-0.5 rounded">{sale.invoice_no}</span>
                                 <span className="text-[10px] text-slate-400 ml-1.5">{formatDateShort(sale.created_at)}</span>
+                                {sale.promoted_from_receipt_no && (
+                                  <span className="block text-[10px] text-indigo-500 font-semibold mt-0.5">
+                                    ⬆ re-issued from receipt {sale.promoted_from_receipt_no}
+                                    {sale.promoted_at ? ` on ${formatDateShort(sale.promoted_at)}` : ''}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status).cls}>{saleStatusChip(sale.payment_status).label}</span>
