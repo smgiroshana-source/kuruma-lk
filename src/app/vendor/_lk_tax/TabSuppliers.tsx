@@ -69,6 +69,9 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
 
   // ── modal open states ────────────────────────────────────────────────────
   const [showAddSupplier, setShowAddSupplier] = useState(false)
+  // Editing lived only on Stock → Suppliers, so this screen — the one called
+  // "Suppliers" — could create a supplier but never correct one.
+  const [editingSupplier, setEditingSupplier] = useState<any>(null)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [showRecordPayment, setShowRecordPayment] = useState<any | null>(null)
 
@@ -268,6 +271,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
             setSelectedSupplier(s)
             setView('invoices')
           }}
+          onEditSupplier={(s) => setEditingSupplier(s)}
         />
       ) : (
         <InvoiceListView
@@ -294,6 +298,18 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
             showToast={showToast}
             onSaved={async () => { setShowAddSupplier(false); await fetchSuppliers() }}
             onCancel={() => setShowAddSupplier(false)}
+          />
+        </Modal>
+      )}
+
+      {/* ── EDIT SUPPLIER MODAL ─────────────────────────────────────────────── */}
+      {editingSupplier && (
+        <Modal title={`Edit ${editingSupplier.name}`} onClose={() => setEditingSupplier(null)}>
+          <SupplierForm
+            initial={editingSupplier}
+            showToast={showToast}
+            onSaved={async () => { setEditingSupplier(null); await fetchSuppliers() }}
+            onCancel={() => setEditingSupplier(null)}
           />
         </Modal>
       )}
@@ -550,11 +566,13 @@ function SupplierListView({
   loading,
   onAddSupplier,
   onSelectSupplier,
+  onEditSupplier,
 }: {
   suppliers: any[]
   loading: boolean
   onAddSupplier: () => void
   onSelectSupplier: (s: any) => void
+  onEditSupplier: (s: any) => void
 }) {
   return (
     <div>
@@ -637,6 +655,12 @@ function SupplierListView({
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => onEditSupplier(s)}
+                        className="px-3 py-1.5 mr-1.5 rounded-lg border border-blue-200 text-xs font-semibold text-blue-600 hover:bg-blue-50 transition-colors"
+                      >
+                        Edit
+                      </button>
                       <button
                         onClick={() => onSelectSupplier(s)}
                         className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:border-slate-300 transition-colors"
