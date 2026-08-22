@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
       (inv) =>
         (inv.status === 'unpaid' || inv.status === 'partial') &&
         (inv.due_date as string) < today &&
-        (inv.amount_paid as number) < (inv.amount as number)
+        ((inv.amount_paid as number) + (((inv as any).credit_total as number) || 0)) < (inv.amount as number)
     )
     .map((inv) => inv.id as string)
 
@@ -205,7 +205,7 @@ export async function POST(req: NextRequest) {
     // Fetch the invoice and verify vendor ownership
     const { data: invoice, error: invErr } = await admin
       .from('supplier_invoices')
-      .select('id, vendor_id, amount, amount_paid, status')
+      .select('id, vendor_id, amount, amount_paid, credit_total, status')
       .eq('id', invoice_id)
       .eq('vendor_id', vendor.id)
       .single()
@@ -214,7 +214,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
     }
 
-    const remaining = (invoice.amount as number) - (invoice.amount_paid as number)
+    // Credit notes already came off the bill — paying the full invoice value
+    // after a discount would overpay the supplier.
+    const remaining = (invoice.amount as number) - (invoice.amount_paid as number) - (((invoice as any).credit_total as number) || 0)
     if (amount > remaining) {
       return NextResponse.json(
         { error: `Payment amount (${amount}) exceeds remaining balance (${remaining})` },
@@ -259,7 +261,7 @@ export async function POST(req: NextRequest) {
     // Recalculate invoice totals and status
     const newAmountPaid = (invoice.amount_paid as number) + amount
     const newStatus: 'paid' | 'partial' =
-      newAmountPaid >= (invoice.amount as number) ? 'paid' : 'partial'
+      newAmountPaid + (((invoice as any).credit_total as number) || 0) >= (invoice.amount as number) ? 'paid' : 'partial'
 
     const { error: updateErr } = await admin
       .from('supplier_invoices')

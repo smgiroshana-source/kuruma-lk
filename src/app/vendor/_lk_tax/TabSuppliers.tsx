@@ -49,6 +49,24 @@ const BLANK_INVOICE = {
   notes: '',
 }
 
+// Fields copied straight off the supplier's document — never derived. They
+// round differently, discount part of an invoice, and sometimes issue a note
+// with no VAT at all; the claim has to match their paper.
+const BLANK_CREDIT_NOTE = {
+  creditNoteNo: '', creditNoteDate: todayStr(),
+  invoiceNo: '', invoiceDate: '',
+  reason: 'discount', remarks: '',
+  netAmount: '' as string, vatAmount: '' as string,
+}
+
+const CREDIT_REASONS: Array<{ v: string; l: string }> = [
+  { v: 'discount',         l: 'Settlement / quantity discount' },
+  { v: 'price_adjustment', l: 'Price adjustment' },
+  { v: 'overcharge',       l: 'Overcharged on the invoice' },
+  { v: 'goods_returned',   l: 'Goods returned' },
+  { v: 'other',            l: 'Other' },
+]
+
 const BLANK_PAYMENT = {
   amount: '',
   payment_date: todayStr(),
@@ -72,6 +90,9 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
   // Editing lived only on Stock → Suppliers, so this screen — the one called
   // "Suppliers" — could create a supplier but never correct one.
   const [editingSupplier, setEditingSupplier] = useState<any>(null)
+  const [creditNoteFor, setCreditNoteFor] = useState<any>(null)
+  const [creditForm, setCreditForm] = useState({ ...BLANK_CREDIT_NOTE })
+  const [creditSaving, setCreditSaving] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [showRecordPayment, setShowRecordPayment] = useState<any | null>(null)
 
@@ -105,6 +126,32 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
     } finally {
       setLoading(false)
     }
+  }
+
+  async function saveCreditNote() {
+    if (!creditNoteFor || !selectedSupplier) return
+    setCreditSaving(true)
+    try {
+      const r = await fetch('/api/vendor/supplier-credit-notes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          supplierId: selectedSupplier.id,
+          supplierInvoiceId: creditNoteFor.id,
+          ...creditForm,
+          netAmount: Number(creditForm.netAmount),
+          vatAmount: Number(creditForm.vatAmount || 0),
+        }),
+      })
+      const j = await r.json()
+      if (j.ok) {
+        showToast('✅ ' + j.message)
+        setCreditNoteFor(null)
+        await fetchInvoices(selectedSupplier.id)
+        await fetchSuppliers()
+      } else showToast('⚠️ ' + (j.error || 'Could not save'))
+    } catch { showToast('Network error') }
+    setCreditSaving(false)
   }
 
   async function fetchInvoices(supplierId: string) {
@@ -283,6 +330,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           onBack={() => { setView('list'); setSelectedSupplier(null); setInvoices([]) }}
           onAddInvoice={openAddInvoiceModal}
           onPay={(inv) => { setShowRecordPayment(inv); setNewPayment({ ...BLANK_PAYMENT }) }}
+          onCreditNote={(inv) => { setCreditNoteFor(inv); setCreditForm({ ...BLANK_CREDIT_NOTE, invoiceNo: inv.invoice_no || '', invoiceDate: inv.invoice_date || '' }) }}
           onDelete={handleDeleteInvoice}
           hasUnpaid={hasUnpaid}
           aging={aging}
@@ -301,6 +349,108 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           />
         </Modal>
       )}
+
+      {/* ── SUPPLIER CREDIT NOTE MODAL ──────────────────────────────────────── */}
+      {creditNoteFor && (() => {
+        const net = Math.round(Number(creditForm.netAmount) || 0)
+        const vat = Math.round(Number(creditForm.vatAmount) || 0)
+        const outstanding = (creditNoteFor.amount ?? 0) - (creditNoteFor.amount_paid ?? 0) - (creditNoteFor.credit_total ?? 0)
+        const tooBig = net + vat > outstanding
+        return (
+          <Modal title={`Credit note against ${creditNoteFor.invoice_no}`} onClose={() => setCreditNoteFor(null)}>
+            <p className="text-xs text-slate-500 mb-3">
+              Copy the figures straight off the supplier&apos;s note. Don&apos;t work the discount out yourself —
+              your VAT claim has to match their document, because that is what IRD cross-checks.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Credit note no. *</label>
+                <input value={creditForm.creditNoteNo} autoFocus
+                  onChange={e => setCreditForm(f => ({ ...f, creditNoteNo: e.target.value }))}
+                  placeholder="e.g. CRN/046637"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Credit note date *</label>
+                <input type="date" value={creditForm.creditNoteDate}
+                  onChange={e => setCreditForm(f => ({ ...f, creditNoteDate: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                <p className="text-[10px] text-slate-400 mt-1">Decides which VAT period the claim drops in.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Their invoice no.</label>
+                <input value={creditForm.invoiceNo}
+                  onChange={e => setCreditForm(f => ({ ...f, invoiceNo: e.target.value }))}
+                  placeholder="e.g. CRI/250787/92"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                <p className="text-[10px] text-slate-400 mt-1">As printed on the note — Schedule 04 lists this, not our GRN number.</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Their invoice date</label>
+                <input type="date" value={creditForm.invoiceDate}
+                  onChange={e => setCreditForm(f => ({ ...f, invoiceDate: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Sub total (excl VAT) *</label>
+                <input type="number" step="0.01" value={creditForm.netAmount}
+                  onChange={e => setCreditForm(f => ({ ...f, netAmount: e.target.value }))}
+                  placeholder="7575.44"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">VAT on the note</label>
+                <input type="number" step="0.01" value={creditForm.vatAmount}
+                  onChange={e => setCreditForm(f => ({ ...f, vatAmount: e.target.value }))}
+                  placeholder="1363.58"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                <p className="text-[10px] text-slate-400 mt-1">Zero if the note shows none.</p>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-slate-500 mb-1">Reason</label>
+                <select value={creditForm.reason}
+                  onChange={e => setCreditForm(f => ({ ...f, reason: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white">
+                  {CREDIT_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-slate-500 mb-1">Remarks from the note</label>
+                <input value={creditForm.remarks}
+                  onChange={e => setCreditForm(f => ({ ...f, remarks: e.target.value }))}
+                  placeholder="e.g. qty discount of 2.5%"
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+              </div>
+            </div>
+
+            {(net > 0 || vat > 0) && (
+              <div className={`mt-3 rounded-lg px-3 py-2 text-xs border ${tooBig ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                {/* Supplier notes carry cents; everything here is whole rupees,
+                    as are the IRD schedules. Show what will actually be saved. */}
+                <p className="font-bold text-slate-700">
+                  Recorded as Rs.{net.toLocaleString()} + VAT Rs.{vat.toLocaleString()} = Rs.{(net + vat).toLocaleString()}
+                </p>
+                {tooBig
+                  ? <p className="text-red-600 font-bold mt-0.5">Only Rs.{outstanding.toLocaleString()} is outstanding on this invoice — check you picked the right one.</p>
+                  : <p className="text-slate-500 mt-0.5">
+                      Rs.{(net + vat).toLocaleString()} off what you owe · input VAT down Rs.{vat.toLocaleString()} in {String(creditForm.creditNoteDate).slice(0, 7)} · Rs.{net.toLocaleString()} to profit.
+                      No cash moves.
+                    </p>}
+              </div>
+            )}
+
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setCreditNoteFor(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
+              <button onClick={saveCreditNote}
+                disabled={creditSaving || !creditForm.creditNoteNo.trim() || !creditForm.creditNoteDate || net <= 0 || tooBig}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-sm py-2.5 rounded-xl">
+                {creditSaving ? 'Saving…' : 'Record credit note'}
+              </button>
+            </div>
+          </Modal>
+        )
+      })()}
 
       {/* ── EDIT SUPPLIER MODAL ─────────────────────────────────────────────── */}
       {editingSupplier && (
@@ -689,6 +839,7 @@ function InvoiceListView({
   onBack,
   onAddInvoice,
   onPay,
+  onCreditNote,
   onDelete,
   hasUnpaid,
   aging,
@@ -701,6 +852,7 @@ function InvoiceListView({
   onBack: () => void
   onAddInvoice: () => void
   onPay: (inv: any) => void
+  onCreditNote: (inv: any) => void
   onDelete: (inv: any) => void
   hasUnpaid: boolean
   aging: { current: number; b30: number; b60: number; b60plus: number }
@@ -791,7 +943,10 @@ function InvoiceListView({
               <tbody>
                 {invoices.map((inv: any) => {
                   const amtPaid = inv.amount_paid ?? 0
-                  const balance = inv.amount - amtPaid
+                  const credited = inv.credit_total ?? 0
+                  // Credit notes settle the bill without cash moving — they
+                  // come off the balance exactly as a payment does.
+                  const balance = inv.amount - amtPaid - credited
                   const overdueDays = inv.status === 'overdue' ? daysBetween(inv.due_date, today) : 0
                   return (
                     <tr key={inv.id} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
@@ -801,7 +956,12 @@ function InvoiceListView({
                       <td className="px-4 py-3 text-xs text-slate-500">{inv.invoice_date}</td>
                       <td className="px-4 py-3 text-xs text-slate-500">{inv.due_date}</td>
                       <td className="px-4 py-3 text-right text-sm font-semibold text-slate-700">{formatRs(inv.amount)}</td>
-                      <td className="px-4 py-3 text-right text-xs text-slate-400">{amtPaid > 0 ? formatRs(amtPaid) : '—'}</td>
+                      <td className="px-4 py-3 text-right text-xs text-slate-400">
+                        {amtPaid > 0 ? formatRs(amtPaid) : '—'}
+                        {credited > 0 && (
+                          <span className="block text-[10px] font-bold text-emerald-600">credit {formatRs(credited)}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-right text-sm font-bold text-slate-800">
                         {balance > 0 ? formatRs(balance) : <span className="text-slate-300">—</span>}
                       </td>
@@ -823,7 +983,16 @@ function InvoiceListView({
                               Pay
                             </button>
                           )}
-                          {amtPaid === 0 && (
+                          {inv.status !== 'paid' && (
+                            <button
+                              onClick={() => onCreditNote(inv)}
+                              title="The supplier sent a credit note — a discount, price adjustment or overcharge"
+                              className="px-2.5 py-1 rounded-lg border border-blue-200 text-[11px] font-bold text-blue-600 hover:bg-blue-50 transition-colors"
+                            >
+                              Credit Note
+                            </button>
+                          )}
+                          {amtPaid === 0 && credited === 0 && (
                             <button
                               onClick={() => onDelete(inv)}
                               className="px-2.5 py-1 rounded-lg border border-red-200 text-[11px] font-bold text-red-500 hover:bg-red-50 transition-colors"

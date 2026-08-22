@@ -39,7 +39,7 @@ export async function GET() {
   try {
     invoices = await fetchAllRows((from, to) => admin
       .from('supplier_invoices')
-      .select('supplier_id, amount, amount_paid, status, due_date')
+      .select('supplier_id, amount, amount_paid, credit_total, status, due_date')
       .eq('vendor_id', vendor.id)
       .neq('status', 'paid')
       .order('id')
@@ -65,7 +65,9 @@ export async function GET() {
     if (!agg[sid]) {
       agg[sid] = { total_owed: 0, overdue_count: 0, overdue_amount: 0, oldest_overdue_days: 0 }
     }
-    const owed = (inv.amount as number) - (inv.amount_paid as number)
+    // Supplier credit notes settle a payable without any cash moving, so they
+    // count against what is owed exactly as a payment does.
+    const owed = (inv.amount as number) - (inv.amount_paid as number) - ((inv.credit_total as number) || 0)
     agg[sid].total_owed += owed
 
     if (inv.status === 'overdue') {

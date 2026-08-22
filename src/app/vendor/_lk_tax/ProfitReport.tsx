@@ -56,6 +56,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
           ${row('GROSS PROFIT' + (s.grossMarginPct != null ? ` (${s.grossMarginPct}% margin)` : ''), money(s.grossProfit), { bold: true, color: s.grossProfit >= 0 ? '#15803d' : '#dc2626' })}
           ${row('Operating expenses', '− ' + money(s.expenseTotal), { bold: true })}
           ${s.writeoffTotal > 0 ? row('Stock written off', '− ' + money(s.writeoffTotal), { bold: true, color: '#b45309' }) : ''}
+          ${s.supplierCreditTotal > 0 ? row('Supplier discounts received', '+ ' + money(s.supplierCreditTotal), { bold: true, color: '#15803d' }) : ''}
           ${row('NET PROFIT', money(s.netProfit), { bold: true, color: s.netProfit >= 0 ? '#15803d' : '#dc2626' })}
         </tbody>
       </table>`
@@ -104,6 +105,17 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
         </tbody>
       </table>
       <p class="note">Goods that left the shelf without being sold. The cost is a loss of this period — it is not in cost of goods sold, because nothing was sold.</p>` : ''
+
+    const creditBlock = (data.supplierCredits || []).length > 0 ? `
+      <h3>Supplier discounts received</h3>
+      <table>
+        <thead><tr><th>Date</th><th>Credit note</th><th>Supplier</th><th>Reason</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          ${data.supplierCredits.map((c: any) => `<tr><td>${escapeHtml(c.date)}</td><td>${escapeHtml(c.no)}</td><td>${escapeHtml(c.supplier)}</td><td>${escapeHtml(String(c.reason).replace(/_/g, ' '))}</td><td class="num">${money(c.amount)}</td></tr>`).join('')}
+          <tr class="tot"><td colspan="4">Total</td><td class="num">${money(s.supplierCreditTotal)}</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Net of VAT. The VAT on each note is recovered through the VAT return, not kept, so it is not profit.</p>` : ''
 
     const productBlock = `
       <h3>Profit by item</h3>
@@ -175,6 +187,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       ${noCostBlock}
       ${expenseBlock}
       ${writeoffBlock}
+      ${creditBlock}
       ${mode === 'full' ? productBlock + detailBlock : productBlock}
 
       <div class="foot">

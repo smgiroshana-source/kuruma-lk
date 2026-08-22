@@ -175,6 +175,20 @@ export async function GET(req: NextRequest) {
     writeoffTotal += amt
   }
 
+  // Credit notes received from suppliers — settlement and quantity discounts,
+  // price adjustments. Owner decision 2026-08-22: shown as income of the
+  // period rather than reducing what the goods cost, so the margin on invoices
+  // already issued and printed is never re-stated.
+  //
+  // NET only. The VAT on the note is recovered through the VAT return, not
+  // kept — counting it here would inflate profit by money owed to IRD.
+  const { data: supCredits } = await admin.from('supplier_credit_notes')
+    .select('credit_note_no, credit_note_date, reason, net_amount, supplier:suppliers(name)')
+    .eq('vendor_id', caller.vendor.id)
+    .gte('credit_note_date', from).lte('credit_note_date', to)
+    .order('credit_note_date')
+  const supplierCreditTotal = (supCredits || []).reduce((t: number, c: any) => t + r0(c.net_amount), 0)
+
   const realGp = realRev - realCogs
   const roughGp = roughRev - roughCogs
   const knownRev = realRev + roughRev + serviceRev
@@ -197,7 +211,8 @@ export async function GET(req: NextRequest) {
       grossMarginPct: knownRev > 0 ? Math.round((grossProfit / knownRev) * 100) : null,
       expenseTotal: r0(expenseTotal),
       writeoffTotal: r0(writeoffTotal),
-      netProfit: r0(grossProfit - expenseTotal - writeoffTotal),
+      supplierCreditTotal: r0(supplierCreditTotal),
+      netProfit: r0(grossProfit - expenseTotal - writeoffTotal + supplierCreditTotal),
       // What share of the period's takings the profit figure cannot speak for
       coveragePct: totalRev > 0 ? Math.round((knownRev / totalRev) * 100) : null,
       saleCount: (sales || []).length,
@@ -208,6 +223,10 @@ export async function GET(req: NextRequest) {
     noCost: [...noCostAgg.values()].sort((a, b) => b.revenue - a.revenue),
     expenses: [...expenseByCat.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount),
     writeoffs: [...writeoffByReason.entries()].map(([reason, amount]) => ({ reason, amount })).sort((a, b) => b.amount - a.amount),
+    supplierCredits: (supCredits || []).map((c: any) => ({
+      no: c.credit_note_no, date: String(c.credit_note_date).slice(0, 10),
+      supplier: c.supplier?.name || '', reason: c.reason, amount: r0(c.net_amount),
+    })),
     writeoffList: (writeoffRows || []).map((w: any) => ({
       no: w.writeoff_no, date: String(w.writeoff_date).slice(0, 10),
       reason: w.reason, cost: r0(w.total_cost),

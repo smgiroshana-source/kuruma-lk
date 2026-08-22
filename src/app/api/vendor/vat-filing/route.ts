@@ -236,6 +236,31 @@ export async function GET(req: NextRequest) {
     _ref: r.return_no,
     _party: r.supplier?.name || '',
   }))
+  // Credit notes for discounts and price adjustments — nothing came back off
+  // the shelf, so these never touch the returns flow, but they reduce input
+  // VAT exactly the same way and belong on the same schedule.
+  const { data: supCns, error: supCnErr } = await admin.from('supplier_credit_notes')
+    .select('credit_note_no, credit_note_date, invoice_no, invoice_date, net_amount, vat_amount, reason, supplier:suppliers(name, tin)')
+    .eq('vendor_id', caller.vendor.id)
+    .gte('credit_note_date', from).lte('credit_note_date', to)
+    .order('credit_note_date')
+  if (supCnErr) return NextResponse.json({ error: 'Supplier credit notes: ' + supCnErr.message }, { status: 500 })
+  for (const c of (supCns || []) as any[]) {
+    schedule04Supplier.push({
+      tin: c.supplier?.tin || '',
+      invoiceDate: c.invoice_date || '',
+      invoiceNo: c.invoice_no || '',
+      noteType: 'Credit',
+      noteDate: String(c.credit_note_date).slice(0, 10),
+      noteNo: c.credit_note_no,
+      value: parseInt(c.net_amount || 0),
+      vatAmount: parseInt(c.vat_amount || 0),
+      issuedByMe: 'No',
+      _ref: c.reason,
+      _party: c.supplier?.name || '',
+    })
+  }
+
   const supplierCrnVat = schedule04Supplier.reduce((s: number, r: any) => s + r.vatAmount, 0)
 
   // Output VAT is reduced by credit notes issued in this period
