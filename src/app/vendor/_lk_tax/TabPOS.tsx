@@ -3,7 +3,7 @@ import { toWhatsAppNumber } from '@/lib/constants'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
-import { gpPercent, isBelowCost, netOfVat } from '@/lib/margin'
+import { gpPercent, isBelowCost, netOfVat, costIncVat } from '@/lib/margin'
 import { useState, useEffect, useMemo } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
@@ -659,6 +659,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ex-VAT slice, so GP%/below-cost must compare cost against that, not the
   // sticker price — otherwise a loss-making sale can pass the warning.
   const posMarginBase = (p: number | null | undefined) => posIsVatEntity ? netOfVat(p, posVatRate) : (Number(p) || 0)
+  // The lowest VAT-INCLUSIVE price that still breaks even — the same currency
+  // the operator quotes in, so the net cost is never mistaken for a floor.
+  const posCostFloor = (c: number | null | undefined) => posIsVatEntity ? costIncVat(c, posVatRate) : (Number(c) || 0)
   // Ex-VAT price entry (insurance quotes): only meaningful on the VAT entity.
   const posEntryExcl = posIsVatEntity && posPriceMode === 'excl'
   const grossOfNet = (p: number) => Math.round((Number(p) || 0) * (100 + posVatRate) / 100)
@@ -1114,8 +1117,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), item.cost) ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
                             {posEntryExcl && Number(item.unitPrice) > 0 && <p className="text-[9px] font-bold text-amber-700 mt-0.5 leading-none">= Rs.{Number(item.unitPrice).toLocaleString()} with VAT</p>}
                             {Number(item.cost) > 0 && (isBelowCost(posMarginBase(item.unitPrice), item.cost)
-                              ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost Rs.{Number(item.cost).toLocaleString()}{posIsVatEntity ? ` (excl. VAT Rs.${posMarginBase(item.unitPrice).toLocaleString()})` : ''}</p>
-                              : Number(item.unitPrice) > 0 && <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), item.cost)}%{posIsVatEntity ? ' net' : ''}</p>)}
+                              ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{posCostFloor(item.cost).toLocaleString()} or more{posIsVatEntity ? ` (cost Rs.${Number(item.cost).toLocaleString()} excl VAT)` : ''}</p>
+                              : Number(item.unitPrice) > 0
+                                ? <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), item.cost)}%{posIsVatEntity ? ' net' : ''}</p>
+                                : <p className="text-[9px] text-slate-400 mt-0.5 leading-none">min Rs.{posCostFloor(item.cost).toLocaleString()}</p>)}
                           </td>
                           <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td>
                           <td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td>

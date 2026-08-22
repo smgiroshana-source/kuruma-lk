@@ -3,7 +3,7 @@ import { toWhatsAppNumber, formatPhoneSL, validatePhoneSL } from '@/lib/constant
 import { escapeHtml } from '@/lib/escapeHtml'
 import { colomboToday } from '@/lib/dates'
 import { saleStatusChip } from '@/lib/saleStatus'
-import { gpPercent, isBelowCost, netOfVat } from '@/lib/margin'
+import { gpPercent, isBelowCost, netOfVat, costIncVat } from '@/lib/margin'
 import { compressImage } from '@/lib/compressImage'
 
 // "Business day" of a sale/return/collection = the Asia/Colombo calendar date it
@@ -1276,6 +1276,10 @@ export default function VendorDashboard() {
   // slice — GP%/below-cost must be judged on that, or a loss-making price can
   // look profitable. Sakura (no VAT) keeps the full price.
   const marginBase = (price: any) => isLkTax ? netOfVat(price, Number(vendorSettings?.vat_rate) || 18) : (Number(price) || 0)
+  // Cost is stored net; a price quoted over the counter is VAT-inclusive. This
+  // is the floor in the SAME currency the customer hears, so nobody quotes
+  // under it by mistake.
+  const costFloor = (cost: any) => costIncVat(cost, Number(vendorSettings?.vat_rate) || 18)
 
   async function handleReturn(refundMethod: 'advance' | 'cash') {
     if (!returnModal) return
@@ -2551,7 +2555,7 @@ ${customerRows.map(c => `<tr>
                         <span className="text-[10px] font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</span>
                         <span className="text-[9px] text-slate-400 font-mono">{p.sku}</span>
                       </div>
-                      {p.cost != null && Number(p.cost) > 0 && <span className={'text-[9px] block truncate ' + (isBelowCost(marginBase(p.price), p.cost) ? 'text-red-600 font-bold' : 'text-slate-400')}>cost Rs.{Number(p.cost).toLocaleString()}{gpPercent(marginBase(p.price), p.cost) != null ? ' · GP ' + gpPercent(marginBase(p.price), p.cost) + '%' : ''}</span>}
+                      {p.cost != null && Number(p.cost) > 0 && <span className={'text-[9px] block truncate ' + (isBelowCost(marginBase(p.price), p.cost) ? 'text-red-600 font-bold' : 'text-slate-400')}>cost Rs.{Number(p.cost).toLocaleString()}{isLkTax ? ` · min Rs.${costFloor(p.cost).toLocaleString()}` : ''}{gpPercent(marginBase(p.price), p.cost) != null ? ' · GP ' + gpPercent(marginBase(p.price), p.cost) + '%' : ''}</span>}
                       {locLabel(p) && <span className="text-[9px] font-semibold text-amber-700 bg-amber-50 px-1 rounded truncate block">📍 {locLabel(p)}</span>}
                     </div>
                   </div>
