@@ -370,6 +370,11 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       {creditNoteFor && (() => {
         const net = Math.round(Number(creditForm.netAmount) || 0)
         const vat = Math.round(Number(creditForm.vatAmount) || 0)
+        // A supplier who isn't VAT-registered never charged VAT, so they have
+        // none to credit back. Expected rate is zero, and VAT on such a note
+        // is a red flag worth stopping to look at.
+        const supplierVat = !!selectedSupplier?.vat_registered
+        const expectedRate = supplierVat ? vatRate : 0
         const outstanding = (creditNoteFor.amount ?? 0) - (creditNoteFor.amount_paid ?? 0) - (creditNoteFor.credit_total ?? 0)
         const tooBig = net + vat > outstanding
         return (
@@ -418,7 +423,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                       // Fill the usual answer in; the operator overwrites it
                       // whenever the note disagrees.
                       vatAmount: vatTouched ? f.vatAmount
-                        : (Number(v) > 0 ? String(Math.round(Number(v) * vatRate) / 100) : ''),
+                        : (Number(v) > 0 && expectedRate > 0 ? String(Math.round(Number(v) * expectedRate) / 100) : ''),
                     }))
                   }}
                   placeholder="7575.44"
@@ -430,8 +435,10 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                   onChange={e => { setVatTouched(true); setCreditForm(f => ({ ...f, vatAmount: e.target.value })) }}
                   placeholder="1363.58"
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Filled in at {vatRate}% — change it to whatever the note actually shows.
+                <p className={`text-[10px] mt-1 ${supplierVat ? 'text-slate-400' : 'text-slate-500 font-semibold'}`}>
+                  {supplierVat
+                    ? `Filled in at ${vatRate}% — change it to whatever the note actually shows.`
+                    : `${selectedSupplier?.name || 'This supplier'} is not VAT-registered, so leave this at zero.`}
                 </p>
               </div>
               <div className="col-span-2">
@@ -462,7 +469,13 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                     rates, or be raised at a rate that has since changed — so
                     an odd percentage is a prompt to look at the paper, never a
                     reason to refuse the entry. */}
-                {!tooBig && net > 0 && Math.abs(vat - Math.round(net * vatRate / 100)) > 1 && (
+                {!tooBig && net > 0 && !supplierVat && vat > 0 && (
+                  <p className="text-red-600 font-bold mt-0.5">
+                    {selectedSupplier?.name} is not VAT-registered, so they cannot charge VAT — or credit it back.
+                    Either the note has no VAT, or the supplier record is wrong.
+                  </p>
+                )}
+                {!tooBig && net > 0 && supplierVat && Math.abs(vat - Math.round(net * vatRate / 100)) > 1 && (
                   <p className="text-amber-700 font-bold mt-0.5">
                     That is {(vat / net * 100).toFixed(1)}% of the sub-total, not {vatRate}% — fine if the note is zero-rated,
                     covers a mix of rates, or was raised when the rate was different. Otherwise check the figures.
@@ -471,7 +484,9 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                 {tooBig
                   ? <p className="text-red-600 font-bold mt-0.5">Only Rs.{outstanding.toLocaleString()} is outstanding on this invoice — check you picked the right one.</p>
                   : <p className="text-slate-500 mt-0.5">
-                      Rs.{(net + vat).toLocaleString()} off what you owe · input VAT down Rs.{vat.toLocaleString()} in {String(creditForm.creditNoteDate).slice(0, 7)} · Rs.{net.toLocaleString()} to profit.
+                      Rs.{(net + vat).toLocaleString()} off what you owe · {vat > 0
+                        ? `input VAT down Rs.${vat.toLocaleString()} in ${String(creditForm.creditNoteDate).slice(0, 7)}`
+                        : 'no VAT to adjust, so nothing goes on Schedule 04'} · Rs.{net.toLocaleString()} to profit.
                       No cash moves.
                     </p>}
               </div>
