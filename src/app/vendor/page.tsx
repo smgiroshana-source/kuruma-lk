@@ -1425,7 +1425,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1605,6 +1605,19 @@ ${(() => {
             '</div>'
           : '')
     })()}
+
+${(dayWriteoffs || []).length > 0 ? (() => {
+      const woTotal = (dayWriteoffs || []).reduce((t: number, w: any) => t + parseInt(w.total_cost || 0), 0)
+      return '<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Stock Written Off</h3>' +
+        '<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px">' +
+        (dayWriteoffs || []).map((w: any) =>
+          '<div style="font-size:12px;color:#92400e;padding:2px 0">\u2022 <strong>' + escapeHtml(w.writeoff_no) + '</strong> \u00b7 ' +
+          escapeHtml(w.reason || '') + ' \u00b7 ' + (w.items_count || 0) + ' item' + ((w.items_count || 0) !== 1 ? 's' : '') +
+          ' \u2014 Rs.' + parseInt(w.total_cost || 0).toLocaleString() + '</div>').join('') +
+        '<div style="font-size:12px;font-weight:800;color:#92400e;border-top:1px solid #fde68a;margin-top:6px;padding-top:6px">Total cost lost: Rs.' + woTotal.toLocaleString() + '</div>' +
+        '<div style="font-size:10px;color:#a16207;margin-top:4px">Goods off the shelf without a sale. No cash moved \u2014 this is stock value, not a drawer payment.</div>' +
+        '</div>'
+    })() : ''}
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Transactions (${filtered.length})</h3>
 <table><thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr></thead><tbody>
@@ -1848,10 +1861,13 @@ ${customerRows.map(c => `<tr>
       // Early-morning Colombo sales (+5:30) are stored under yesterday's UTC date;
       // fetch the previous UTC day too and pin each row to its Colombo day.
       const prev = new Date(date + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
-      const [r, cs, ex] = await Promise.all([
+      const [r, cs, ex, wo] = await Promise.all([
         fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${date}`),
         fetch(`/api/vendor/cash-sessions?date=${date}`),
         fetch(`/api/vendor/expenses?date=${date}`),
+        // Stock that left without being sold is part of the day's story too —
+        // the shelf is lighter and the owner should not have to go looking.
+        fetch('/api/vendor/writeoffs'),
       ])
       if (!r.ok) { showToast(`Failed (${r.status})`) }
       else {
@@ -1876,7 +1892,15 @@ ${customerRows.map(c => `<tr>
             category: 'supplier', amount: p.amount, payment_method: 'cash',
           })),
         ]
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements)
+        let dayWriteoffs: any[] = []
+        try {
+          if (wo.ok) {
+            const wj = await wo.json()
+            dayWriteoffs = (wj.writeoffs || []).filter((w: any) =>
+              w.status === 'posted' && String(w.writeoff_date).slice(0, 10) === date)
+          }
+        } catch {}
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs)
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)

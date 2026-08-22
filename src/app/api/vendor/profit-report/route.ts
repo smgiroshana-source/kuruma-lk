@@ -156,6 +156,25 @@ export async function GET(req: NextRequest) {
     expenseTotal += netAmt
   }
 
+  // Stock written off in the window — lost, damaged, stolen.
+  //
+  // This cost belongs in neither COGS (it was never sold) nor expenses, so
+  // until now it fell out of the arithmetic entirely: goods left the shelf and
+  // profit did not move. It is a real loss of the period and is shown on its
+  // own line rather than buried in expenses, because the owner needs to see
+  // how much stock is walking out unsold.
+  const { data: writeoffRows } = await admin.from('stock_writeoffs')
+    .select('writeoff_no, writeoff_date, reason, total_cost, status')
+    .eq('vendor_id', caller.vendor.id).eq('status', 'posted')
+    .gte('writeoff_date', from).lte('writeoff_date', to)
+  const writeoffByReason = new Map<string, number>()
+  let writeoffTotal = 0
+  for (const w of (writeoffRows || [])) {
+    const amt = r0(w.total_cost)
+    writeoffByReason.set(w.reason || 'Other', (writeoffByReason.get(w.reason || 'Other') || 0) + amt)
+    writeoffTotal += amt
+  }
+
   const realGp = realRev - realCogs
   const roughGp = roughRev - roughCogs
   const knownRev = realRev + roughRev + serviceRev
@@ -177,7 +196,8 @@ export async function GET(req: NextRequest) {
       grossProfit: r0(grossProfit),
       grossMarginPct: knownRev > 0 ? Math.round((grossProfit / knownRev) * 100) : null,
       expenseTotal: r0(expenseTotal),
-      netProfit: r0(grossProfit - expenseTotal),
+      writeoffTotal: r0(writeoffTotal),
+      netProfit: r0(grossProfit - expenseTotal - writeoffTotal),
       // What share of the period's takings the profit figure cannot speak for
       coveragePct: totalRev > 0 ? Math.round((knownRev / totalRev) * 100) : null,
       saleCount: (sales || []).length,
@@ -187,5 +207,10 @@ export async function GET(req: NextRequest) {
     byProduct: [...productAgg.values()].sort((a, b) => b.profit - a.profit),
     noCost: [...noCostAgg.values()].sort((a, b) => b.revenue - a.revenue),
     expenses: [...expenseByCat.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount),
+    writeoffs: [...writeoffByReason.entries()].map(([reason, amount]) => ({ reason, amount })).sort((a, b) => b.amount - a.amount),
+    writeoffList: (writeoffRows || []).map((w: any) => ({
+      no: w.writeoff_no, date: String(w.writeoff_date).slice(0, 10),
+      reason: w.reason, cost: r0(w.total_cost),
+    })),
   })
 }

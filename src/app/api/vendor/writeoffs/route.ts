@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { adjustProductQuantity } from '@/lib/stock'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -230,13 +231,17 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Update product quantity
-      const { error: updateErr } = await admin
-        .from('products')
-        .update({ quantity: newQty })
-        .eq('id', item.product_id)
+      // Atomic RPC, not a read-then-write: a POS sale landing between the read
+      // above and the write would otherwise be erased by a blind overwrite.
+      await adjustProductQuantity(admin, item.product_id, vendor.id, -item.quantity)
 
-      if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
+      // Take the cost out of the FIFO layers too. Without this the goods leave
+      // the shelf but their cost stays in stock valuation, and the next sale
+      // draws cost from a layer that should already have been used up — the
+      // loss silently becomes some future sale's COGS.
+      await admin.rpc('consume_fifo_cost', {
+        p_vendor_id: vendor.id, p_product_id: item.product_id, p_quantity: item.quantity,
+      })
 
       // Log stock movement
       const { error: movErr } = await admin.from('stock_movements').insert({

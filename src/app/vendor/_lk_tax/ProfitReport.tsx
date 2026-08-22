@@ -55,6 +55,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
           ${row('Cost of goods sold', '− ' + money(s.realCogs + s.roughCogs), { bold: true })}
           ${row('GROSS PROFIT' + (s.grossMarginPct != null ? ` (${s.grossMarginPct}% margin)` : ''), money(s.grossProfit), { bold: true, color: s.grossProfit >= 0 ? '#15803d' : '#dc2626' })}
           ${row('Operating expenses', '− ' + money(s.expenseTotal), { bold: true })}
+          ${s.writeoffTotal > 0 ? row('Stock written off', '− ' + money(s.writeoffTotal), { bold: true, color: '#b45309' }) : ''}
           ${row('NET PROFIT', money(s.netProfit), { bold: true, color: s.netProfit >= 0 ? '#15803d' : '#dc2626' })}
         </tbody>
       </table>`
@@ -90,6 +91,19 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
         </tbody>
       </table>
       <p class="note">Shown net of any input VAT claimed back. Owner top-ups, banking and drawings are money moved, not expenses — they never appear here.</p>` : ''
+
+    // Its own block, not folded into expenses: stock walking out unsold is a
+    // different problem from spending money, and the owner needs to see it.
+    const writeoffBlock = (data.writeoffs || []).length > 0 ? `
+      <h3>Stock written off</h3>
+      <table>
+        <thead><tr><th>Reason</th><th class="num">Cost</th></tr></thead>
+        <tbody>
+          ${data.writeoffs.map((w: any) => `<tr><td>${escapeHtml(w.reason)}</td><td class="num">${money(w.amount)}</td></tr>`).join('')}
+          <tr class="tot"><td>Total</td><td class="num">${money(s.writeoffTotal)}</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Goods that left the shelf without being sold. The cost is a loss of this period — it is not in cost of goods sold, because nothing was sold.</p>` : ''
 
     const productBlock = `
       <h3>Profit by item</h3>
@@ -160,6 +174,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
 
       ${noCostBlock}
       ${expenseBlock}
+      ${writeoffBlock}
       ${mode === 'full' ? productBlock + detailBlock : productBlock}
 
       <div class="foot">
@@ -213,7 +228,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
               { l: 'Revenue (with cost)', v: rs(s.knownRevenue) },
               { l: 'Cost of goods', v: rs(s.realCogs + s.roughCogs) },
               { l: `Gross profit${s.grossMarginPct != null ? ` · ${s.grossMarginPct}%` : ''}`, v: rs(s.grossProfit), hi: true },
-              { l: 'Net after expenses', v: rs(s.netProfit), hi: true },
+              { l: s.writeoffTotal > 0 ? 'Net after expenses & write-offs' : 'Net after expenses', v: rs(s.netProfit), hi: true },
             ].map(c => (
               <div key={c.l} className="bg-white px-4 py-3">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">{c.l}</p>
