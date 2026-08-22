@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { checkPromotable, PROMOTE_WINDOW_DAYS } from '@/lib/promoteReceipt'
 import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows } from '@/lib/fetchAll'
 import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnSales } from '@/lib/branchScope'
@@ -174,6 +175,14 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const period = url.searchParams.get('period') || 'all'
   const saleId = url.searchParams.get('id')
+
+  // Pre-flight: can this receipt be promoted, and what will it disturb?
+  // Answered before the operator commits, so the numbering consequences are a
+  // decision rather than a discovery.
+  if (url.searchParams.get('action') === 'promote_check' && saleId) {
+    const check = await checkPromotable(admin, vendor.id, saleId)
+    return NextResponse.json({ ...check, windowDays: PROMOTE_WINDOW_DAYS })
+  }
 
   if (saleId) {
     const { data: sale } = await admin
@@ -753,6 +762,73 @@ export async function POST(req: NextRequest) {
       newAdvance: finalAdvance,
       totalAmountDue,
       message: msg,
+    })
+  }
+
+  // ── PROMOTE a proprietor receipt to a Pvt Ltd tax invoice ─────────────────
+  // Within 30 days, for customers who are not VAT-registered. The customer has
+  // already paid, so the TOTAL must not move — VAT is carved OUT of what they
+  // paid, not added on top. The business absorbs it; the customer's receipt
+  // still reconciles to the cash they handed over.
+  if (action === 'promote_to_tax_invoice') {
+    const { saleId, acknowledgeWarnings } = body
+    if (!saleId) return NextResponse.json({ success: false, error: 'saleId required' }, { status: 400 })
+
+    const admin = createAdminClient()
+    const check = await checkPromotable(admin, vendor.id, saleId)
+    if (!check.eligible) return NextResponse.json({ success: false, error: check.reason }, { status: 400 })
+
+    // Re-evaluated here rather than trusted from the client: the operator must
+    // have been shown these exact conditions, and they can change between the
+    // pre-flight check and the click.
+    if (check.warnings.length > 0 && !acknowledgeWarnings) {
+      return NextResponse.json({ success: false, needsAcknowledgement: true, warnings: check.warnings }, { status: 409 })
+    }
+
+    const { data: sale } = await admin.from('sales')
+      .select('id, receipt_no, total, date_supply, created_at').eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!sale) return NextResponse.json({ success: false, error: 'Sale not found' }, { status: 404 })
+
+    const target = check.targetEntity!
+    const { data: targetRow } = await admin.from('invoice_entities')
+      .select('id, serial_qqqq, receipt_prefix').eq('id', target.id).single()
+
+    const vatRate = await getVatRate(vendor.id)
+    const total = Math.round(Number(sale.total || 0))
+    // Carve VAT out of the paid total — the price already included it as far as
+    // the customer is concerned.
+    const net = Math.round(total / (1 + vatRate / 100))
+    const vat = total - net
+
+    const supplyDate = new Date(`${check.supplyDate}T00:00:00+05:30`)
+    let serial
+    try {
+      serial = await reserveSerial(target.id, targetRow as any, 'tax_invoice', supplyDate)
+    } catch (e: any) {
+      return NextResponse.json({ success: false, error: e?.message || 'Serial generation failed' }, { status: 500 })
+    }
+
+    // receipt_no is kept, not cleared: the customer holds that piece of paper
+    // and the receipt sequence must stay gapless. One sale, two identifiers.
+    const { error: upErr } = await admin.from('sales').update({
+      invoice_entity_id: target.id,
+      document_type:     'tax_invoice',
+      tax_serial:        serial.taxSerial,
+      invoice_no:        serial.taxSerial,
+      net_amount:        net,
+      vat_amount:        vat,
+      date_supply:       check.supplyDate,
+      promoted_at:       new Date().toISOString(),
+      promoted_from_receipt_no: sale.receipt_no,
+    }).eq('id', saleId).eq('vendor_id', vendor.id)
+    if (upErr) return NextResponse.json({ success: false, error: upErr.message }, { status: 500 })
+
+    return NextResponse.json({
+      success: true,
+      taxSerial: serial.taxSerial,
+      net, vat, total,
+      warnings: check.warnings,
+      message: `${sale.receipt_no} is now ${serial.taxSerial} — Rs.${net.toLocaleString()} + VAT Rs.${vat.toLocaleString()}, total unchanged at Rs.${total.toLocaleString()}`,
     })
   }
 

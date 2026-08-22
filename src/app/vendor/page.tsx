@@ -648,6 +648,9 @@ export default function VendorDashboard() {
   const [taxConfigSaving, setTaxConfigSaving] = useState(false)
 
   // Void sale modal
+  const [promoteSale, setPromoteSale] = useState<any>(null)
+  const [promoteCheck, setPromoteCheck] = useState<any>(null)
+  const [promoting, setPromoting] = useState(false)
   const [voidModal, setVoidModal] = useState<{ saleId: string; total: number; paid: number; customerName: string } | null>(null)
   const [dailyReportLoading, setDailyReportLoading] = useState(false)
   const [returnModal, setReturnModal] = useState<any>(null)
@@ -1412,6 +1415,32 @@ export default function VendorDashboard() {
     </body></html>`
     const w = window.open('', '_blank', 'width=800,height=700')
     if (w) { w.document.write(html); w.document.close() }
+  }
+
+  // ── Promote a proprietor receipt to a Pvt Ltd tax invoice ────────────────
+  // Checked first, so the numbering consequences are shown before the operator
+  // commits rather than discovered in the ledger afterwards.
+  async function openPromote(sale: any) {
+    setPromoteSale(sale); setPromoteCheck(null)
+    try {
+      const r = await fetch(`/api/vendor/sales?action=promote_check&id=${sale.id}`)
+      setPromoteCheck(await r.json())
+    } catch { showToast('Network error'); setPromoteSale(null) }
+  }
+
+  async function confirmPromote() {
+    if (!promoteSale) return
+    setPromoting(true)
+    try {
+      const r = await fetch('/api/vendor/sales', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'promote_to_tax_invoice', saleId: promoteSale.id, acknowledgeWarnings: true }),
+      })
+      const j = await r.json()
+      if (j.success) { showToast('✅ ' + j.message); setPromoteSale(null); fetchSales(); fetchData() }
+      else showToast('⚠️ ' + (j.error || 'Could not promote'))
+    } catch { showToast('Network error') }
+    setPromoting(false)
   }
 
   async function voidSale(saleId: string, refundMethod: 'advance' | 'cash') {
@@ -3628,6 +3657,12 @@ ${customerRows.map(c => `<tr>
                                       {sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && !isLkTax && (
                                         <button onClick={e => { e.stopPropagation(); setVoidModal({ saleId: sale.id, total: parseFloat(sale.total || 0), paid: parseFloat(sale.paid_amount || 0), customerName: sale.customer?.name || sale.customer_name || 'Walk-in' }) }} className="text-[11px] font-semibold text-red-600 px-3 py-1.5 rounded border border-red-200 active:bg-red-50">🚫 Void</button>
                                       )}
+                                      {isLkTax && !sale.tax_serial && sale.receipt_no && sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && (
+                                        <button onClick={e => { e.stopPropagation(); openPromote(sale) }}
+                                          className="text-[11px] font-semibold text-indigo-600 px-3 py-1.5 rounded border border-indigo-200 active:bg-indigo-50">
+                                          ⬆ Make Tax Invoice
+                                        </button>
+                                      )}
                                       {sale.customer_id && <button onClick={e => { e.stopPropagation(); setCustomerHistoryId(sale.customer_id); setCustomerHistoryName(sale.customer?.name || sale.customer_name) }} className="text-[11px] font-semibold text-purple-600 px-3 py-1.5 rounded border border-purple-200 active:bg-purple-50">👤 History</button>}
                                     </div>
                                   </td></tr>
@@ -4092,7 +4127,61 @@ ${customerRows.map(c => `<tr>
         )}
 
         {/* VOID SALE MODAL */}
-        {voidModal && (
+        {promoteSale && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setPromoteSale(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-black text-slate-900">Re-issue as a Pvt Ltd tax invoice</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">
+              {promoteSale.receipt_no} · {promoteSale.customer_name || 'Walk-in'} · Rs.{parseFloat(promoteSale.total || 0).toLocaleString()}
+            </p>
+
+            {!promoteCheck ? (
+              <p className="text-sm text-slate-400 py-4 text-center">Checking…</p>
+            ) : !promoteCheck.eligible ? (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 text-sm text-red-700 font-semibold">
+                {promoteCheck.reason}
+              </div>
+            ) : (
+              <>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600 space-y-1">
+                  <p>Sold <strong>{promoteCheck.supplyDate}</strong> — {promoteCheck.ageDays} day{promoteCheck.ageDays !== 1 ? 's' : ''} ago, inside the {promoteCheck.windowDays}-day window.</p>
+                  <p>Becomes a <strong>{promoteCheck.targetEntity?.serial_qqqq}</strong> invoice in period <strong>{promoteCheck.period}</strong>.</p>
+                  {/* The customer already paid — VAT comes OUT of that figure,
+                      it is not added on top, or their receipt stops matching
+                      the cash they handed over. */}
+                  <p className="text-slate-500">
+                    The total stays at Rs.{parseFloat(promoteSale.total || 0).toLocaleString()}. VAT is taken out of it, not added — the customer has already paid.
+                  </p>
+                </div>
+
+                {promoteCheck.warnings?.length > 0 && (
+                  <div className="mt-3 bg-amber-50 border-2 border-amber-300 rounded-lg px-3 py-2.5">
+                    <p className="text-xs font-black text-amber-800 mb-1.5">⚠️ Numbering &amp; period</p>
+                    {promoteCheck.warnings.map((w: any) => (
+                      <p key={w.code} className="text-[11px] text-amber-800 leading-snug mb-1.5 last:mb-0">{w.text}</p>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2 mt-4">
+                  <button onClick={() => setPromoteSale(null)}
+                    className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
+                  <button onClick={confirmPromote} disabled={promoting}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white font-black text-sm py-2.5 rounded-xl">
+                    {promoting ? 'Working…' : promoteCheck.warnings?.length > 0 ? 'Promote anyway' : 'Promote'}
+                  </button>
+                </div>
+              </>
+            )}
+            {promoteCheck && !promoteCheck.eligible && (
+              <button onClick={() => setPromoteSale(null)}
+                className="w-full mt-4 px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600">Close</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {voidModal && (
           <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setVoidModal(null)}>
             <div className="bg-white rounded-2xl max-w-sm w-full overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="bg-red-50 px-5 py-4 border-b border-red-100">
