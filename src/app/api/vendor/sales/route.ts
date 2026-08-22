@@ -612,7 +612,16 @@ export async function POST(req: NextRequest) {
       notes: notes || null,
       vehicle_no: vehicleNo || null,
     }
-    if (saleDate) saleRecord.created_at = new Date(saleDate).toISOString()
+    if (saleDate) {
+      // A date with no time parses as midnight UTC, which is 5:30am Colombo —
+      // the right DAY, but sitting exactly on a UTC period boundary, which is
+      // where "is this before the period start" comparisons go wrong. Two bugs
+      // this month traced back to it. Stamp date-only sales at Colombo midday
+      // instead: unambiguously inside the day and nowhere near an edge.
+      saleRecord.created_at = /^\d{4}-\d{2}-\d{2}$/.test(String(saleDate))
+        ? new Date(`${saleDate}T12:00:00+05:30`).toISOString()
+        : new Date(saleDate).toISOString()
+    }
 
     // lk_tax extra fields
     if (isLkTax) {
