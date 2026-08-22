@@ -167,6 +167,24 @@ async function reserveSerial(
   }
 }
 
+/**
+ * Hand a freshly minted serial back to the counter.
+ *
+ * Only safe while ours is still the highest number issued — if anyone has
+ * reserved since, decrementing would hand the same number out twice. The
+ * conditional update makes that check and the write atomic; a false return
+ * means the number is spent and the caller must account for it another way
+ * (create_sale writes a VOID row carrying it, which keeps the ledger gapless).
+ */
+async function releaseSerial(entityId: string, period: string, number: number): Promise<boolean> {
+  const admin = createAdminClient()
+  const { data } = await admin.from('invoice_sequences')
+    .update({ last_number: number - 1 })
+    .eq('entity_id', entityId).eq('period', period).eq('last_number', number)
+    .select('entity_id')
+  return !!data && data.length > 0
+}
+
 export async function GET(req: NextRequest) {
   const vendor = await getVendor()
   if (!vendor) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
@@ -821,7 +839,22 @@ export async function POST(req: NextRequest) {
       promoted_at:       new Date().toISOString(),
       promoted_from_receipt_no: sale.receipt_no,
     }).eq('id', saleId).eq('vendor_id', vendor.id)
-    if (upErr) return NextResponse.json({ success: false, error: upErr.message }, { status: 500 })
+
+    if (upErr) {
+      // The serial was minted a moment ago and nothing has been issued under
+      // it, so give it back rather than leaving a hole in a sequence that is
+      // required to be gapless. A failed promotion must cost nothing.
+      const num = parseInt(String(serial.taxSerial).split('_')[2], 10)
+      const reclaimed = await releaseSerial(target.id, check.period!, num)
+      return NextResponse.json({
+        success: false,
+        error: upErr.message,
+        serialReclaimed: reclaimed,
+        note: reclaimed
+          ? undefined
+          : `${serial.taxSerial} was reserved and could not be reclaimed — it must be recorded as VOID to keep the sequence gapless.`,
+      }, { status: 500 })
+    }
 
     return NextResponse.json({
       success: true,
