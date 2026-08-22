@@ -93,6 +93,13 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
   const [creditNoteFor, setCreditNoteFor] = useState<any>(null)
   const [creditForm, setCreditForm] = useState({ ...BLANK_CREDIT_NOTE })
   const [creditSaving, setCreditSaving] = useState(false)
+  // Standard rate from config, never hardcoded. Used to PRE-FILL the VAT on a
+  // credit note and to sanity-check what was typed — never to overrule the
+  // supplier's document, which is what IRD cross-checks.
+  const [vatRate, setVatRate] = useState(18)
+  // Once the operator touches the VAT box, stop auto-filling it: a note on
+  // zero-rated goods, or on a mix of rates, is not 18% of the sub-total.
+  const [vatTouched, setVatTouched] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [showRecordPayment, setShowRecordPayment] = useState<any | null>(null)
 
@@ -127,6 +134,15 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/vendor/tax-config')
+        if (r.ok) { const j = await r.json(); if (j.config?.vat_rate != null) setVatRate(parseFloat(j.config.vat_rate)) }
+      } catch {}
+    })()
+  }, [])
 
   async function saveCreditNote() {
     if (!creditNoteFor || !selectedSupplier) return
@@ -394,17 +410,29 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">Sub total (excl VAT) *</label>
                 <input type="number" step="0.01" value={creditForm.netAmount}
-                  onChange={e => setCreditForm(f => ({ ...f, netAmount: e.target.value }))}
+                  onChange={e => {
+                    const v = e.target.value
+                    setCreditForm(f => ({
+                      ...f,
+                      netAmount: v,
+                      // Fill the usual answer in; the operator overwrites it
+                      // whenever the note disagrees.
+                      vatAmount: vatTouched ? f.vatAmount
+                        : (Number(v) > 0 ? String(Math.round(Number(v) * vatRate) / 100) : ''),
+                    }))
+                  }}
                   placeholder="7575.44"
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">VAT on the note</label>
                 <input type="number" step="0.01" value={creditForm.vatAmount}
-                  onChange={e => setCreditForm(f => ({ ...f, vatAmount: e.target.value }))}
+                  onChange={e => { setVatTouched(true); setCreditForm(f => ({ ...f, vatAmount: e.target.value })) }}
                   placeholder="1363.58"
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                <p className="text-[10px] text-slate-400 mt-1">Zero if the note shows none.</p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Filled in at {vatRate}% — change it to whatever the note actually shows.
+                </p>
               </div>
               <div className="col-span-2">
                 <label className="block text-xs font-bold text-slate-500 mb-1">Reason</label>
@@ -430,6 +458,16 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                 <p className="font-bold text-slate-700">
                   Recorded as Rs.{net.toLocaleString()} + VAT Rs.{vat.toLocaleString()} = Rs.{(net + vat).toLocaleString()}
                 </p>
+                {/* A note can legitimately be zero-rated, or cover a mix of
+                    rates, or be raised at a rate that has since changed — so
+                    an odd percentage is a prompt to look at the paper, never a
+                    reason to refuse the entry. */}
+                {!tooBig && net > 0 && Math.abs(vat - Math.round(net * vatRate / 100)) > 1 && (
+                  <p className="text-amber-700 font-bold mt-0.5">
+                    That is {(vat / net * 100).toFixed(1)}% of the sub-total, not {vatRate}% — fine if the note is zero-rated,
+                    covers a mix of rates, or was raised when the rate was different. Otherwise check the figures.
+                  </p>
+                )}
                 {tooBig
                   ? <p className="text-red-600 font-bold mt-0.5">Only Rs.{outstanding.toLocaleString()} is outstanding on this invoice — check you picked the right one.</p>
                   : <p className="text-slate-500 mt-0.5">
