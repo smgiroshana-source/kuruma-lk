@@ -196,6 +196,15 @@ export async function GET(req: NextRequest) {
   const period = url.searchParams.get('period') || 'all'
   const saleId = url.searchParams.get('id')
 
+  // May THIS person withdraw tax invoices at all? Answered from the role
+  // alone — the button's visibility must not hinge on the log table, or a
+  // missing migration silently hides a feature instead of failing where the
+  // problem actually is.
+  if (url.searchParams.get('action') === 'reverse_permission') {
+    const perm = await mayReversePromotion(admin, vendor, (vendor as any).callerUserId)
+    return NextResponse.json({ allowed: perm.allowed, role: perm.role })
+  }
+
   // Can this tax invoice be un-promoted, and may THIS person do it?
   if (url.searchParams.get('action') === 'reverse_check' && saleId) {
     const perm = await mayReversePromotion(admin, vendor, (vendor as any).callerUserId)

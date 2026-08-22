@@ -1443,7 +1443,7 @@ export default function VendorDashboard() {
   // not the sale.
   useEffect(() => {
     if (!isLkTax) return
-    fetch('/api/vendor/sales?action=promotion_log')
+    fetch('/api/vendor/sales?action=reverse_permission')
       .then(r => r.ok ? r.json() : null)
       .then(j => setMayReverse(!!j?.allowed))
       .catch(() => {})
