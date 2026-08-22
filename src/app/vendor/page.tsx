@@ -2800,7 +2800,7 @@ ${customerRows.map(c => `<tr>
                                 </td>
                                 <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{p.side || '—'}</td>
                                 <td className="px-3 py-2 font-mono text-slate-500 whitespace-nowrap">{p.oem_code || '—'}</td>
-                                <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.cost ? 'Rs.' + Number(p.cost).toLocaleString() : '—'}</td>
+                                <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{p.cost ? 'Rs.' + (isLkTax ? costFloor(p.cost) : Number(p.cost)).toLocaleString() : '—'}</td>
                                 <td className="px-3 py-2 font-bold text-orange-600 whitespace-nowrap">{p.price ? 'Rs.' + Number(p.price).toLocaleString() : 'Ask'}</td>
                                 <td className={'px-3 py-2 whitespace-nowrap ' + qtyColor}>{p.quantity}</td>
                                 <td className="px-3 py-2 text-slate-500 whitespace-nowrap text-[10px]">{loc || '—'}</td>
