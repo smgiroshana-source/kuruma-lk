@@ -185,7 +185,13 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const netAmount    = parseInt(sale.net_amount) || (total - vatAmount)
   const discount     = parseFloat(sale.discount || 0)
   const serial       = escapeHtml(sale.tax_serial || sale.invoice_no || '')
-  const invoiceDate  = fmtDate(sale.created_at)
+  // Date of Invoice is the day the DOCUMENT was raised; Date of Supply is the
+  // day the goods or services changed hands. The gazette asks for both
+  // separately precisely because they can differ — a receipt promoted to a tax
+  // invoice days later is exactly that case. Using the sale date for both made
+  // a promoted invoice look as though it had been issued out of sequence:
+  // 00005 dated before 00004, when in truth both were raised the same morning.
+  const invoiceDate  = fmtDate(sale.promoted_at || sale.created_at)
   const supplyDate   = fmtDate(sale.date_supply || sale.created_at)
   const totalWords   = numberToWords(total) + ' Rupees Only'
 
