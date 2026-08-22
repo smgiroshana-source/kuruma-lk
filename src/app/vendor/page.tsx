@@ -1425,7 +1425,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[], dayCreditNotes?: any[], daySupplierCredits?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1605,6 +1605,34 @@ ${(() => {
             '</div>'
           : '')
     })()}
+
+${((dayCreditNotes || []).length > 0 || (daySupplierCredits || []).length > 0) ? (() => {
+      // Both directions on one section. Neither moves cash — say so, or the
+      // figures get read against the till and the drawer never balances.
+      const outTot = (dayCreditNotes || []).reduce((t: number, c: any) => t + parseInt(c.total || c.total_amount || 0), 0)
+      const inTot  = (daySupplierCredits || []).reduce((t: number, c: any) => t + parseInt(c.total_amount || 0), 0)
+      return '<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Credit Notes</h3>' +
+        '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px">' +
+        ((dayCreditNotes || []).length > 0
+          ? '<div style="font-size:11px;font-weight:800;color:#1e40af;margin-bottom:3px">Issued to customers \u2014 reduces sales</div>' +
+            (dayCreditNotes || []).map((c: any) =>
+              '<div style="font-size:12px;color:#1e3a8a;padding:2px 0">\u2022 <strong>' + escapeHtml(c.credit_note_no || '') + '</strong> \u00b7 ' +
+              escapeHtml(c.customer_name || 'Walk-in') + ' \u00b7 against ' + escapeHtml(c.original_serial || '') +
+              ' \u2014 Rs.' + parseInt(c.total || c.total_amount || 0).toLocaleString() + '</div>').join('') +
+            '<div style="font-size:12px;font-weight:800;color:#1e40af;padding:2px 0">Total credited to customers: Rs.' + outTot.toLocaleString() + '</div>'
+          : '') +
+        ((daySupplierCredits || []).length > 0
+          ? '<div style="font-size:11px;font-weight:800;color:#166534;margin:6px 0 3px">Received from suppliers \u2014 reduces what we owe</div>' +
+            (daySupplierCredits || []).map((c: any) =>
+              '<div style="font-size:12px;color:#166534;padding:2px 0">\u2022 <strong>' + escapeHtml(c.credit_note_no || '') + '</strong> \u00b7 ' +
+              escapeHtml(c.supplier?.name || '') + ' \u00b7 ' + escapeHtml(String(c.reason || '').replace(/_/g, ' ')) +
+              ' \u2014 Rs.' + parseInt(c.total_amount || 0).toLocaleString() +
+              (parseInt(c.vat_amount || 0) > 0 ? ' (incl VAT Rs.' + parseInt(c.vat_amount).toLocaleString() + ')' : '') + '</div>').join('') +
+            '<div style="font-size:12px;font-weight:800;color:#166534;padding:2px 0">Total credited by suppliers: Rs.' + inTot.toLocaleString() + '</div>'
+          : '') +
+        '<div style="font-size:10px;color:#475569;margin-top:4px">No cash moved either way \u2014 do not read these against the drawer.</div>' +
+        '</div>'
+    })() : ''}
 
 ${(dayWriteoffs || []).length > 0 ? (() => {
       const woTotal = (dayWriteoffs || []).reduce((t: number, w: any) => t + parseInt(w.total_cost || 0), 0)
@@ -1861,13 +1889,18 @@ ${customerRows.map(c => `<tr>
       // Early-morning Colombo sales (+5:30) are stored under yesterday's UTC date;
       // fetch the previous UTC day too and pin each row to its Colombo day.
       const prev = new Date(date + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
-      const [r, cs, ex, wo] = await Promise.all([
+      const [r, cs, ex, wo, cn, scn] = await Promise.all([
         fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${date}`),
         fetch(`/api/vendor/cash-sessions?date=${date}`),
         fetch(`/api/vendor/expenses?date=${date}`),
         // Stock that left without being sold is part of the day's story too —
         // the shelf is lighter and the owner should not have to go looking.
         fetch('/api/vendor/writeoffs'),
+        // Credit notes, both directions. Neither moves cash, but both change
+        // what the day was worth: ones we issue reduce revenue, ones suppliers
+        // send reduce what we owe.
+        fetch('/api/vendor/credit-notes'),
+        fetch('/api/vendor/supplier-credit-notes'),
       ])
       if (!r.ok) { showToast(`Failed (${r.status})`) }
       else {
@@ -1900,7 +1933,26 @@ ${customerRows.map(c => `<tr>
               w.status === 'posted' && String(w.writeoff_date).slice(0, 10) === date)
           }
         } catch {}
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs)
+        let dayCreditNotes: any[] = []
+        try {
+          if (cn.ok) {
+            const cj = await cn.json()
+            // issued_at is a timestamp, so it must be pinned to the Colombo
+            // day like everything else here — a note raised before 5:30am
+            // Colombo carries yesterday's UTC date.
+            dayCreditNotes = (cj.creditNotes || [])
+              .filter((c: any) => c.issued_at && colomboBusinessDay(c.issued_at) === date)
+          }
+        } catch {}
+        let daySupplierCredits: any[] = []
+        try {
+          if (scn.ok) {
+            const sj = await scn.json()
+            daySupplierCredits = (sj.creditNotes || [])
+              .filter((c: any) => String(c.credit_note_date || '').slice(0, 10) === date)
+          }
+        } catch {}
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs, dayCreditNotes, daySupplierCredits)
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)
