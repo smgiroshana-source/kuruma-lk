@@ -818,6 +818,8 @@ export async function POST(req: NextRequest) {
     const net = Math.round(total / (1 + vatRate / 100))
     const vat = total - net
 
+    // check.supplyDate is the carried-over date, not the day of the sale — the
+    // serial's period and the printed dates all follow it.
     const supplyDate = new Date(`${check.supplyDate}T00:00:00+05:30`)
     let serial
     try {

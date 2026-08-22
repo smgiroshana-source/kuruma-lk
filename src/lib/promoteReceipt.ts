@@ -46,11 +46,52 @@ export type PromoteWarning = { code: string; text: string }
 export type PromoteCheck = {
   eligible: boolean
   reason?: string
+  /** Date that will be printed as BOTH Date of Invoice and Date of Supply. */
   supplyDate?: string
+  /** The day the sale actually happened, kept visible so the override is seen. */
+  originalSaleDate?: string
+  /** The tax invoice whose date is being carried over, if there is one. */
+  datedFrom?: { serial: string; date: string } | null
   ageDays?: number
   period?: string
   targetEntity?: { id: string; name: string; serial_qqqq: string }
   warnings: PromoteWarning[]
+}
+
+/**
+ * The date a promoted invoice is stamped with — owner rule 2026-08-22.
+ *
+ * Not the day the sale happened and not the day the document is raised, but
+ * the date of the LAST tax invoice this entity issued, so the serial sequence
+ * and the dates advance together with no step backwards. Date of Invoice and
+ * Date of Supply are then set the same.
+ *
+ * Note this states a supply date other than the day the goods or services
+ * changed hands; the true sale timestamp stays on sales.created_at, and
+ * promoted_at records when the document was actually raised, so the real
+ * sequence of events remains recoverable.
+ *
+ * Falls back to the sale's own date when the entity has issued nothing yet.
+ */
+export async function lastTaxInvoiceDate(
+  admin: SupabaseClient,
+  vendorId: string,
+  entityId: string,
+): Promise<{ serial: string; date: string } | null> {
+  const { data } = await admin.from('sales')
+    .select('tax_serial, date_supply, created_at')
+    .eq('vendor_id', vendorId).eq('invoice_entity_id', entityId)
+    .not('tax_serial', 'is', null)
+  if (!data || data.length === 0) return null
+  // "Last" means the highest serial issued, which is the one the next number
+  // follows — not the latest date, which can lag behind it.
+  const sorted = [...data].sort((a: any, b: any) => {
+    const [pa, , na] = String(a.tax_serial).split('_')
+    const [pb, , nb] = String(b.tax_serial).split('_')
+    return (periodRank(pa) - periodRank(pb)) || (parseInt(na, 10) - parseInt(nb, 10))
+  })
+  const last: any = sorted[sorted.length - 1]
+  return { serial: last.tax_serial, date: String(last.date_supply || last.created_at).slice(0, 10) }
 }
 
 /**
@@ -95,10 +136,12 @@ export async function checkPromotable(
     return no('This customer is VAT-registered — they must be given the Pvt Ltd tax invoice at the time of sale, not afterwards')
   }
 
-  const supplyDate = String(sale.date_supply || sale.created_at).slice(0, 10)
+  const originalSaleDate = String(sale.date_supply || sale.created_at).slice(0, 10)
+  // Eligibility is judged on when the sale REALLY happened — the 30-day window
+  // is about the age of the transaction, not the date we are about to stamp.
   const ageDays = Math.floor(
     (new Date(`${today.toISOString().slice(0, 10)}T00:00:00Z`).getTime()
-      - new Date(`${supplyDate}T00:00:00Z`).getTime()) / 86_400_000
+      - new Date(`${originalSaleDate}T00:00:00Z`).getTime()) / 86_400_000
   )
   if (ageDays > PROMOTE_WINDOW_DAYS) {
     return no(`Sold ${ageDays} days ago — past the ${PROMOTE_WINDOW_DAYS}-day window`)
@@ -109,10 +152,24 @@ export async function checkPromotable(
     .eq('invoice_mode', 'lk_tax').eq('branch', fromEntity.branch).maybeSingle()
   if (!target) return no(`No Pvt Ltd entity is set up for the ${fromEntity.branch} branch`)
 
+  // The date carried over from the last tax invoice this entity issued, so the
+  // serials and their dates advance together (owner rule). Everything below —
+  // the serial's period, the warnings — follows from this, not from the day
+  // the sale happened.
+  const datedFrom = await lastTaxInvoiceDate(admin, vendorId, target.id)
+  const supplyDate = datedFrom ? datedFrom.date : originalSaleDate
+
   // ── What promoting will disturb ──
   const warnings: PromoteWarning[] = []
   const period = serialPeriod(supplyDate)
   const nowPeriod = serialPeriod(today)
+
+  if (datedFrom && datedFrom.date !== originalSaleDate) {
+    warnings.push({
+      code: 'date_carried_over',
+      text: `Both dates will read ${datedFrom.date}, carried from ${datedFrom.serial}. The sale actually happened on ${originalSaleDate}, and that stays on the record but is not what the invoice will show.`,
+    })
+  }
 
   if (period !== nowPeriod) {
     warnings.push({
@@ -145,7 +202,7 @@ export async function checkPromotable(
   }
 
   return {
-    eligible: true, supplyDate, ageDays, period,
+    eligible: true, supplyDate, originalSaleDate, datedFrom, ageDays, period,
     targetEntity: { id: target.id, name: target.name, serial_qqqq: target.serial_qqqq },
     warnings,
   }

@@ -185,13 +185,11 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const netAmount    = parseInt(sale.net_amount) || (total - vatAmount)
   const discount     = parseFloat(sale.discount || 0)
   const serial       = escapeHtml(sale.tax_serial || sale.invoice_no || '')
-  // Date of Invoice is the day the DOCUMENT was raised; Date of Supply is the
-  // day the goods or services changed hands. The gazette asks for both
-  // separately precisely because they can differ — a receipt promoted to a tax
-  // invoice days later is exactly that case. Using the sale date for both made
-  // a promoted invoice look as though it had been issued out of sequence:
-  // 00005 dated before 00004, when in truth both were raised the same morning.
-  const invoiceDate  = fmtDate(sale.promoted_at || sale.created_at)
+  // A promoted invoice carries ONE date (owner rule): Date of Invoice and Date
+  // of Supply both read the date stamped at promotion, which is the date of
+  // the previous tax invoice. The real timestamps stay in the database —
+  // created_at for the sale, promoted_at for when the document was raised.
+  const invoiceDate  = fmtDate(sale.promoted_at ? (sale.date_supply || sale.created_at) : sale.created_at)
   const supplyDate   = fmtDate(sale.date_supply || sale.created_at)
   const totalWords   = numberToWords(total) + ' Rupees Only'
 
@@ -4159,8 +4157,12 @@ ${customerRows.map(c => `<tr>
             ) : (
               <>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 text-xs text-slate-600 space-y-1">
-                  <p>Sold <strong>{promoteCheck.supplyDate}</strong> — {promoteCheck.ageDays} day{promoteCheck.ageDays !== 1 ? 's' : ''} ago, inside the {promoteCheck.windowDays}-day window.</p>
+                  <p>Sold <strong>{promoteCheck.originalSaleDate}</strong> — {promoteCheck.ageDays} day{promoteCheck.ageDays !== 1 ? 's' : ''} ago, inside the {promoteCheck.windowDays}-day window.</p>
                   <p>Becomes a <strong>{promoteCheck.targetEntity?.serial_qqqq}</strong> invoice in period <strong>{promoteCheck.period}</strong>.</p>
+                  <p>
+                    Both dates will print as <strong>{promoteCheck.supplyDate}</strong>
+                    {promoteCheck.datedFrom ? <> — carried from {promoteCheck.datedFrom.serial}</> : ' — no earlier tax invoice, so the sale date is used'}.
+                  </p>
                   {/* The customer already paid — VAT comes OUT of that figure,
                       it is not added on top, or their receipt stops matching
                       the cash they handed over. */}
