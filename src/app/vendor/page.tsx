@@ -20,6 +20,7 @@ import TabStockStandard from './_standard/TabStock'
 import TabPOSLkTax from './_lk_tax/TabPOS'
 import TabPOSStandard from './_standard/TabPOS'
 import type { PendingDraft } from './_lk_tax/TabPOS'
+import IncomingTransfers from './_shared/IncomingTransfers'
 import TabCredit from './_shared/TabCredit'
 import ProductThumb from '@/components/ProductThumb'
 import TabCreditNotes from './_lk_tax/TabCreditNotes'
@@ -2201,6 +2202,10 @@ ${customerRows.map(c => `<tr>
 
         {/* OVERVIEW — WHEEL MART uses TabOverview, Sakura keeps inline */}
         {tab === 'overview' && isLkTax && (
+          <>
+          {/* Stock the other shop has sent — answered here, where the shop
+              actually looks, not only inside the Transfer Stock tab. */}
+          <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
           <TabOverview
             vendor={vendor}
             stats={stats}
@@ -2216,9 +2221,11 @@ ${customerRows.map(c => `<tr>
             })}
             showToast={showToast}
           />
+          </>
         )}
         {tab === 'overview' && !isLkTax && (<div>
           <h1 className="text-2xl font-black text-slate-900 mb-6">Dashboard</h1>
+          <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-orange-500">{stats.totalProducts}</p><p className="text-xs text-slate-400 mt-1">Products</p></div>
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-emerald-500">{stats.activeProducts}</p><p className="text-xs text-slate-400 mt-1">Active</p></div>
