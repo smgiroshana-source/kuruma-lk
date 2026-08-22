@@ -61,15 +61,18 @@ export type PromoteCheck = {
 /**
  * The date a promoted invoice is stamped with — owner rule 2026-08-22.
  *
- * Not the day the sale happened and not the day the document is raised, but
- * the date of the LAST tax invoice this entity issued, so the serial sequence
+ * The date of the LAST tax invoice this entity issued, so the serial sequence
  * and the dates advance together with no step backwards. Date of Invoice and
  * Date of Supply are then set the same.
  *
- * Note this states a supply date other than the day the goods or services
- * changed hands; the true sale timestamp stays on sales.created_at, and
- * promoted_at records when the document was actually raised, so the real
- * sequence of events remains recoverable.
+ * The caller never back-dates past the sale itself — it takes the LATER of
+ * this date and the day the sale happened, so an invoice can be carried
+ * forward but can never claim a supply took place earlier than it did.
+ *
+ * Where the date is carried forward it differs from the day the goods changed
+ * hands; the true sale timestamp stays on sales.created_at and promoted_at
+ * records when the document was raised, so the real order of events remains
+ * recoverable.
  *
  * Falls back to the sale's own date when the entity has issued nothing yet.
  */
@@ -157,17 +160,23 @@ export async function checkPromotable(
   // the serial's period, the warnings — follows from this, not from the day
   // the sale happened.
   const datedFrom = await lastTaxInvoiceDate(admin, vendorId, target.id)
-  const supplyDate = datedFrom ? datedFrom.date : originalSaleDate
+  // Carry the previous invoice's date forward, but NEVER backwards past the
+  // day the sale happened (owner exception): an invoice must not claim a
+  // supply took place earlier than it did. Taking the later of the two keeps
+  // the sequence non-decreasing without ever back-dating.
+  const supplyDate = datedFrom && datedFrom.date > originalSaleDate
+    ? datedFrom.date
+    : originalSaleDate
 
   // ── What promoting will disturb ──
   const warnings: PromoteWarning[] = []
   const period = serialPeriod(supplyDate)
   const nowPeriod = serialPeriod(today)
 
-  if (datedFrom && datedFrom.date !== originalSaleDate) {
+  if (supplyDate !== originalSaleDate) {
     warnings.push({
       code: 'date_carried_over',
-      text: `Both dates will read ${datedFrom.date}, carried from ${datedFrom.serial}. The sale actually happened on ${originalSaleDate}, and that stays on the record but is not what the invoice will show.`,
+      text: `Both dates will read ${supplyDate}, carried forward from ${datedFrom!.serial}, so the numbering stays in date order. The sale actually happened on ${originalSaleDate} — that stays on the record but is not what the invoice will show.`,
     })
   }
 

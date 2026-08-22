@@ -4161,7 +4161,9 @@ ${customerRows.map(c => `<tr>
                   <p>Becomes a <strong>{promoteCheck.targetEntity?.serial_qqqq}</strong> invoice in period <strong>{promoteCheck.period}</strong>.</p>
                   <p>
                     Both dates will print as <strong>{promoteCheck.supplyDate}</strong>
-                    {promoteCheck.datedFrom ? <> — carried from {promoteCheck.datedFrom.serial}</> : ' — no earlier tax invoice, so the sale date is used'}.
+                    {promoteCheck.supplyDate === promoteCheck.originalSaleDate
+                      ? ' — the sale\u2019s own date, which is already on or after the last invoice.'
+                      : <> — carried forward from {promoteCheck.datedFrom?.serial}.</>}
                   </p>
                   {/* The customer already paid — VAT comes OUT of that figure,
                       it is not added on top, or their receipt stops matching
