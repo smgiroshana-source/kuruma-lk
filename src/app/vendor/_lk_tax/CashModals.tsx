@@ -359,21 +359,48 @@ export function QuickIncomeModal({
   const [propEntity, setPropEntity] = useState<{ id: string; name: string } | null>(null)
   const [entityLoading, setEntityLoading] = useState(true)
 
+  // "No Proprietorship entity configured" was reported for EVERY failure —
+  // a 401, a dropped connection, anything — because the response was parsed
+  // without checking r.ok and the catch was empty. The entity is configured;
+  // the fetch was failing, and the message sent whoever saw it looking in
+  // Settings for a problem that was not there.
+  const [entityError, setEntityError] = useState<string | null>(null)
   useEffect(() => {
-    fetch('/api/vendor/invoice-entities')
-      .then(r => r.json())
-      .then(j => {
-        // The Proprietorship = the entity that issues receipts, not tax invoices
-        const prop = (j.entities || []).find((e: any) => e.invoice_mode !== 'lk_tax')
-        setPropEntity(prop ? { id: prop.id, name: prop.name } : null)
-      })
-      .catch(() => {})
-      .finally(() => setEntityLoading(false))
+    let cancelled = false
+    ;(async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const r = await fetch('/api/vendor/invoice-entities')
+          const j = await r.json().catch(() => ({}))
+          if (!r.ok) {
+            if (attempt === 0) continue            // one retry for a cold session
+            if (!cancelled) setEntityError(j?.error || `Could not load entities (${r.status})`)
+            break
+          }
+          // The Proprietorship = the entity that issues receipts, not tax invoices
+          const prop = (j.entities || []).find((e: any) => e.invoice_mode !== 'lk_tax')
+          if (!cancelled) {
+            setPropEntity(prop ? { id: prop.id, name: prop.name } : null)
+            setEntityError(prop ? null : 'no-prop-entity')
+          }
+          break
+        } catch (e: any) {
+          if (attempt === 1 && !cancelled) setEntityError('Network error loading entities')
+        }
+      }
+      if (!cancelled) setEntityLoading(false)
+    })()
+    return () => { cancelled = true }
   }, [])
 
   async function save() {
     if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
-    if (!propEntity) { showToast('No Proprietorship entity configured'); return }
+    if (!propEntity) {
+      showToast(entityError && entityError !== 'no-prop-entity'
+        ? `Couldn't load the shop's entities — ${entityError}. Try again.`
+        : 'No Proprietorship entity configured — add one in Settings')
+      return
+    }
     if (method === 'cheque' && !payRef.trim()) { showToast('Enter the cheque number'); return }
     const amt = Math.round(Number(amount))
     setSaving(true)
