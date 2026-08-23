@@ -55,6 +55,18 @@ export async function GET(req: NextRequest) {
   if (scope === 'shop' || scope === 'workshop') empQuery = empQuery.eq('branch', scope)
   const { data: employees } = await empQuery.order('branch').order('name')
 
+  // id_photos holds object paths now; older rows hold full public URLs. Both
+  // reduce to the same path, and both are served as a signed URL that expires.
+  for (const e of (employees || []) as any[]) {
+    if (!Array.isArray(e.id_photos) || e.id_photos.length === 0) continue
+    e.id_photos = await Promise.all(e.id_photos.map(async (v: any) => {
+      if (typeof v !== 'string') return v
+      const path = v.includes('/staff-docs/') ? v.split('/staff-docs/')[1] : v
+      const { data: sg } = await admin.storage.from('staff-docs').createSignedUrl(decodeURI(path), 60 * 60)
+      return sg?.signedUrl || v
+    }))
+  }
+
 
   // Pay items: owner sees all; manager only office-visible ones
   let itemsQuery = admin.from('employee_pay_items').select('*').eq('active', true)
@@ -102,8 +114,12 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient()
 
-  // ── ID copy upload (multipart) → staff-docs bucket, plain public URL
-  //    (SL office practice: ID copies live in an ordinary office file) ──
+  // ── ID copy upload (multipart) → staff-docs bucket ──
+  //
+  // These are NIC scans. The bucket used to be public and the stored value was
+  // a permanent public URL, so 47 staff ID photos were readable — and the
+  // folder listable — by anyone on the internet with no login at all. The
+  // bucket is private now and reads go through short-lived signed URLs.
   const contentType = req.headers.get('content-type') || ''
   if (contentType.includes('multipart/form-data')) {
     if (!isOffice) return NextResponse.json({ error: 'No access' }, { status: 403 })
@@ -116,8 +132,11 @@ export async function POST(req: NextRequest) {
       const buf = Buffer.from(await file.arrayBuffer())
       const { error: upErr } = await admin.storage.from('staff-docs').upload(path, buf, { contentType: file.type || 'image/jpeg', upsert: false })
       if (upErr) return NextResponse.json({ error: 'Upload failed: ' + upErr.message }, { status: 500 })
-      const { data: pub } = admin.storage.from('staff-docs').getPublicUrl(path)
-      return NextResponse.json({ url: pub.publicUrl })
+      // Return a signed URL so the operator sees the upload immediately, and
+      // ALSO the bare path — that is what gets stored, since a signed URL
+      // expires and a public one must never be minted again.
+      const { data: signed } = await admin.storage.from('staff-docs').createSignedUrl(path, 60 * 60)
+      return NextResponse.json({ url: signed?.signedUrl || null, path })
     } catch (e: any) {
       return NextResponse.json({ error: 'Upload failed: ' + (e?.message || 'unknown') }, { status: 500 })
     }
@@ -154,7 +173,11 @@ export async function POST(req: NextRequest) {
     // ID copies are COMPULSORY (owner rule): every employee record must carry
     // at least one NIC/ID photo (plain URLs in the staff-docs bucket)
     const photoPaths = Array.isArray(id_photos)
-      ? id_photos.filter((p: any) => typeof p === 'string' && p.includes('/staff-docs/'))
+      ? id_photos
+          .filter((p: any) => typeof p === 'string' && (p.includes('/staff-docs/') || p.startsWith('staff-ids/')))
+          // Normalise to the bare object path. A signed URL would expire in
+          // storage; a public one is the hole we just closed.
+          .map((p: string) => (p.includes('/staff-docs/') ? decodeURI(p.split('/staff-docs/')[1].split('?')[0]) : p))
       : undefined
     if (!inScope(branch === 'workshop' ? 'workshop' : 'shop')) {
       return NextResponse.json({ error: `Your access covers the ${scope} only` }, { status: 403 })
