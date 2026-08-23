@@ -195,7 +195,9 @@ export async function GET(req: NextRequest) {
       `)
       .eq('to_vendor_id', vendor.id)
       .order('transferred_at', { ascending: false })
-      .limit(200)
+      // A single shipment can be hundreds of lines; 200 silently truncated a
+      // 331-line batch to 200 and made a real shortfall look like a display.
+      .limit(2000)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
     const batches = new Map<string, any>()
@@ -439,10 +441,16 @@ export async function POST(req: NextRequest) {
       ? { status: 'accepted', accepted_at: new Date().toISOString(), accepted_by: userId }
       : { status: 'rejected', rejected_at: new Date().toISOString(), rejected_by: userId, reject_reason: (reason || '').trim() || null }
 
+    // Claim the lines but do NOT mark them accepted yet.
+    //
+    // Marking the whole batch accepted up front and landing them in a loop is
+    // what lost 130 units on 23 Aug: the function timed out part-way, leaving
+    // rows flagged accepted with nothing behind them — off the sender's shelf
+    // and never on ours. Rows now stay PENDING until each one has actually
+    // landed, so a timeout simply leaves the rest to be accepted again.
     const { data: rows, error: claimErr } = await admin.from('stock_transfers')
-      .update(settle)
-      .eq('batch_id', batchId).eq('to_vendor_id', vendor.id).eq('status', 'pending')
       .select('*')
+      .eq('batch_id', batchId).eq('to_vendor_id', vendor.id).eq('status', 'pending')
     if (claimErr) return NextResponse.json({ success: false, error: claimErr.message }, { status: 500 })
     if (!rows || rows.length === 0) {
       return NextResponse.json({
@@ -456,17 +464,17 @@ export async function POST(req: NextRequest) {
 
     for (const row of rows) {
       if (action === 'reject') {
+        // Claim this one line; if another till got there first, skip it.
+        const { data: claimed } = await admin.from('stock_transfers')
+          .update(settle).eq('id', row.id).eq('status', 'pending').select('id')
+        if (!claimed || claimed.length === 0) continue
         await returnToSender(admin, row)
         settled++
         continue
       }
       const landed = await landAtDestination(admin, row)
       if (landed.error) {
-        // Put this line back in transit so it can be retried once the clash is
-        // resolved — the goods are still nobody's until it lands.
-        await admin.from('stock_transfers')
-          .update({ status: 'pending', accepted_at: null, accepted_by: null })
-          .eq('id', row.id)
+        // Still pending — nothing to unwind, the goods never moved.
         errors.push(landed.error)
         continue
       }
@@ -478,13 +486,19 @@ export async function POST(req: NextRequest) {
           p_received_at: new Date().toISOString().slice(0, 10),
         })
       }
-      await admin.from('stock_transfers')
+      // ONE statement marks it accepted AND records where it landed, so those
+      // two facts can never disagree — the split between them is precisely the
+      // gap the 130 lost units fell through. Conditional on still being
+      // pending, so a second till cannot land the same line twice.
+      const { data: claimed } = await admin.from('stock_transfers')
         .update({
+          ...settle,
           to_product_id: landed.productId,
           to_product_name: landed.productName,
           created_dest_product: landed.created,
         })
-        .eq('id', row.id)
+        .eq('id', row.id).eq('status', 'pending').select('id')
+      if (!claimed || claimed.length === 0) continue
       settled++
     }
 
