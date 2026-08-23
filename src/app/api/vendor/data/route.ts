@@ -178,9 +178,15 @@ export async function GET(req: NextRequest) {
 
     let payablesDue = 0, payOverdueCount = 0, payOldestDays = 0
     const { data: payRows } = await admin.from('supplier_invoices')
-      .select('amount, amount_paid, due_date').eq('vendor_id', vendor.id).neq('status', 'paid')
+      .select('invoice_no, amount, amount_paid, credit_total, due_date').eq('vendor_id', vendor.id).neq('status', 'paid')
     for (const inv of (payRows || [])) {
-      payablesDue += (parseInt(inv.amount || 0) - parseInt(inv.amount_paid || 0))
+      payablesDue += (parseInt(inv.amount || 0) - parseInt(inv.amount_paid || 0) - parseInt(inv.credit_total || 0))
+      // Opening balances carry no real due date — they are what was owed when
+      // the system started, dated the day they were entered. Counting them as
+      // overdue turns a one-off migration artefact into a permanent red alert
+      // that never clears and trains everyone to ignore the panel. They still
+      // show as owed in Suppliers & Payables, which is where they belong.
+      if (inv.invoice_no === 'OPENING-BALANCE') continue
       if (inv.due_date && inv.due_date < colToday) {
         payOverdueCount++
         const days = Math.floor((Date.now() - new Date(inv.due_date).getTime()) / 86400000)
