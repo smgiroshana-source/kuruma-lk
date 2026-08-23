@@ -195,7 +195,7 @@ th{padding:7px 8px;text-align:left;font-size:9px;font-weight:700;text-transform:
               <p className="text-xs text-slate-400 mt-1">Credit notes are issued when items are returned against a gazette tax invoice</p>
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50">
