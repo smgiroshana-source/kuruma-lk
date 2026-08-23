@@ -434,6 +434,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     setPosDraftId(pendingDraft.draftId)
     setPosDraftInvoiceNo(pendingDraft.draftInvoiceNo)
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
+    setPosCreditSale(false)
     setPosDiscount(''); setPosNotes(''); setPosPreview(false)
     setPosDate(colomboToday())
     onDraftLoaded?.()
@@ -595,6 +596,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     setPosDiscount(''); setPosNotes(''); setPosErrors({}); setUseAdvance(false)
     setPosPriceMode('incl') // ex-VAT entry is per-job (insurance) — never carry into the next sale
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
+    setPosCreditSale(false)
   }
 
   function addManualLine() {
@@ -633,6 +635,11 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // Any card line puts the WHOLE bill on card prices: one line cannot have two
   // prices, and "part of your bill is priced differently" is not explainable
   // at a counter.
+  // Leaving the amount blank used to complete the sale as credit. That is the
+  // same shape as the attendance default: doing nothing produced a записан
+  // record nobody intended, and here it is money owed that nobody chased.
+  // Credit is now a deliberate press.
+  const [posCreditSale, setPosCreditSale] = useState(false)
   const posCardPricing = posPayments.some((p: any) => p.method === 'card')
   const cardPrice = (base: number) =>
     posCardPricing ? Math.round((Number(base) || 0) * (100 + cardFeePct) / 100) : Math.round(Number(base) || 0)
@@ -1148,15 +1155,20 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(cardPrice(item.unitPrice), posVatRate) : cardPrice(item.unitPrice)) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), posCostBasis(item.cost))  /* base price: the 3.5% is the bank's, not margin */ ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
+                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), posCostBasis(item.cost))  /* base price: the 3.5% is the bank's, not margin */ ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
                             {posEntryExcl && Number(item.unitPrice) > 0 && <p className="text-[9px] font-bold text-amber-700 mt-0.5 leading-none">= Rs.{Number(item.unitPrice).toLocaleString()} with VAT</p>}
+                            {posCardPricing && Number(item.unitPrice) > 0 && (
+                              <p className="text-[9px] font-bold text-purple-700 mt-0.5 leading-none">
+                                card Rs.{cardPrice(item.unitPrice).toLocaleString()}
+                              </p>
+                            )}
                             {Number(item.cost) > 0 && (isBelowCost(posMarginBase(item.unitPrice), item.cost)
                               ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{posCostFloor(item.cost).toLocaleString()} or more{posIsVatEntity ? ` (cost Rs.${Number(item.cost).toLocaleString()} excl VAT)` : ''}</p>
                               : Number(item.unitPrice) > 0
                                 ? <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), posCostBasis(item.cost))}%{posIsVatEntity ? ' net' : ''}</p>
                                 : <p className="text-[9px] text-slate-400 mt-0.5 leading-none">min Rs.{posCostFloor(item.cost).toLocaleString()}</p>)}
                           </td>
-                          <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * item.unitPrice).toLocaleString()}</td>
+                          <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * cardPrice(item.unitPrice)).toLocaleString()}</td>
                           <td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td>
                         </tr>
                       ))}
@@ -1242,7 +1254,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                   {posLoading ? '…' : '📦 Send on Approval'}
                 </button>
               )}
-              <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">
+              <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0 || (posBalance > 0 && !posCreditSale)} title={posBalance > 0 && !posCreditSale ? 'Enter the amount collected, or mark it as credit' : ''} className="hidden lg:block w-full bg-green-500 hover:bg-green-600 text-white font-black text-lg py-4 rounded-xl disabled:opacity-50">
                 {posLoading ? 'Saving…' : posDraftId ? '✅ Complete Invoice' : posBalance > 0 ? '💳 Complete (Credit: Rs.' + posBalance.toLocaleString() + ')' : posOverpayment > 0 && posCustomer.outstanding > 0 ? '💰 Complete & Settle Outstanding' : posOverpayment > 0 ? '💰 Complete (+Rs.' + posOverpayment.toLocaleString() + ' advance)' : '💰 Complete Sale'}
               </button>
             </div>
@@ -1338,6 +1350,22 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                       {posPayments.length > 1 && <button onClick={() => setPosPayments(posPayments.filter((_, x) => x !== i))} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>}
                     </div>
                   ))}
+                  {/* Right under the amount, where the operator is already
+                      looking when they realise nothing was collected. */}
+                  {posTotal > 0 && posBalance > 0 && (
+                    <button
+                      onClick={() => setPosCreditSale(v => !v)}
+                      className={`w-full mt-2 py-2.5 rounded-xl text-xs font-black border-2 transition-colors ${
+                        posCreditSale
+                          ? 'bg-red-500 border-red-500 text-white'
+                          : 'bg-white border-red-200 text-red-600 hover:bg-red-50'
+                      }`}
+                    >
+                      {posCreditSale
+                        ? `✓ On credit — Rs.${posBalance.toLocaleString()} to collect later`
+                        : `🧾 Nothing collected? Mark as credit (Rs.${posBalance.toLocaleString()})`}
+                    </button>
+                  )}
                   <div className="flex gap-3">
                     <button onClick={() => setPosPayments([...posPayments, { method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])} className="text-xs font-bold text-blue-600">+ Add Payment Method</button>
                     {posTotal - posPaidAmount > 0 && <button onClick={() => { const u = [...posPayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(posTotal - posPaidAmount) }; setPosPayments(u) }} className="text-xs font-bold text-orange-600">Fill remaining (Rs.{(posTotal - posPaidAmount).toLocaleString()})</button>}
@@ -1364,7 +1392,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                   {posLoading ? '…' : '📦 Approval'}
                 </button>
               )}
-              <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0} className="flex-[2] bg-green-500 active:bg-green-600 text-white font-black text-sm py-4 disabled:opacity-40">
+              <button onClick={handleCreateSale} disabled={posLoading || posCart.length === 0 || (posBalance > 0 && !posCreditSale)} title={posBalance > 0 && !posCreditSale ? 'Enter the amount collected, or mark it as credit' : ''} className="flex-[2] bg-green-500 active:bg-green-600 text-white font-black text-sm py-4 disabled:opacity-40">
                 {posLoading ? '…' : posDraftId ? '✅ Complete Invoice' : posBalance > 0 ? '💳 Complete (Credit Rs.' + posBalance.toLocaleString() + ')' : '💰 Complete Sale'}
               </button>
             </div>
