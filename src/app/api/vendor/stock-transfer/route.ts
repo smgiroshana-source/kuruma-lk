@@ -226,7 +226,8 @@ export async function GET(req: NextRequest) {
     const all = [...batches.values()]
     return NextResponse.json({
       pending: all.filter(b => b.status === 'pending'),
-      recent:  all.filter(b => b.status !== 'pending').slice(0, 20),
+      // 20 was enough for a notification panel; this is a history view now.
+      recent:  all.filter(b => b.status !== 'pending').slice(0, 50),
       pendingCount: all.filter(b => b.status === 'pending').length,
     })
   }

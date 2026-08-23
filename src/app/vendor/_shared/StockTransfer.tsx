@@ -231,6 +231,11 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
 
   // History
   const [historyOpen, setHistoryOpen] = useState(false)
+  // Which direction the history panel is showing. Sent and received are two
+  // different questions — "where did my stock go" vs "what did they send me".
+  const [historyDir, setHistoryDir] = useState<'out' | 'in'>('out')
+  const [incomingHistory, setIncomingHistory] = useState<any[]>([])
+  const [incomingLoading, setIncomingLoading] = useState(false)
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [reversingBatch, setReversingBatch] = useState<string | null>(null)
@@ -287,10 +292,32 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
     setReversingBatch(null)
   }
 
+  async function fetchIncomingHistory() {
+    setIncomingLoading(true)
+    try {
+      const r = await fetch('/api/vendor/stock-transfer?action=incoming')
+      if (r.ok) {
+        const j = await r.json()
+        // Everything they have sent us — still waiting, accepted or sent back.
+        setIncomingHistory([...(j.pending || []), ...(j.recent || [])])
+      }
+    } catch {}
+    setIncomingLoading(false)
+  }
+
   function handleHistoryToggle() {
     const next = !historyOpen
     setHistoryOpen(next)
-    if (next && history.length === 0) fetchHistory()
+    if (next) {
+      if (historyDir === 'out' && history.length === 0) fetchHistory()
+      if (historyDir === 'in' && incomingHistory.length === 0) fetchIncomingHistory()
+    }
+  }
+
+  function switchHistoryDir(dir: 'out' | 'in') {
+    setHistoryDir(dir)
+    if (dir === 'out' && history.length === 0) fetchHistory()
+    if (dir === 'in' && incomingHistory.length === 0) fetchIncomingHistory()
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -917,7 +944,7 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
           onClick={handleHistoryToggle}
           className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-50 rounded-xl transition-colors"
         >
-          <span className="font-semibold text-slate-700 text-sm">Transfer History (outgoing)</span>
+          <span className="font-semibold text-slate-700 text-sm">Transfer History</span>
           <svg
             className={`w-5 h-5 text-slate-400 transition-transform ${historyOpen ? 'rotate-180' : ''}`}
             viewBox="0 0 20 20"
@@ -929,7 +956,57 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
 
         {historyOpen && (
           <div className="border-t border-slate-100 p-5">
-            {historyLoading ? (
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden text-xs font-bold mb-4 w-fit">
+              {([['out', 'Sent to others'], ['in', 'Received from others']] as const).map(([d, label]) => (
+                <button key={d} onClick={() => switchHistoryDir(d)}
+                  className={`px-4 py-2 transition-colors ${historyDir === d ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-600 hover:bg-indigo-50'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {historyDir === 'in' ? (
+              incomingLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500 py-4"><Spinner sm /> Loading…</div>
+              ) : incomingHistory.length === 0 ? (
+                <p className="text-sm text-slate-400 italic py-2">Nothing has been sent to you yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {incomingHistory.map(b => (
+                    <div key={b.key} className="border border-slate-200 rounded-lg p-3">
+                      <div className="flex items-baseline justify-between gap-2 flex-wrap mb-1.5">
+                        <p className="text-sm font-bold text-slate-800">
+                          From {b.fromVendor}
+                          <span className="font-normal text-slate-400"> · {b.totalUnits} unit{b.totalUnits !== 1 ? 's' : ''}</span>
+                        </p>
+                        <span className={'text-[11px] font-bold ' + (
+                          b.status === 'pending' ? 'text-amber-600'
+                            : b.status === 'accepted' ? 'text-emerald-600'
+                            : b.status === 'reversed' ? 'text-slate-400' : 'text-red-600')}>
+                          {b.status === 'pending' ? '⏳ Waiting for you'
+                            : b.status === 'accepted' ? '✓ Accepted'
+                            : b.status === 'reversed' ? '⊘ Reversed by sender'
+                            : '↩ You sent it back'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mb-2">
+                        Sent {new Date(b.sentAt).toLocaleDateString('en-GB', { timeZone: 'Asia/Colombo' })}
+                        {b.settledAt ? ` · answered ${new Date(b.settledAt).toLocaleDateString('en-GB', { timeZone: 'Asia/Colombo' })}` : ''}
+                        {b.rejectReason ? ` · ${b.rejectReason}` : ''}
+                      </p>
+                      <div className="space-y-0.5">
+                        {b.items.map((it: any) => (
+                          <div key={it.id} className="flex justify-between text-xs text-slate-600">
+                            <span>{it.name}{it.sku ? <span className="text-slate-300 font-mono"> · {it.sku}</span> : null}</span>
+                            <span className="font-semibold">×{it.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : historyLoading ? (
               <div className="flex items-center gap-2 text-sm text-slate-500 py-4">
                 <Spinner sm /> Loading history…
               </div>
