@@ -81,6 +81,17 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
+// What a phone is actually used for, standing in the shop or at home.
+// One tap each — burying these in the drawer is what made them hard to find.
+// POS is deliberately absent: it needs a printer, a drawer and careful money
+// entry, and it mints gazette serials.
+const MOBILE_BAR: Array<{ id: string; icon: string; label: string }> = [
+  { id: 'overview',  icon: '🏠', label: 'Home' },
+  { id: 'products',  icon: '🔍', label: 'Look up' },
+  { id: 'stocktake', icon: '📦', label: 'Count' },
+  { id: 'sales',     icon: '📋', label: 'Sales' },
+]
+
 const BOTTOM_ITEMS: NavItem[] = [
   { id: 'settings',  icon: '⚙️',  label: 'Settings' },
   { id: '_signout',  icon: '🚪',  label: 'Log Out' },
@@ -142,17 +153,6 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
     <>
       {/* Phone: a hamburger instead of a permanent 220px column. Fixed so it
           stays reachable however far the page has scrolled. */}
-      {narrow && !drawerOpen && (
-        <button
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open menu"
-          className="fixed top-3 left-3 z-50 w-11 h-11 rounded-xl flex items-center justify-center shadow-lg"
-          style={{ background: '#0f172a' }}
-        >
-          <span className="text-orange-400 text-xl leading-none">☰</span>
-        </button>
-      )}
-
       {/* Tapping away closes it — the usual expectation for a drawer. */}
       {narrow && drawerOpen && (
         <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setDrawerOpen(false)} />
@@ -310,6 +310,31 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
         })}
       </div>
     </aside>
+
+    {/* Phone: the four floor jobs always one tap away, plus More for the rest.
+        Fixed to the bottom because that is where a thumb rests. */}
+    {narrow && (
+      <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-slate-700/60"
+        style={{ background: '#0f172a' }}>
+        {MOBILE_BAR.filter(m => canSee({ id: m.id as NavItem['id'], icon: m.icon, label: m.label })).map(m => {
+          const isActive = tab === m.id
+          return (
+            <button key={m.id} onClick={() => onTabChange(m.id as LkTaxTab)}
+              className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] ${
+                isActive ? 'text-orange-400' : 'text-slate-400'
+              }`}>
+              <span className="text-lg leading-none">{m.icon}</span>
+              <span className="text-[10px] font-bold">{m.label}</span>
+            </button>
+          )
+        })}
+        <button onClick={() => setDrawerOpen(true)}
+          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[56px] text-slate-400">
+          <span className="text-lg leading-none">☰</span>
+          <span className="text-[10px] font-bold">More</span>
+        </button>
+      </nav>
+    )}
     </>
   )
 }

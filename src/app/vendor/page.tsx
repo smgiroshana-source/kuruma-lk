@@ -652,6 +652,17 @@ export default function VendorDashboard() {
   const [taxConfigSaving, setTaxConfigSaving] = useState(false)
 
   // Void sale modal
+  // Phones get Sales read-only. The list and Print are useful on the floor;
+  // Void, Return and Make Tax Invoice all write consequential records and a
+  // mis-tap on a 375px row is not worth the convenience.
+  const [isNarrow, setIsNarrow] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const apply = () => setIsNarrow(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
   const [promoteSale, setPromoteSale] = useState<any>(null)
   const [promoteCheck, setPromoteCheck] = useState<any>(null)
   const [promoting, setPromoting] = useState(false)
@@ -2351,7 +2362,7 @@ ${customerRows.map(c => `<tr>
         </div></div>
       )}
 
-      <main className={isLkTax ? 'px-3 sm:px-6 py-6 md:ml-[220px]' : 'max-w-7xl mx-auto px-4 py-6'}>
+      <main className={isLkTax ? 'px-3 sm:px-6 py-6 pb-24 md:pb-6 md:ml-[220px]' : 'max-w-7xl mx-auto px-4 py-6'}>
 
         {/* OVERVIEW — WHEEL MART uses TabOverview, Sakura keeps inline */}
         {tab === 'overview' && isLkTax && (
@@ -3704,17 +3715,17 @@ ${customerRows.map(c => `<tr>
                                           {(sale.customer_phone || sale.customer?.phone) && <button onClick={() => { sendWhatsAppBill(sale, salesData.vendor, sale.customer_phone || sale.customer?.phone); document.getElementById('print-menu-' + sale.id)?.classList.add('hidden') }} className="w-full text-left px-3 py-2.5 text-xs font-semibold text-green-600 hover:bg-green-50">💬 WhatsApp</button>}
                                         </div>
                                       </div>
-                                      {sale.payment_status !== 'voided' && <button onClick={e => { e.stopPropagation(); setReturnModal(sale); setReturnItems({}) }} className="text-[11px] font-semibold text-amber-600 px-3 py-1.5 rounded border border-amber-200 active:bg-amber-50">↩ Return</button>}
-                                      {sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && !isLkTax && (
+                                      {!isNarrow && sale.payment_status !== 'voided' && <button onClick={e => { e.stopPropagation(); setReturnModal(sale); setReturnItems({}) }} className="text-[11px] font-semibold text-amber-600 px-3 py-1.5 rounded border border-amber-200 active:bg-amber-50">↩ Return</button>}
+                                      {!isNarrow && sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && !isLkTax && (
                                         <button onClick={e => { e.stopPropagation(); setVoidModal({ saleId: sale.id, total: parseFloat(sale.total || 0), paid: parseFloat(sale.paid_amount || 0), customerName: sale.customer?.name || sale.customer_name || 'Walk-in' }) }} className="text-[11px] font-semibold text-red-600 px-3 py-1.5 rounded border border-red-200 active:bg-red-50">🚫 Void</button>
                                       )}
-                                      {isLkTax && mayReverse && sale.promoted_at && sale.tax_serial && sale.payment_status !== 'voided' && (
+                                      {!isNarrow && isLkTax && mayReverse && sale.promoted_at && sale.tax_serial && sale.payment_status !== 'voided' && (
                                         <button onClick={e => { e.stopPropagation(); openReverse(sale) }}
                                           className="text-[11px] font-semibold text-amber-700 px-3 py-1.5 rounded border border-amber-300 active:bg-amber-50">
                                           ↩ Withdraw Tax Invoice
                                         </button>
                                       )}
-                                      {isLkTax && !sale.tax_serial && sale.receipt_no && sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && (
+                                      {!isNarrow && isLkTax && !sale.tax_serial && sale.receipt_no && sale.payment_status !== 'voided' && sale.payment_status !== 'draft' && (
                                         <button onClick={e => { e.stopPropagation(); openPromote(sale) }}
                                           className="text-[11px] font-semibold text-indigo-600 px-3 py-1.5 rounded border border-indigo-200 active:bg-indigo-50">
                                           ⬆ Make Tax Invoice
