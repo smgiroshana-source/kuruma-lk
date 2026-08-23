@@ -2390,12 +2390,12 @@ ${customerRows.map(c => `<tr>
         {tab === 'overview' && !isLkTax && (<div>
           <h1 className="text-2xl font-black text-slate-900 mb-6">Dashboard</h1>
           <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+          <div className="grid grid-cols-3 gap-4 mb-8">
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-orange-500">{stats.totalProducts}</p><p className="text-xs text-slate-400 mt-1">Products</p></div>
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-emerald-500">{stats.activeProducts}</p><p className="text-xs text-slate-400 mt-1">Active</p></div>
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-blue-500">{stats.totalStock}</p><p className="text-xs text-slate-400 mt-1">Stock</p></div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-purple-500">Rs.{stats.stockValue.toLocaleString()}</p><p className="text-xs text-slate-400 mt-1">Stock Value</p></div>
-            <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-green-600">Rs.{stats.totalSales.toLocaleString()}</p><p className="text-xs text-slate-400 mt-1">Sales</p></div>
+            
+            
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl border border-slate-200 p-5"><h3 className="font-bold text-slate-900 mb-3">Quick Actions</h3><div className="space-y-2">
