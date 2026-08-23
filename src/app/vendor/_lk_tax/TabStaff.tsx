@@ -56,6 +56,33 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
 
   // Employee editor
   const [editing, setEditing] = useState<any>(null) // null | {employee fields + pay_items + id_photos}
+  // Scheduled salary rises — "From 2027 Apr salary 60,000" off the salary sheet
+  const [raises, setRaises] = useState<any[]>([])
+  const [raiseFor, setRaiseFor] = useState<any>(null)
+  const [raiseForm, setRaiseForm] = useState({ effectiveMonth: '', newAmount: '', note: '' })
+  const [raiseBusy, setRaiseBusy] = useState(false)
+
+  async function fetchRaises() {
+    if (!isOwner) return
+    try {
+      const r = await fetch('/api/vendor/salary-increments')
+      if (r.ok) setRaises((await r.json()).increments || [])
+    } catch {}
+  }
+  useEffect(() => { fetchRaises() }, [isOwner])
+
+  async function postRaise(payload: any, ok: string) {
+    setRaiseBusy(true)
+    try {
+      const r = await fetch('/api/vendor/salary-increments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      })
+      const j = await r.json()
+      if (j.ok) { tt('✅ ' + (j.message || ok)); setRaiseFor(null); fetchRaises(); load() }
+      else tt('⚠️ ' + (j.error || 'Failed'))
+    } catch { tt('Network error') }
+    setRaiseBusy(false)
+  }
   const [saving, setSaving] = useState(false)
   const [uploadingId, setUploadingId] = useState(false)
 
@@ -279,6 +306,39 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
                   <button onClick={() => setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })), _origItemCount: (e.pay_items || []).length, id_photos: Array.isArray((e as any).id_photos) ? [...(e as any).id_photos] : [] })}
                     className="text-xs font-bold text-orange-500 hover:text-orange-600">Edit</button>
                 </div>
+                {isOwner && (() => {
+                  const mine = raises.filter(r => r.employee_id === e.id && r.status === 'scheduled')
+                  const today = colomboToday()
+                  return (
+                    <div className="mt-2 pt-2 border-t border-slate-100">
+                      {mine.map(r => {
+                        const due = r.effective_from <= today
+                        const when = new Date(r.effective_from + 'T00:00:00+05:30')
+                          .toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+                        return (
+                          <div key={r.id} className={`flex items-center gap-2 flex-wrap text-[11px] mb-1 px-2 py-1.5 rounded-lg border ${
+                            due ? 'bg-amber-50 border-amber-300' : 'bg-slate-50 border-slate-200'}`}>
+                            <span className="font-bold text-slate-700">
+                              {due ? '⏰ Due now' : '📅 From ' + when} · {r.item_label} → Rs.{Number(r.new_amount).toLocaleString()}
+                            </span>
+                            {r.note && <span className="text-slate-400">{r.note}</span>}
+                            <span className="flex-1" />
+                            {due && (
+                              <button disabled={raiseBusy}
+                                onClick={() => postRaise({ action: 'apply', incrementId: r.id }, 'Applied')}
+                                className="font-black text-emerald-700 hover:text-emerald-800">Apply</button>
+                            )}
+                            <button disabled={raiseBusy}
+                              onClick={() => { if (confirm('Cancel this scheduled increase?')) postRaise({ action: 'cancel', incrementId: r.id }, 'Cancelled') }}
+                              className="text-slate-400 hover:text-red-600">Cancel</button>
+                          </div>
+                        )
+                      })}
+                      <button onClick={() => { setRaiseFor(e); setRaiseForm({ effectiveMonth: '', newAmount: '', note: '' }) }}
+                        className="text-[11px] font-bold text-orange-600 hover:text-orange-700">+ Schedule salary increase</button>
+                    </div>
+                  )
+                })()}
                 {(e.pay_items || []).length > 0 && (
                   <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
                     {e.pay_items.map((i, idx) => (
@@ -292,6 +352,47 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
             ))}
           </div>
         </>
+      )}
+
+      {raiseFor && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => setRaiseFor(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-black text-slate-900">Schedule a salary increase</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-4">
+              {raiseFor.name} · currently Rs.
+              {Number((raiseFor.pay_items || []).find((i: PayItem) => i.kind === 'base')?.amount || 0).toLocaleString()}
+            </p>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Starts from *</label>
+            <input type="month" value={raiseForm.effectiveMonth} autoFocus
+              onChange={e => setRaiseForm(f => ({ ...f, effectiveMonth: e.target.value }))}
+              className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 mb-3" />
+            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">New salary (Rs.) *</label>
+            <input type="number" value={raiseForm.newAmount}
+              onChange={e => setRaiseForm(f => ({ ...f, newAmount: e.target.value }))}
+              placeholder="60000"
+              className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 mb-3" />
+            <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Note</label>
+            <input value={raiseForm.note}
+              onChange={e => setRaiseForm(f => ({ ...f, note: e.target.value }))}
+              placeholder="e.g. annual review"
+              className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+            {/* Applied on a click, not on a date — a figure that changes itself
+                is one nobody checks, and the first sign of an error is an
+                underpaid payslip. */}
+            <p className="text-[10px] text-slate-400 mt-2">
+              You&apos;ll be reminded on the dashboard when the month arrives. Nothing changes until you apply it.
+            </p>
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setRaiseFor(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
+              <button disabled={raiseBusy || !raiseForm.effectiveMonth || !(Number(raiseForm.newAmount) > 0)}
+                onClick={() => postRaise({ action: 'schedule', employeeId: raiseFor.id, ...raiseForm }, 'Scheduled')}
+                className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-sm py-2.5 rounded-xl">
+                {raiseBusy ? 'Saving…' : 'Schedule'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── ATTENDANCE ── */}

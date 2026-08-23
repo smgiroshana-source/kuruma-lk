@@ -31,6 +31,8 @@ type Dashboard = {
   creditOldestName?: string
   payables: { due: number; overdueCount: number; oldestDays: number }
   grnDrafts: number
+  salaryRaisesDue?: number
+  salaryRaiseName?: string
   recentActivity: { time: string; customer: string; amount: number; method: string }[]
 }
 
@@ -306,6 +308,15 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         text: `${lowStock.length} product${lowStock.length !== 1 ? 's' : ''} below minimum stock` +
               (lowStockWorst ? ` (${lowStockWorst.name}: ${lowStockWorst.quantity} left)` : ''),
         cta: 'Reorder', tab: 'stocktake',
+      })
+    }
+    if ((d.salaryRaisesDue || 0) > 0) {
+      attention.push({
+        icon: '💰', tone: 'amber',
+        text: d.salaryRaisesDue === 1
+          ? `${d.salaryRaiseName}'s salary increase is due — not applied yet`
+          : `${d.salaryRaisesDue} salary increases are due — not applied yet`,
+        cta: 'Apply', tab: 'staff',
       })
     }
     if (d.grnDrafts > 0) {

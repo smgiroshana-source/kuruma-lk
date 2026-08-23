@@ -194,6 +194,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Salary rises whose month has arrived. The whole point of scheduling one
+    // is that nobody remembers it a year later.
+    const { data: dueRaises } = await admin.from('salary_increments')
+      .select('effective_from, new_amount, employee:employees(name)')
+      .eq('vendor_id', vendor.id).eq('status', 'scheduled').lte('effective_from', colToday)
+      .order('effective_from')
+    const salaryRaisesDue = (dueRaises || []).length
+    const salaryRaiseName = ((dueRaises || [])[0] as any)?.employee?.name || ''
+
     const { count: grnDrafts } = await admin.from('grns')
       .select('id', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'draft')
 
@@ -204,6 +213,7 @@ export async function GET(req: NextRequest) {
       attendance: { marked: attMarked, total: empIds.length },
       creditOwed, creditCustomers, creditOldestDays, creditOldestName,
       payables: { due: payablesDue, overdueCount: payOverdueCount, oldestDays: payOldestDays },
+      salaryRaisesDue, salaryRaiseName,
       grnDrafts: grnDrafts || 0,
       recentActivity,
     }
