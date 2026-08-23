@@ -50,10 +50,6 @@ export default function IncomingTransfers({
   const [answering, setAnswering] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState<IncomingBatch | null>(null)
   const [rejectReason, setRejectReason] = useState('')
-  // Where the receiver is putting it. Optional — blank leaves the product
-  // unshelved, which is honest; what must never happen is inheriting the
-  // sender's rack.
-  const [putAway, setPutAway] = useState({ loc_store: '', loc_floor: '', loc_sub1: '', loc_sub2: '' })
 
   const fetchIncoming = useCallback(async () => {
     try {
@@ -74,7 +70,6 @@ export default function IncomingTransfers({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: accept ? 'accept' : 'reject', batchId: batch.batchId, reason,
-          ...(accept && Object.values(putAway).some(v => v.trim()) ? { location: putAway } : {}),
         }),
       })
       const j = await r.json()
@@ -126,20 +121,6 @@ export default function IncomingTransfers({
                 </div>
               ))}
             </div>
-
-            {/* Asked before accepting, because that is the moment someone is
-                standing at the rack with the box. */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-              {([['loc_store', 'Store'], ['loc_floor', 'Floor'], ['loc_sub1', 'Rack'], ['loc_sub2', 'Shelf']] as const).map(([k, label]) => (
-                <input key={k} value={(putAway as any)[k]}
-                  onChange={e => setPutAway(p => ({ ...p, [k]: e.target.value }))}
-                  placeholder={label}
-                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:border-emerald-400" />
-              ))}
-            </div>
-            <p className="text-[10px] text-slate-400 mb-2">
-              Where you&apos;re putting it (optional) — leave blank to shelve later. The sender&apos;s location is never copied.
-            </p>
 
             <div className="flex items-center gap-3">
               <button
