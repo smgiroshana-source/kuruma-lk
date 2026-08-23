@@ -53,6 +53,7 @@ async function getLinkedVendors(admin: ReturnType<typeof createAdminClient>, sou
 async function landAtDestination(
   admin: ReturnType<typeof createAdminClient>,
   row: any,
+  location?: { loc_store?: string; loc_floor?: string; loc_sub1?: string; loc_sub2?: string },
 ): Promise<
   | { productId: string; productName: string; created: boolean; error?: undefined }
   | { error: string; productId?: undefined; productName?: undefined; created?: undefined }
@@ -77,7 +78,17 @@ async function landAtDestination(
     return { productId: destExisting.id as string, productName: row.from_product_name as string, created: false }
   }
 
-  const { images, ...fields } = snap
+  // Strip what belongs to the SENDER's shop, not to the goods.
+  //
+  // A shelf address is about where a thing physically sits — copying it means
+  // the receiver's product claims to live on the sender's rack, which is worse
+  // than blank because it reads as true. Same for the stocktake date: the
+  // receiver has never counted these, so carrying the sender's confirmation
+  // would assert a count that never happened.
+  //
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { images, loc_store: _ls, loc_floor: _lf, loc_sub1: _l1, loc_sub2: _l2,
+          last_stock_confirmed_at: _lsc, ...fields } = snap
   // Real slug at creation (nothing "regenerates" null slugs later — that
   // assumption published UUID-only URLs). slug-sku on collision, like the
   // products create path.
@@ -87,6 +98,13 @@ async function landAtDestination(
 
   const { data: created, error: createErr } = await admin.from('products').insert({
     ...fields,
+    // Where the RECEIVER is putting it, if they said. Blank otherwise, which
+    // correctly reads as "not shelved yet".
+    loc_store: location?.loc_store || null,
+    loc_floor: location?.loc_floor || null,
+    loc_sub1:  location?.loc_sub1  || null,
+    loc_sub2:  location?.loc_sub2  || null,
+    last_stock_confirmed_at: null,
     vendor_id: toVendorId,
     quantity:  qty,
     cost:      row.transfer_cost  ?? fields.cost,
@@ -442,7 +460,10 @@ export async function POST(req: NextRequest) {
   // Only the RECEIVING shop may answer, and only owner/manager: accepting
   // creates products in their catalogue and changes their stock.
   if (action === 'accept' || action === 'reject') {
-    const { batchId, reason } = body as { batchId: string; reason?: string }
+    const { batchId, reason, location } = body as {
+      batchId: string; reason?: string
+      location?: { loc_store?: string; loc_floor?: string; loc_sub1?: string; loc_sub2?: string }
+    }
     if (!batchId) return NextResponse.json({ success: false, error: 'batchId required' }, { status: 400 })
     if (!(await callerMayTransfer(admin, vendor, userId))) {
       return NextResponse.json({
@@ -489,7 +510,7 @@ export async function POST(req: NextRequest) {
         settled++
         continue
       }
-      const landed = await landAtDestination(admin, row)
+      const landed = await landAtDestination(admin, row, location)
       if (landed.error) {
         // Still pending — nothing to unwind, the goods never moved.
         errors.push(landed.error)
