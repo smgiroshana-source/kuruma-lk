@@ -618,9 +618,30 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   function updatePaymentLine(i: number, field: string, value: string) { setPosPayments(p => p.map((line, x) => x === i ? { ...line, [field]: value } : line)) }
   function removePaymentLine(i: number) { setPosPayments(p => p.filter((_, x) => x !== i)) }
 
+  const [cardFeePct, setCardFeePct] = useState(3.5)
+  useEffect(() => {
+    fetch('/api/vendor/tax-config').then(r => r.json())
+      .then(j => { if (j.config?.card_fee_pct != null) setCardFeePct(parseFloat(j.config.card_fee_pct)) })
+      .catch(() => {})
+  }, [])
+  // ── Card pricing ───────────────────────────────────────────────────────
+  // A card sale is priced higher, it does not carry a fee. The uplift is
+  // DERIVED from the payment lines and applied at display/submit time; the
+  // cart keeps the base price, so switching card → cash reverts exactly and
+  // switching back cannot compound.
+  //
+  // Any card line puts the WHOLE bill on card prices: one line cannot have two
+  // prices, and "part of your bill is priced differently" is not explainable
+  // at a counter.
+  const posCardPricing = posPayments.some((p: any) => p.method === 'card')
+  const cardPrice = (base: number) =>
+    posCardPricing ? Math.round((Number(base) || 0) * (100 + cardFeePct) / 100) : Math.round(Number(base) || 0)
+
   // ── Computed totals ────────────────────────────────────────────────────
   const { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment } = useMemo(() => {
-    const posSubtotal = posCart.reduce((s, i) => s + i.quantity * i.unitPrice, 0)
+    // Sum the prices actually shown, so a customer adding up the printed
+    // lines reaches the same total.
+    const posSubtotal = posCart.reduce((s, i) => s + i.quantity * cardPrice(i.unitPrice), 0)
     const posDiscountAmt = Math.min(posSubtotal, Math.max(0, Math.round(parseFloat(posDiscount) || 0)))
     const posTotal = Math.max(0, posSubtotal - posDiscountAmt)
     const posPaidAmount = posPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
@@ -629,30 +650,14 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     const posBalance = Math.max(0, posTotal - posTotalPaid)
     const posOverpayment = Math.max(0, posTotalPaid - posTotal)
     return { posSubtotal, posDiscountAmt, posTotal, posPaidAmount, posAdvanceApplied, posTotalPaid, posBalance, posOverpayment }
-  }, [posCart, posDiscount, posPayments, useAdvance, posCustomer])
+  }, [posCart, posDiscount, posPayments, useAdvance, posCustomer, posCardPricing, cardFeePct])
 
   const posVatRate = Number(vendorSettings?.vat_rate) || 18
   // The bank's card-machine fee. When the shop passes it to the customer it
   // must be a LINE on the invoice (revenue, VAT applies, SVC stream) — extra
   // money on the card machine that isn't invoiced would never reconcile with
   // the bank settlement, and the VAT return would understate.
-  const [cardFeePct, setCardFeePct] = useState(3.5)
-  useEffect(() => {
-    fetch('/api/vendor/tax-config').then(r => r.json())
-      .then(j => { if (j.config?.card_fee_pct != null) setCardFeePct(parseFloat(j.config.card_fee_pct)) })
-      .catch(() => {})
-  }, [])
-  const hasCardFeeLine = posCart.some(i => !i.productId && String(i.productName).startsWith('Card fee'))
-  function addCardFeeLine() {
-    if (hasCardFeeLine) { showToast('Card fee is already on the bill'); return }
-    const fee = Math.round(posTotal * cardFeePct / 100)
-    if (fee <= 0) { showToast('Nothing on the bill yet'); return }
-    setPosCart(prev => [...prev, {
-      productId: null, productName: `Card fee (${cardFeePct}%)`, productSku: '',
-      unitPrice: fee, quantity: 1, maxStock: null, ssclStream: 'SVC',
-    }])
-    showToast(`Card fee Rs.${fee.toLocaleString()} added to the bill`)
-  }
+
   const posVatAmount = posIsVatEntity ? Math.round(posTotal * posVatRate / (100 + posVatRate)) : 0
   const posNetAmount = posIsVatEntity ? posTotal - posVatAmount : posTotal
   // Entered prices are VAT-inclusive. For the VAT entity the shop only keeps the
@@ -792,7 +797,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
             customerId: posCustomer.id || null,
             useAdvance,
             // productId/Name/Sku let the API insert rows for items added during finalize
-            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: i.unitPrice, quantity: i.quantity, productId: i.productId || null, productName: i.productName, productSku: i.productSku || null, ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC') })),
+            items: posCart.map(i => ({ id: i.saleItemId, unitPrice: cardPrice(i.unitPrice), quantity: i.quantity, productId: i.productId || null, productName: i.productName, productSku: i.productSku || null, ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC') })),
             payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
             discount: posDiscountAmt,
             vehicleNo: posVehicleNo || null,
@@ -1082,7 +1087,22 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                 )}
               </div>
 
-              {/* Cart */}
+              {/* Card pricing is the one thing on this screen the customer will
+          question, so say it plainly rather than letting the numbers change
+          silently under the operator. */}
+      {posCardPricing && posCart.length > 0 && (
+        <div className="bg-purple-50 border-2 border-purple-300 rounded-xl px-4 py-2.5 mb-3 flex items-center gap-3 flex-wrap">
+          <span className="text-lg leading-none">💳</span>
+          <span className="text-sm font-black text-purple-900">
+            Card prices — every line +{cardFeePct}%
+          </span>
+          <span className="text-xs text-purple-700">
+            Charge <strong>Rs.{posTotal.toLocaleString()}</strong> on the machine. Switch the payment to Cash and the prices drop back.
+          </span>
+        </div>
+      )}
+
+      {/* Cart */}
               {posCart.length === 0 ? (
                 <div className="bg-white rounded-xl border border-slate-200 p-8 text-center"><p className="text-3xl opacity-30">🛒</p><p className="text-slate-400 font-semibold">Add products above</p></div>
               ) : (
@@ -1128,7 +1148,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), posCostBasis(item.cost)) ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
+                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(cardPrice(item.unitPrice), posVatRate) : cardPrice(item.unitPrice)) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), posCostBasis(item.cost))  /* base price: the 3.5% is the bank's, not margin */ ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
                             {posEntryExcl && Number(item.unitPrice) > 0 && <p className="text-[9px] font-bold text-amber-700 mt-0.5 leading-none">= Rs.{Number(item.unitPrice).toLocaleString()} with VAT</p>}
                             {Number(item.cost) > 0 && (isBelowCost(posMarginBase(item.unitPrice), item.cost)
                               ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{posCostFloor(item.cost).toLocaleString()} or more{posIsVatEntity ? ` (cost Rs.${Number(item.cost).toLocaleString()} excl VAT)` : ''}</p>
@@ -1315,13 +1335,6 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                         <input type="date" value={line.chequeDate} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], chequeDate: e.target.value }; setPosPayments(u) }} className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
                       </>)}
                       {line.method === 'bank' && <input type="text" value={line.bankRef} onChange={e => { const u = [...posPayments]; u[i] = { ...u[i], bankRef: e.target.value }; setPosPayments(u) }} className="w-28 px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" placeholder="Ref #" />}
-                      {line.method === 'card' && !hasCardFeeLine && (
-                        <button onClick={addCardFeeLine}
-                          title="Only when the customer pays the machine fee — it becomes a line on the invoice"
-                          className="text-[10px] font-bold px-2 py-1.5 rounded-lg border-2 border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 whitespace-nowrap">
-                          + fee {cardFeePct}%
-                        </button>
-                      )}
                       {posPayments.length > 1 && <button onClick={() => setPosPayments(posPayments.filter((_, x) => x !== i))} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>}
                     </div>
                   ))}
