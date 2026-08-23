@@ -977,7 +977,11 @@ export function AttendanceModal({
         const m: Record<string, string> = {}
         for (const e of emps) {
           const existing = (j.attendance || []).find((a: any) => a.employee_id === e.id)
-          m[e.id] = existing?.status || 'present'
+          // Deliberately NOT defaulting to present. Pre-filling every row
+          // means closing the dialog untouched records a full house — the
+          // absentees included — and attendance prorates payroll. Marking
+          // someone present has to be an act, not the absence of one.
+          if (existing?.status) m[e.id] = existing.status
         }
         setMarks(m)
       })
@@ -992,12 +996,14 @@ export function AttendanceModal({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'mark_attendance', date: todayStr(),
-          marks: people.map(p => ({ employee_id: p.id, status: marks[p.id] || 'present' })),
+          marks: people.map(p => ({ employee_id: p.id, status: marks[p.id] })),
         }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error ?? 'Failed to save')
-      showToast(`✅ Attendance saved — ${people.length}/${people.length} marked`)
+      // Report what the server actually stored, not what was on screen — the
+      // API drops anything unmarked, so the two can differ.
+      showToast(`✅ Attendance saved — ${j.saved ?? people.length} of ${people.length} marked`)
       onSaved(people.length, people.length)
     } catch (e: any) { showToast('⚠️ ' + e.message) }
     setSaving(false)
@@ -1012,8 +1018,25 @@ export function AttendanceModal({
   return (
     <Modal title="Today's attendance" onClose={onClose}>
       <p className="text-xs text-slate-500 -mt-2 mb-4">
-        Everyone starts as Present — tap only the exceptions. You can reopen and correct this any time today.
+        Mark everyone, or tap All present and change the exceptions. You can reopen and correct this any time today.
       </p>
+
+      {!loading && people.length > 0 && (() => {
+        const unmarked = people.filter(p => !marks[p.id]).length
+        return (
+          <div className="flex items-center gap-2 flex-wrap mb-3">
+            <button
+              onClick={() => setMarks(Object.fromEntries(people.map(p => [p.id, marks[p.id] || 'present'])))}
+              className="text-xs font-bold text-emerald-700 border border-emerald-300 bg-emerald-50 px-3 py-1.5 rounded-lg hover:bg-emerald-100"
+            >
+              ✓ All present
+            </button>
+            <span className={`text-xs font-bold ${unmarked > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+              {unmarked > 0 ? `${unmarked} not marked yet` : `All ${people.length} marked`}
+            </span>
+          </div>
+        )
+      })()}
       {loading ? <Spinner /> : people.length === 0 ? (
         <p className="text-sm text-slate-400 py-6 text-center">No active staff registered.</p>
       ) : (
@@ -1041,7 +1064,9 @@ export function AttendanceModal({
       )}
       <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || loading || people.length === 0}
+        <button onClick={save}
+          disabled={saving || loading || people.length === 0 || people.some(p => !marks[p.id])}
+          title={people.some(p => !marks[p.id]) ? 'Mark everyone first' : ''}
           className="px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-black disabled:opacity-40">
           {saving ? 'Saving…' : 'Save attendance'}
         </button>
