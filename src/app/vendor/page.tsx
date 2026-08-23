@@ -2324,7 +2324,7 @@ ${customerRows.map(c => `<tr>
 
       {/* ── Top header bar ───────────────────────────────────────────────────── */}
       {isLkTax ? (
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 transition-all" style={{marginLeft:'220px'}}>
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-30 transition-all md:ml-[220px] pl-16 md:pl-0">
           <div className="px-6 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm">
               <span className="font-black text-orange-500 text-sm">WHEEL MART</span>
@@ -2351,7 +2351,7 @@ ${customerRows.map(c => `<tr>
         </div></div>
       )}
 
-      <main className={isLkTax ? 'px-6 py-6' : 'max-w-7xl mx-auto px-4 py-6'} style={isLkTax ? {marginLeft:'220px'} : {}}>
+      <main className={isLkTax ? 'px-3 sm:px-6 py-6 md:ml-[220px]' : 'max-w-7xl mx-auto px-4 py-6'}>
 
         {/* OVERVIEW — WHEEL MART uses TabOverview, Sakura keeps inline */}
         {tab === 'overview' && isLkTax && (

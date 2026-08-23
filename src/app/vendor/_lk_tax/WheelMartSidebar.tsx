@@ -1,6 +1,6 @@
 'use client'
 // ── WHEEL MART ONLY — never import this from _standard/ ──────────────────────
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 // 'customers' is a navigation alias: page.tsx maps it to the Sales tab's
 // Customers sub-view (there is no standalone customers tab).
@@ -99,12 +99,26 @@ type Props = {
 
 export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRole, canFileTax, onSignOut }: Props) {
   const [collapsed, setCollapsed] = useState(false)
-  const w = collapsed ? 56 : 220
+  // Below 768px the sidebar stops being furniture and becomes a drawer. Fixed
+  // at 220px it ate 60% of a 375px phone before any content rendered, which is
+  // what made every screen unusable rather than merely cramped.
+  const [narrow, setNarrow] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const apply = () => { setNarrow(mq.matches); if (!mq.matches) setDrawerOpen(false) }
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+  const w = narrow ? 264 : collapsed ? 56 : 220
 
   function handleItem(item: NavItem) {
     if (item.comingSoon || item.id === '_coming') return
     if (item.id === '_signout') { onSignOut(); return }
     onTabChange(item.id as LkTaxTab)
+    // On a phone the drawer covers the content it just navigated to.
+    if (narrow) setDrawerOpen(false)
   }
 
   const roleLabel = staffRole === 'owner' ? 'Owner' : staffRole === 'manager' ? 'Manager' : staffRole === 'cashier' ? 'Cashier' : staffRole
@@ -125,8 +139,29 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
   }
 
   return (
+    <>
+      {/* Phone: a hamburger instead of a permanent 220px column. Fixed so it
+          stays reachable however far the page has scrolled. */}
+      {narrow && !drawerOpen && (
+        <button
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Open menu"
+          className="fixed top-3 left-3 z-50 w-11 h-11 rounded-xl flex items-center justify-center shadow-lg"
+          style={{ background: '#0f172a' }}
+        >
+          <span className="text-orange-400 text-xl leading-none">☰</span>
+        </button>
+      )}
+
+      {/* Tapping away closes it — the usual expectation for a drawer. */}
+      {narrow && drawerOpen && (
+        <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setDrawerOpen(false)} />
+      )}
+
     <aside
-      className="fixed top-0 left-0 h-screen flex flex-col z-40 overflow-y-auto overflow-x-hidden transition-all duration-200"
+      className={`fixed top-0 left-0 h-screen flex flex-col z-50 overflow-y-auto overflow-x-hidden transition-transform duration-200 ${
+        narrow ? (drawerOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full') : 'translate-x-0'
+      }`}
       style={{ width: w, background: '#0f172a' }}
     >
       {/* Shop header */}
@@ -269,11 +304,12 @@ export default function WheelMartSidebar({ tab, onTabChange, vendorName, staffRo
               style={isActive ? { background: '#1e293b' } : {}}
             >
               <span className="text-sm shrink-0">{item.icon}</span>
-              {!collapsed && <span className="text-[13px]">{item.label}</span>}
+              {(!collapsed || narrow) && <span className="text-[13px]">{item.label}</span>}
             </button>
           )
         })}
       </div>
     </aside>
+    </>
   )
 }
