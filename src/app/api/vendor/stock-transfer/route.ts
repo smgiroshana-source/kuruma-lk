@@ -5,6 +5,11 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { generateProductSlug } from '@/lib/slug'
 
+// A shipment is processed line by line, so a container-sized batch needs more
+// than the platform default. Each line is written as it goes, so overrunning
+// this is survivable — it just leaves the rest unsent.
+export const maxDuration = 60
+
 /**
  * Transfers are restricted to linked shops — vendors owned by the source shop's
  * owner, or that the calling user owns / is active staff of. Without this, ANY
@@ -327,6 +332,18 @@ export async function POST(req: NextRequest) {
     const { data: sourceProducts } = await admin.from('products').select('*').eq('vendor_id', vendor.id).in('id', productIds)
     const sourceMap = new Map((sourceProducts || []).map((p: any) => [p.id, p]))
 
+    // Photos for every line in ONE query. Fetching them per item put a third
+    // round trip inside the loop, which is a third of the time budget on a
+    // shipment of any size.
+    const imagesByProduct = new Map<string, any[]>()
+    for (let i = 0; i < productIds.length; i += 100) {
+      const { data: imgs } = await admin.from('product_images')
+        .select('product_id, url, sort_order').in('product_id', productIds.slice(i, i + 100)).order('sort_order')
+      for (const img of (imgs || []) as any[]) {
+        imagesByProduct.set(img.product_id, [...(imagesByProduct.get(img.product_id) || []), img])
+      }
+    }
+
     // One send is one physical box; the receiver accepts the box, not each
     // line in it.
     const batchId = crypto.randomUUID()
@@ -371,10 +388,9 @@ export async function POST(req: NextRequest) {
       // removed.
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { id: _id, vendor_id: _vid, created_at: _ca, updated_at: _ua, slug: _sl, ...snapshot } = src
-      const { data: srcImages } = await admin.from('product_images')
-        .select('url, sort_order').eq('product_id', src.id).order('sort_order')
+      const srcImages = imagesByProduct.get(src.id) || []
 
-      transferRecords.push({
+      const record = ({
         from_vendor_id:    vendor.id,
         from_product_id:   src.id,
         from_product_sku:  src.sku,
@@ -390,25 +406,24 @@ export async function POST(req: NextRequest) {
         status:            'pending',
         batch_id:          batchId,
         moved_unit_cost:   movedUnitCost,
-        product_snapshot:  { ...snapshot, images: srcImages || [] },
+        product_snapshot:  { ...snapshot, images: srcImages },
       })
+
+      // Written NOW, not after the loop. Stock has just left this shelf, and
+      // the row is the only record of where it went — a timeout between the
+      // two loses the goods. This is the same fault that stranded 130 units on
+      // the receiving side; a partial shipment is recoverable, vanished stock
+      // is not.
+      const { error: rowErr } = await admin.from('stock_transfers').insert(record)
+      if (rowErr) {
+        await returnToSender(admin, record)
+        errors.push(`${src.name}: could not be recorded, so it was not sent — ${rowErr.message}`)
+        continue
+      }
+      transferRecords.push(record)
     }
 
-    if (transferRecords.length > 0) {
-      const { error: historyError } = await admin.from('stock_transfers').insert(transferRecords)
-      if (historyError) {
-        // This row IS the transfer now — the stock has left the shelf and the
-        // only record of where it went is this insert. Losing it would
-        // vaporise the goods, so put everything back rather than report a
-        // "saved history" warning over missing stock.
-        for (const r of transferRecords) await returnToSender(admin, r)
-        return NextResponse.json({
-          success: false,
-          error: 'Nothing was sent — the transfer could not be recorded: ' + historyError.message,
-        }, { status: 500 })
-      }
-      revalidatePath('/')
-    }
+    if (transferRecords.length > 0) revalidatePath('/')
 
     if (errors.length > 0 && transferRecords.length === 0)
       return NextResponse.json({ success: false, error: errors.join('; ') }, { status: 400 })
@@ -417,7 +432,9 @@ export async function POST(req: NextRequest) {
       success: true,
       transferred: transferRecords.length,
       errors: errors.length > 0 ? errors : undefined,
-      message: `${transferRecords.length} product${transferRecords.length !== 1 ? 's' : ''} sent to ${destVendor.name} — waiting for them to accept`,
+      message: errors.length > 0
+        ? `${transferRecords.length} of ${aggregated.size} sent to ${destVendor.name} — the rest were NOT touched, send them again`
+        : `${transferRecords.length} product${transferRecords.length !== 1 ? 's' : ''} sent to ${destVendor.name} — waiting for them to accept`,
     })
   }
 
