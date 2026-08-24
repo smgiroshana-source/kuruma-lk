@@ -27,6 +27,20 @@ export async function middleware(request: NextRequest) {
   return response
 }
 
+// Only the surfaces that actually use a server-side session. The storefront
+// (/, /product, /tyres, /[make]) is ISR-cached anonymous HTML — running this
+// function in front of it billed Active CPU on every cache hit (7,754 product
+// URLs × crawlers = the Hobby overage of Aug 2026) and added a Supabase
+// auth round trip to every signed-in page view. Storefront auth is
+// client-side (AuthProvider); server-side cookie reads exist only in /api.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: [
+    '/api/:path*',
+    '/vendor/:path*',
+    '/admin/:path*',
+    '/login',
+    '/register',
+    '/forgot-password',
+    '/reset-password',
+  ],
 }
