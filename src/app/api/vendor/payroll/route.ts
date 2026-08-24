@@ -98,14 +98,13 @@ function proposeLine(emp: any, items: any[], att: any[], advances: any[]) {
       continue
     }
 
-    // Monthly cash amount, prorated by attendance. With no attendance marked
-    // at all, pay the full month — missing data is not an absence.
-    const factor = marked > 0 ? payableDays / marked : 1
-    components.push({
-      ...base, qty: 1, rate,
-      amount: r0(rate * factor),
-      proratedFrom: marked > 0 && payableDays < marked ? { payableDays, marked } : null,
-    })
+    // Monthly salary is a FIXED amount (owner, 2026-08-24): attendance is
+    // information for the owner, never an automatic deduction. Holidays stay
+    // unmarked, normal leave is paid, and marking someone absent changes the
+    // day counts shown — not the money. When leave has gone too far, the
+    // owner types the cut into the "Leave / other deduction" line (net pay
+    // only) or edits the base directly (which also lowers percentage EPF).
+    components.push({ ...base, qty: 1, rate, amount: r0(rate) })
   }
 
   // EPF on a percentage takes the base salary as computed above
@@ -113,6 +112,15 @@ function proposeLine(emp: any, items: any[], att: any[], advances: any[]) {
   for (const c of components) {
     if (c.kind === 'epf' && c.unit === 'percent') { c.amount = r0(baseEarned * c.rate / 100); c.needsInput = false }
     else if (c.kind === 'epf') c.amount = r0(c.rate)
+  }
+
+  // Standing manual deduction — zero unless the owner types one in. This is
+  // the ONLY road from attendance to money, and a person drives it.
+  if (items.length > 0) {
+    components.push({
+      kind: 'other', label: 'Leave / other deduction', unit: 'cash', period: 'monthly',
+      qty: 1, rate: 0, amount: 0, isDeduction: true,
+    })
   }
 
   const gross = components.filter(c => !c.isDeduction).reduce((s, c) => s + c.amount, 0)
@@ -198,6 +206,12 @@ export async function POST(req: NextRequest) {
   if (action === 'save_draft') {
     const { period, lines, note } = body
     if (!/^\d{4}-\d{2}$/.test(String(period || ''))) return NextResponse.json({ error: 'period must be YYYY-MM' }, { status: 400 })
+    // The system pays from the 25 Aug – 24 Sep 2026 cycle onwards (owner,
+    // 2026-08-24): earlier cycles were paid outside it, and a run saved here
+    // by mistake would double-pay the month and hit the cash book.
+    if (period < '2026-09') {
+      return NextResponse.json({ error: 'Payroll here starts with the 25 Aug – 24 Sep 2026 cycle — earlier salaries were paid outside the system' }, { status: 400 })
+    }
     if (!Array.isArray(lines) || lines.length === 0) return NextResponse.json({ error: 'Nothing to save' }, { status: 400 })
 
     const { data: existing } = await admin.from('payroll_runs')

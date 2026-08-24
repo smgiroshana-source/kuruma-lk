@@ -38,7 +38,10 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
     const [y, m] = today.slice(0, 7).split('-').map(Number)
     const day = Number(today.slice(8, 10))
     const d = day >= 25 ? new Date(y, m - 1, 1) : new Date(y, m - 2, 1)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const p = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    // Payroll in the system starts with the 25 Aug – 24 Sep 2026 cycle —
+    // never default to a cycle the API refuses to save.
+    return p < '2026-09' ? '2026-09' : p
   })
   const [lines, setLines] = useState<Line[]>([])
   const [run, setRun] = useState<any>(null)
