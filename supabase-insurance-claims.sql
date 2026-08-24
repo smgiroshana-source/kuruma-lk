@@ -19,7 +19,7 @@ create table if not exists public.insurance_claims (
   id                   uuid primary key default gen_random_uuid(),
   vendor_id            uuid not null references public.vendors(id) on delete cascade,
   insurer_customer_id  uuid not null references public.customers(id),
-  claim_no             text not null,
+  claim_no             text,  -- often unknown until the insurer''s paperwork arrives
   vehicle_no           text,
   workshop_job_ref     text,
   status               text not null default 'open'
@@ -38,6 +38,9 @@ create index if not exists idx_claims_status
   on public.insurance_claims (vendor_id, status);
 
 -- Both of the claim's OWN invoices point at it (PART sale and REPR sale).
+-- Already ran an earlier version? This makes the number optional there too.
+alter table public.insurance_claims alter column claim_no drop not null;
+
 alter table public.sales add column if not exists claim_id uuid
   references public.insurance_claims(id) on delete set null;
 create index if not exists idx_sales_claim on public.sales (claim_id)
