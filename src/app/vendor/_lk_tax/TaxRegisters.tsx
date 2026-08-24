@@ -19,7 +19,7 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
   // Centre. These registers are the evidence trail, read-only by design.
   onGoToFiling?: () => void
 }) {
-  const [taxReportType, setTaxReportType] = useState<'vat_register' | 'sscl_report' | 'input_vat' | 'vat_summary'>('vat_register')
+  const [taxReportType, setTaxReportType] = useState<'vat_register' | 'sscl_report' | 'input_vat' | 'vat_summary' | 'shortfall_aging'>('vat_register')
   const [taxReportFrom, setTaxReportFrom] = useState(() => colomboToday().slice(0, 7) + '-01')
   const [taxReportTo, setTaxReportTo] = useState(() => colomboToday())
   const [taxReportData, setTaxReportData] = useState<any>(null)
@@ -45,6 +45,7 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
       input_vat:    `Input VAT Register — ${taxReportFrom} to ${taxReportTo}`,
       vat_summary:  `VAT Summary — ${taxReportFrom} to ${taxReportTo}`,
       sscl_report:  `SSCL Liability Report — ${taxReportFrom} to ${taxReportTo}`,
+      shortfall_aging: `Insurance Shortfall Aging — as at ${taxReportTo}`,
     }
     const title = titleMap[taxReportType] || 'Tax Report'
     const entityName = taxReportData.entity || ''
@@ -182,6 +183,7 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
               <option value="input_vat">Input VAT Register</option>
               <option value="vat_summary">VAT Summary (Net Payable)</option>
               <option value="sscl_report">SSCL Liability Report</option>
+              <option value="shortfall_aging">Insurance Shortfall Aging</option>
             </select>
           </div>
           <div>
@@ -210,6 +212,52 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
           ))}
         </div>
       </div>
+
+      {/* ── Insurance shortfall aging ── */}
+      {taxReportData && taxReportType === 'shortfall_aging' && (() => {
+        const rows = taxReportData.rows || []
+        const byClass = taxReportData.byClass || {}
+        const CLS_COLOR: Record<string, string> = {
+          UNCLASSIFIED: 'bg-red-100 text-red-700', CR: 'bg-sky-100 text-sky-700',
+          WD: 'bg-amber-100 text-amber-800', DISC: 'bg-purple-100 text-purple-700',
+          DEBT: 'bg-slate-200 text-slate-700', RECOVER: 'bg-sky-100 text-sky-700', ABSORB: 'bg-slate-200 text-slate-600',
+        }
+        return (
+          <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="flex gap-2 flex-wrap mb-3">
+              {Object.entries(byClass).map(([k, v]: any) => (
+                <span key={k} className={`text-[11px] font-black px-2.5 py-1.5 rounded-lg ${CLS_COLOR[k] || 'bg-slate-100 text-slate-600'}`}>
+                  {k}: {v.count} · Rs.{Math.round(v.amount).toLocaleString()}
+                </span>
+              ))}
+              {rows.length === 0 && <span className="text-sm text-slate-400">No shortfalls recorded.</span>}
+            </div>
+            {rows.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-[10px] font-black text-slate-400 uppercase border-b border-slate-200">
+                    <th className="py-2 pr-2">Document</th><th className="pr-2">Claim</th><th className="pr-2">Class</th>
+                    <th className="pr-2">Status</th><th className="pr-2 text-right">Amount</th><th className="pr-2 text-right">Age</th><th>Bucket</th>
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((r: any) => (
+                      <tr key={r.id} className={`border-b border-slate-50 ${r.suggestWriteOff ? 'bg-red-50' : ''}`}>
+                        <td className="py-1.5 pr-2 font-mono font-bold">{r.doc}</td>
+                        <td className="pr-2 font-mono text-slate-500">{r.claimNo || r.vehicle || '—'}</td>
+                        <td className="pr-2"><span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${CLS_COLOR[r.classification || 'UNCLASSIFIED']}`}>{r.classification || 'UNCLASSIFIED'}</span></td>
+                        <td className="pr-2 text-slate-500">{r.status}{r.suggestWriteOff && <span className="ml-1 text-[9px] font-black text-red-600">→ consider write-off (&gt;6mo)</span>}</td>
+                        <td className="pr-2 text-right font-bold">Rs.{Math.round(r.amount).toLocaleString()}</td>
+                        <td className="pr-2 text-right">{r.ageDays}d</td>
+                        <td className="text-slate-400">{r.bucket}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── VAT Output Register results ── */}
       {taxReportData && taxReportType === 'vat_register' && (() => {

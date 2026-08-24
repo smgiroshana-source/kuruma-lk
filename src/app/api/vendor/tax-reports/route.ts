@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { resolveBranch } from '@/lib/branchScope'
+import { loadRateHistory, rateAsOf } from '@/lib/taxRates'
 
 // Month bucket in the Colombo calendar — slicing the raw UTC timestamp bins
 // late-night (pre-05:30) transactions into the previous month.
@@ -82,6 +83,37 @@ export async function GET(req: NextRequest) {
   const fromTs = new Date(`${from}T00:00:00.000+05:30`).toISOString()
   const toTs   = new Date(`${to}T23:59:59.999+05:30`).toISOString()
 
+  // Bad-debt events on insurance claims: a DEBT shortfall written off gives
+  // VAT relief (and SSCL exclusion) in the period of the WRITE-OFF; a later
+  // recovery adds both back in the period of the RECOVERY. The VAT share of
+  // the written-off amount uses the original invoice's own ratio.
+  async function badDebtEvents() {
+    const { data: sfRows } = await admin.from('claim_shortfalls')
+      .select('id, amount, written_off_at, recovered_at, status, sale_id, sale:sales!claim_shortfalls_sale_id_fkey(id, tax_serial, customer_name, customer_tin, net_amount, vat_amount, invoice_entity_id)')
+      .eq('vendor_id', vendor.id)
+      .not('sale_id', 'is', null)
+      .in('status', ['written_off', 'recovered'])
+    const events: any[] = []
+    for (const sf of (sfRows || [])) {
+      const sale: any = sf.sale
+      if (!sale || !entityIds.includes(sale.invoice_entity_id)) continue
+      const net = Number(sale.net_amount || 0), vat = Number(sale.vat_amount || 0)
+      const vatShare = net + vat > 0 ? Math.round(Number(sf.amount) * vat / (net + vat)) : 0
+      const base = {
+        shortfallId: sf.id, saleId: sale.id, serial: sale.tax_serial,
+        customerName: sale.customer_name, customerTin: sale.customer_tin || null,
+        amount: Number(sf.amount), vatShare, netShare: Number(sf.amount) - vatShare,
+      }
+      if (sf.written_off_at && sf.written_off_at >= fromTs && sf.written_off_at <= toTs) {
+        events.push({ ...base, kind: 'relief', at: sf.written_off_at })
+      }
+      if (sf.status === 'recovered' && sf.recovered_at && sf.recovered_at >= fromTs && sf.recovered_at <= toTs) {
+        events.push({ ...base, kind: 'addback', at: sf.recovered_at })
+      }
+    }
+    return events
+  }
+
   // ── VAT Output Register ─────────────────────────────────────────────────────
   if (type === 'vat_register') {
     // ── Tax invoices ── (paginated — a wide period can exceed 1000 invoices,
@@ -151,8 +183,24 @@ export async function GET(req: NextRequest) {
       originalVoided: voidedOriginals.has(cn.original_sale_id),
     }))
 
+    // Bad-debt relief (write-offs) and add-backs (recoveries) of the period
+    const bdEvents = await badDebtEvents()
+    const bdRows = bdEvents.map((e: any) => ({
+      rowType:      'bad_debt' as const,
+      serial:       e.kind === 'relief' ? 'BAD DEBT' : 'RECOVERY',
+      invoiceDate:  e.at,
+      supplyDate:   null,
+      customerName: e.customerName,
+      customerTin:  e.customerTin,
+      netAmount:    e.kind === 'relief' ? -e.netShare : e.netShare,
+      vatAmount:    e.kind === 'relief' ? -e.vatShare : e.vatShare,
+      total:        e.kind === 'relief' ? -e.amount : e.amount,
+      status:       e.kind === 'relief' ? 'BAD DEBT' : 'RECOVERED',
+      refSerial:    e.serial,
+    }))
+
     // Merge and sort by date
-    const register = [...invoiceRows, ...cnRows].sort((a, b) =>
+    const register = [...invoiceRows, ...cnRows, ...bdRows].sort((a, b) =>
       new Date(a.invoiceDate).getTime() - new Date(b.invoiceDate).getTime()
     )
 
@@ -168,25 +216,21 @@ export async function GET(req: NextRequest) {
       voidCount:  invoiceRows.length - validInvoices.length,
       crnCount:   cnRows.length,
       crnExcludedCount: cnRows.length - countedCns.length,
+      badDebtRelief:   bdRows.filter(r => r.status === 'BAD DEBT').reduce((t, r) => t - r.vatAmount, 0),
+      badDebtAddback:  bdRows.filter(r => r.status === 'RECOVERED').reduce((t, r) => t + r.vatAmount, 0),
     }
+    totals.netAmount += bdRows.reduce((t, r) => t + r.netAmount, 0)
+    totals.vatAmount += bdRows.reduce((t, r) => t + r.vatAmount, 0)
+    totals.total     += bdRows.reduce((t, r) => t + r.total, 0)
 
     return NextResponse.json({ register, totals, entity: lkTaxEntities[0].name, filing_valid: !branch, branch })
   }
 
   // ── SSCL Liability Report ───────────────────────────────────────────────────
   if (type === 'sscl_report') {
-    // Fetch tax config rates
-    const { data: configRows } = await admin
-      .from('tax_config')
-      .select('key, value')
-      .eq('vendor_id', vendor.id)
-
-    const config: Record<string, number> = {}
-    for (const c of (configRows || [])) config[c.key] = parseFloat(c.value)
-
-    const ssclRate       = (config['sscl_rate']        ?? 2.5)  / 100
-    const liableBasePart = (config['liable_base_part'] ?? 50)   / 100
-    const liableBaseSvc  = (config['liable_base_svc']  ?? 100)  / 100
+    // Effective-dated rates: each month uses the rate in force THAT month, so
+    // a rate change never rewrites an already-filed quarter.
+    const rateHist = await loadRateHistory(admin, vendor.id)
 
     // Get non-voided sales in range for lk_tax entities (paginated — turnover
     // would be understated if the period exceeds 1000 sales / line items)
@@ -249,8 +293,37 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Build report rows
+    // Bad debt: a write-off EXCLUDES the shortfall's turnover in its period; a
+    // recovery ADDS IT BACK in its own. Split per stream by the original
+    // sale's line proportions so each side lands on the right liable base.
+    const ssclBd = await badDebtEvents()
+    if (ssclBd.length > 0) {
+      const bdSaleIds = [...new Set(ssclBd.map((e: any) => e.saleId))]
+      const { data: bdItems } = await admin.from('sale_items')
+        .select('sale_id, sscl_stream, total').in('sale_id', bdSaleIds)
+      const shares: Record<string, { PART: number; SVC: number }> = {}
+      for (const it of (bdItems || [])) {
+        if (!shares[it.sale_id]) shares[it.sale_id] = { PART: 0, SVC: 0 }
+        shares[it.sale_id][(it.sscl_stream || 'PART') as 'PART' | 'SVC'] += parseFloat(it.total || 0)
+      }
+      for (const e of ssclBd) {
+        const sh = shares[e.saleId] || { PART: 1, SVC: 0 }
+        const tot = sh.PART + sh.SVC || 1
+        const partShare = Math.round(e.amount * sh.PART / tot)
+        const svcShare = e.amount - partShare
+        const monthKey = colomboMonth(e.at)
+        if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
+        const sign = e.kind === 'relief' ? -1 : 1
+        monthMap[monthKey].PART += sign * partShare
+        monthMap[monthKey].SVC += sign * svcShare
+      }
+    }
+
+    // Build report rows — rates as of each month
     const months = Object.keys(monthMap).sort().map(month => {
+      const ssclRate       = rateAsOf(rateHist, 'sscl_rate', month, 2.5) / 100
+      const liableBasePart = rateAsOf(rateHist, 'liable_base_part', month, 50) / 100
+      const liableBaseSvc  = rateAsOf(rateHist, 'liable_base_svc', month, 100) / 100
       const partTurnover = Math.round(monthMap[month].PART)
       const svcTurnover  = Math.round(monthMap[month].SVC)
       const partLiable   = Math.round(partTurnover * liableBasePart)
@@ -282,7 +355,13 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       months, totals,
-      config: { ssclRate: ssclRate * 100, liableBasePart: liableBasePart * 100, liableBaseSvc: liableBaseSvc * 100 },
+      // Rates shown are those in force at the period end (per-month rates are
+      // already applied inside each row).
+      config: {
+        ssclRate: rateAsOf(rateHist, 'sscl_rate', to.slice(0, 7), 2.5),
+        liableBasePart: rateAsOf(rateHist, 'liable_base_part', to.slice(0, 7), 50),
+        liableBaseSvc: rateAsOf(rateHist, 'liable_base_svc', to.slice(0, 7), 100),
+      },
       entity: lkTaxEntities[0].name,
       filing_valid: !branch, branch,
     })
@@ -475,7 +554,11 @@ export async function GET(req: NextRequest) {
     const countedCns    = (creditNotes || []).filter((c: any) => !summaryVoided.has(c.original_sale_id))
     const outputVatNet  = validInvoices.reduce((s: number, r: any) => s + parseInt(r.vat_amount || 0), 0)
     const outputVatCrn  = countedCns.reduce((s: number, r: any) => s + parseInt(r.vat_amount || 0), 0)
-    const outputVat     = outputVatNet - outputVatCrn
+    // Bad-debt relief cuts output VAT in its period; recovery restores it
+    const sumBd = await badDebtEvents()
+    const badDebtReliefVat  = sumBd.filter((e: any) => e.kind === 'relief').reduce((t: number, e: any) => t + e.vatShare, 0)
+    const badDebtAddbackVat = sumBd.filter((e: any) => e.kind === 'addback').reduce((t: number, e: any) => t + e.vatShare, 0)
+    const outputVat     = outputVatNet - outputVatCrn - badDebtReliefVat + badDebtAddbackVat
 
     const outputNetSales = validInvoices.reduce((s: number, r: any) => s + parseInt(r.net_amount || 0), 0)
                          - countedCns.reduce((s: number, r: any) => s + parseInt(r.net_amount || 0), 0)
@@ -548,12 +631,48 @@ export async function GET(req: NextRequest) {
       availableCarryForward,
       legacyCount,
       netPayable,
+      badDebtReliefVat, badDebtAddbackVat,
       invoiceCount: validInvoices.length,
       crnCount:     (creditNotes || []).length,
       period:       { from, to },
       entity:       lkTaxEntities[0].name,
       filing_valid: !branch, branch,
     })
+  }
+
+  // ── Aged shortfalls by classification ─────────────────────────────────────
+  if (type === 'shortfall_aging') {
+    const { data: sfRows } = await admin.from('claim_shortfalls')
+      .select('id, amount, classification, status, reason_code, approved_by, created_at, written_off_at, sale:sales!claim_shortfalls_sale_id_fkey(tax_serial, invoice_no, customer_name), bill:claim_third_party_bills!claim_shortfalls_bill_id_fkey(supplier_name, bill_ref), claim:insurance_claims(claim_no, vehicle_no)')
+      .eq('vendor_id', vendor.id)
+      .order('created_at')
+    const now = Date.now()
+    const rows = (sfRows || []).map((sf: any) => {
+      const ageDays = Math.floor((now - new Date(sf.created_at).getTime()) / 86400000)
+      return {
+        id: sf.id,
+        doc: sf.sale ? (sf.sale.tax_serial || sf.sale.invoice_no) : sf.bill ? sf.bill.supplier_name + (sf.bill.bill_ref ? ' · ' + sf.bill.bill_ref : '') : '—',
+        customer: sf.sale?.customer_name || null,
+        claimNo: sf.claim?.claim_no || null,
+        vehicle: sf.claim?.vehicle_no || null,
+        amount: Number(sf.amount),
+        classification: sf.classification,
+        status: sf.status,
+        reasonCode: sf.reason_code,
+        approvedBy: sf.approved_by,
+        ageDays,
+        bucket: ageDays <= 30 ? '0-30' : ageDays <= 90 ? '31-90' : ageDays <= 180 ? '91-180' : '180+',
+        // DEBT older than 6 months: the system suggests the owner write it off
+        suggestWriteOff: sf.classification === 'DEBT' && sf.status === 'actioned' && ageDays > 180,
+      }
+    })
+    const byClass: Record<string, { count: number; amount: number }> = {}
+    for (const r of rows) {
+      const k = r.classification || 'UNCLASSIFIED'
+      if (!byClass[k]) byClass[k] = { count: 0, amount: 0 }
+      byClass[k].count++; byClass[k].amount += r.amount
+    }
+    return NextResponse.json({ rows, byClass, filing_valid: !branch, branch })
   }
 
   return NextResponse.json({ error: 'Unknown report type' }, { status: 400 })

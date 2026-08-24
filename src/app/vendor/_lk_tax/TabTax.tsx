@@ -199,6 +199,8 @@ export default function TabTax({ showToast, vendorSettings }: {
 
       {sectionTabs}
 
+      <PeriodLockPanel period={period} showToast={showToast} />
+
       {/* ── The number that matters ── */}
       <div className={`rounded-xl border-2 p-5 mb-4 ${inRefundPosition ? 'border-red-300 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
         <div className="flex items-end justify-between flex-wrap gap-3">
@@ -342,6 +344,135 @@ export default function TabTax({ showToast, vendorSettings }: {
           Registers &amp; printable reports (VAT register, input VAT, SSCL liability) →
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── Period locks + dated rates (owner-only; hides itself for staff) ──────────
+// Lock the month after filing its return: from then on no credit note,
+// bad-debt write-off or recovery can land in it — corrections become documents
+// of the CURRENT period, so the filed return and the register never diverge.
+function PeriodLockPanel({ period, showToast }: { period: string; showToast: (m: string) => void }) {
+  const [locks, setLocks] = useState<string[] | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [showRates, setShowRates] = useState(false)
+  const [history, setHistory] = useState<any[]>([])
+  const [rate, setRate] = useState({ key: 'vat_rate', value: '', effectiveFrom: '' })
+
+  const loadLocks = useCallback(async () => {
+    try {
+      const r = await fetch('/api/vendor/period-locks')
+      if (r.status === 403) { setLocks(null); return } // staff — hide the panel
+      const j = await r.json()
+      setLocks((j.locks || []).map((l: any) => l.period))
+    } catch { setLocks(null) }
+  }, [])
+  useEffect(() => { loadLocks() }, [loadLocks])
+
+  async function toggleLock(locked: boolean) {
+    if (!locked && !confirm(`Lock ${period}?\n\nDo this AFTER filing its VAT return. No credit note, write-off or recovery can then be dated into it.`)) return
+    if (locked && !confirm(`Unlock ${period}? Only for corrections — re-lock afterwards.`)) return
+    setBusy(true)
+    try {
+      const r = await fetch('/api/vendor/period-locks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: locked ? 'unlock' : 'lock', period }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Failed')
+      showToast('✅ ' + j.message)
+      await loadLocks()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setBusy(false)
+  }
+
+  async function loadHistory() {
+    const r = await fetch('/api/vendor/tax-config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'rate_history' }),
+    })
+    const j = await r.json()
+    setHistory(j.history || [])
+  }
+
+  async function scheduleRate() {
+    setBusy(true)
+    try {
+      const r = await fetch('/api/vendor/tax-config', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'schedule_rate', key: rate.key, value: rate.value, effectiveFrom: rate.effectiveFrom }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Failed')
+      showToast('✅ ' + j.message)
+      setRate({ key: 'vat_rate', value: '', effectiveFrom: '' })
+      await loadHistory()
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setBusy(false)
+  }
+
+  if (locks === null) return null
+  const isLocked = locks.includes(period)
+  const KEY_LABEL: Record<string, string> = {
+    vat_rate: 'VAT %', sscl_rate: 'SSCL %', liable_base_part: 'SSCL base — parts %', liable_base_svc: 'SSCL base — services %',
+  }
+
+  return (
+    <div className={`rounded-xl border-2 p-4 mb-4 ${isLocked ? 'border-slate-300 bg-slate-50' : 'border-slate-200 bg-white'}`}>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-xs font-black text-slate-700">
+            {isLocked ? `🔒 ${period} is LOCKED` : `🔓 ${period} is open`}
+          </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            {isLocked
+              ? 'Return filed — no credit notes, write-offs or recoveries can be dated into it.'
+              : 'After filing this month\'s return, lock it so the filed figures can never drift.'}
+            {locks.length > 0 && ` Locked: ${locks.sort().join(', ')}`}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => toggleLock(isLocked)} disabled={busy}
+            className={`text-xs font-bold px-3.5 py-2 rounded-lg ${isLocked ? 'border-2 border-slate-300 text-slate-600' : 'bg-slate-800 text-white'}`}>
+            {isLocked ? 'Unlock' : `Lock ${period}`}
+          </button>
+          <button onClick={() => { setShowRates(v => !v); if (!showRates) loadHistory() }}
+            className="text-xs font-bold px-3.5 py-2 rounded-lg border-2 border-slate-200 text-slate-500">
+            Rates {showRates ? '▾' : '▸'}
+          </button>
+        </div>
+      </div>
+
+      {showRates && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <p className="text-[11px] text-slate-400 mb-2">
+            Rate changes take effect on their date — invoices switch automatically, and every report uses the rate in force for the month it covers. Old quarters never move.
+          </p>
+          <div className="flex gap-2 flex-wrap items-end mb-2">
+            <select value={rate.key} onChange={e => setRate(p => ({ ...p, key: e.target.value }))}
+              className="px-2.5 py-2 rounded-lg border-2 border-slate-200 text-xs bg-white outline-none">
+              {Object.entries(KEY_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+            <input type="number" step="0.1" value={rate.value} onChange={e => setRate(p => ({ ...p, value: e.target.value }))}
+              placeholder="New %" className="w-24 px-2.5 py-2 rounded-lg border-2 border-slate-200 text-xs font-mono font-bold outline-none" />
+            <input type="date" value={rate.effectiveFrom} onChange={e => setRate(p => ({ ...p, effectiveFrom: e.target.value }))}
+              className="px-2.5 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none" />
+            <button onClick={scheduleRate} disabled={busy || !rate.value || !rate.effectiveFrom}
+              className="text-xs font-bold px-3.5 py-2 rounded-lg bg-orange-500 text-white disabled:opacity-40">Schedule</button>
+          </div>
+          {history.length > 0 && (
+            <div className="text-[11px] text-slate-500 space-y-0.5">
+              {history.map((h: any, i: number) => (
+                <div key={i} className="flex gap-2">
+                  <span className="font-mono">{h.effective_from}</span>
+                  <span className="font-bold">{KEY_LABEL[h.key] || h.key}</span>
+                  <span className="font-mono font-bold">{h.value}%</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

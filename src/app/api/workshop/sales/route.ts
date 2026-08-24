@@ -88,10 +88,15 @@ export async function POST(req: NextRequest) {
   const vendorId = entity.vendor_id
 
   // ── VAT rate + item normalisation (integer LKR) ──
-  const { data: vatRow } = await admin
+  const todayCmb = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+  const { data: vatHist } = await admin.from('tax_rate_history')
+    .select('value').eq('vendor_id', vendorId).eq('key', 'vat_rate')
+    .lte('effective_from', todayCmb)
+    .order('effective_from', { ascending: false }).limit(1).maybeSingle()
+  const { data: vatRow } = vatHist ? { data: null } : await admin
     .from('tax_config').select('value')
     .eq('vendor_id', vendorId).eq('key', 'vat_rate').single()
-  const vatRate = vatRow ? parseFloat(vatRow.value) : 18
+  const vatRate = vatHist ? parseFloat(vatHist.value) : vatRow ? parseFloat(vatRow.value) : 18
 
   const isTaxInvoice = entityKind === 'tax_invoice'
   const exclMode = isTaxInvoice && priceMode === 'excl'

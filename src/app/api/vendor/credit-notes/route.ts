@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
+import { lockedNowMessage } from '@/lib/taxRates'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -50,6 +51,10 @@ export async function POST(req: NextRequest) {
   if (sixMonthsLater.getDate() < origDay) sixMonthsLater.setDate(0)
   if (new Date() > sixMonthsLater)
     return NextResponse.json({ error: 'Credit notes must be issued within 6 months of the original invoice (' + invoiceDate.toLocaleDateString('en-LK') + ')' }, { status: 400 })
+
+  // A locked (filed) period takes no new tax documents
+  const lockMsg = await lockedNowMessage(admin, vendor.id)
+  if (lockMsg) return NextResponse.json({ error: lockMsg }, { status: 400 })
 
   // Get VAT rate from tax_config
   const { data: vatRow } = await admin.from('tax_config').select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').single()

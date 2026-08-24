@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
+import { lockedNowMessage } from '@/lib/taxRates'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Insurance claims — stage 2: settlements and shortfall classification.
@@ -285,6 +286,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, message: 'Kept as a receivable — still chasing, VAT unchanged. Relief only on an actual write-off.' })
     }
 
+    // A locked (filed) period takes no new tax documents
+    const lockMsg = await lockedNowMessage(admin, caller.vendor.id)
+    if (lockMsg) return NextResponse.json({ error: lockMsg }, { status: 400 })
+
     // CR / WD / DISC → credit note from the SALE's entity, at the SALE's rate.
     if (!sale.tax_serial) {
       return NextResponse.json({ error: 'This invoice has no gazette serial — a receipt shortfall needs no credit note; use DEBT or settle it directly' }, { status: 400 })
@@ -397,6 +402,9 @@ export async function POST(req: NextRequest) {
     if (sf.classification !== 'DEBT' || sf.status !== 'actioned') {
       return NextResponse.json({ error: 'Only a DEBT shortfall still being chased can be written off' }, { status: 400 })
     }
+    // Bad-debt relief lands in the period of the write-off — a locked period takes none
+    const woLock = await lockedNowMessage(admin, caller.vendor.id)
+    if (woLock) return NextResponse.json({ error: woLock }, { status: 400 })
     await admin.from('claim_shortfalls').update({
       status: 'written_off', written_off_at: new Date().toISOString(),
       reason_text: reasonText?.trim() || null, updated_at: new Date().toISOString(),
@@ -411,6 +419,8 @@ export async function POST(req: NextRequest) {
       .select('id, status, amount').eq('id', shortfallId).eq('vendor_id', caller.vendor.id).single()
     if (!sf) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (sf.status !== 'written_off') return NextResponse.json({ error: 'Only a written-off debt can be recovered' }, { status: 400 })
+    const recLock = await lockedNowMessage(admin, caller.vendor.id)
+    if (recLock) return NextResponse.json({ error: recLock }, { status: 400 })
     await admin.from('claim_shortfalls').update({
       status: 'recovered', recovered_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     }).eq('id', sf.id)

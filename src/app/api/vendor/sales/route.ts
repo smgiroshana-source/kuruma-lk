@@ -112,7 +112,16 @@ async function getInvoiceEntity(entityId: string) {
 
 /** Fetches VAT rate from tax_config (default 18 if not found). */
 async function getVatRate(vendorId: string): Promise<number> {
+  // Effective-dated: a scheduled rate change takes effect on its date without
+  // anyone editing config on the day. Falls back to flat tax_config.
   const admin = createAdminClient()
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+  const { data: hist } = await admin.from('tax_rate_history')
+    .select('value, effective_from')
+    .eq('vendor_id', vendorId).eq('key', 'vat_rate')
+    .lte('effective_from', today)
+    .order('effective_from', { ascending: false }).limit(1).maybeSingle()
+  if (hist) return parseFloat(hist.value)
   const { data } = await admin
     .from('tax_config')
     .select('value')
