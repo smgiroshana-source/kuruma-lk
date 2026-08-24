@@ -183,10 +183,18 @@ export async function POST(req: NextRequest) {
     for (const s of (claimSales || [])) {
       const bal = r0(s.balance_due)
       if (bal > 0) {
-        await admin.from('claim_shortfalls').upsert({
-          claim_id: claimId, vendor_id: caller.vendor.id, sale_id: s.id,
-          amount: bal, updated_at: new Date().toISOString(),
-        }, { onConflict: 'claim_id,sale_id' })
+        // The unique index is partial (where sale_id is not null), which
+        // upsert conflict-inference cannot target — select then write.
+        const { data: ex } = await admin.from('claim_shortfalls').select('id, classification')
+          .eq('claim_id', claimId).eq('sale_id', s.id).maybeSingle()
+        if (ex) {
+          if (!ex.classification) await admin.from('claim_shortfalls')
+            .update({ amount: bal, updated_at: new Date().toISOString() }).eq('id', ex.id)
+        } else {
+          await admin.from('claim_shortfalls').insert({
+            claim_id: claimId, vendor_id: caller.vendor.id, sale_id: s.id, amount: bal,
+          })
+        }
         shortfalls++
       } else {
         await admin.from('claim_shortfalls').delete()
@@ -197,10 +205,16 @@ export async function POST(req: NextRequest) {
     for (const b of (claimBills || [])) {
       const shortBy = r0(b.bill_amount) - r0(b.reimbursed_amount)
       if (shortBy > 0 && b.fronted) {
-        await admin.from('claim_shortfalls').upsert({
-          claim_id: claimId, vendor_id: caller.vendor.id, bill_id: b.id,
-          amount: shortBy, updated_at: new Date().toISOString(),
-        }, { onConflict: 'claim_id,bill_id' })
+        const { data: ex } = await admin.from('claim_shortfalls').select('id, classification')
+          .eq('claim_id', claimId).eq('bill_id', b.id).maybeSingle()
+        if (ex) {
+          if (!ex.classification) await admin.from('claim_shortfalls')
+            .update({ amount: shortBy, updated_at: new Date().toISOString() }).eq('id', ex.id)
+        } else {
+          await admin.from('claim_shortfalls').insert({
+            claim_id: claimId, vendor_id: caller.vendor.id, bill_id: b.id, amount: shortBy,
+          })
+        }
         shortfalls++
       } else {
         await admin.from('claim_shortfalls').delete()
