@@ -687,7 +687,7 @@ export async function POST(req: NextRequest) {
     // Insurance claim spine: tag the invoice with its claim. Best-effort — a
     // linking problem is a warning on the receipt, never a failed sale.
     let claimWarning: string | null = null
-    if (claimNo && resolvedCustomerId) {
+    if ((claimNo || customerIsInsurance) && resolvedCustomerId) {
       const link = await linkSaleToClaim(admin, vendor.id, sale.id, resolvedCustomerId, claimNo,
         { vehicleNo: vehicleNo || null, createdBy: null })
       claimWarning = link.warning
@@ -1722,7 +1722,7 @@ export async function POST(req: NextRequest) {
       await admin.from('sales').update({ subtotal: 0, total: 0, paid_amount: 0, balance_due: 0 }).eq('id', saleId)
 
       // Claim spine: the partial invoice carries the claim too (best-effort)
-      if (claimNo && resolvedCustomerId) {
+      if ((claimNo || customerIsInsurance) && resolvedCustomerId) {
         await linkSaleToClaim(admin, vendor.id, newSale.id, resolvedCustomerId, claimNo,
           { vehicleNo: vehicleNo || draft.vehicle_no || null, createdBy: null })
       }
@@ -1817,7 +1817,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Claim spine: the finalized invoice carries the claim (best-effort)
-    if (claimNo && resolvedCustomerId) {
+    if ((claimNo || customerIsInsurance) && resolvedCustomerId) {
       await linkSaleToClaim(admin, vendor.id, saleId, resolvedCustomerId, claimNo,
         { vehicleNo: vehicleNo || draft.vehicle_no || null, createdBy: null })
     }

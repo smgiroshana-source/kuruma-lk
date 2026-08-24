@@ -98,19 +98,25 @@ export async function POST(req: NextRequest) {
   if (action === 'create') {
     const { insurerCustomerId, claimNo, vehicleNo, jobRef, notes } = body
     if (!insurerCustomerId) return NextResponse.json({ error: 'Pick the insurance company' }, { status: 400 })
-    if (!String(claimNo || '').trim()) return NextResponse.json({ error: 'Enter the claim number' }, { status: 400 })
+    // The claim number is often unknown until the insurer's paperwork arrives —
+    // a claim can start from just the vehicle and get its number later.
+    if (!String(claimNo || '').trim() && !String(vehicleNo || '').trim()) {
+      return NextResponse.json({ error: 'Enter the claim number or at least the vehicle' }, { status: 400 })
+    }
     const { data: insurer } = await admin.from('customers')
       .select('id, is_insurance').eq('id', insurerCustomerId).eq('vendor_id', caller.vendor.id).single()
     if (!insurer?.is_insurance) return NextResponse.json({ error: 'That customer is not marked as an insurance company' }, { status: 400 })
 
-    const { data: dupe } = await admin.from('insurance_claims').select('id')
-      .eq('vendor_id', caller.vendor.id).eq('insurer_customer_id', insurerCustomerId)
-      .ilike('claim_no', String(claimNo).trim()).maybeSingle()
-    if (dupe) return NextResponse.json({ error: 'This claim number already exists for that insurer' }, { status: 409 })
+    if (String(claimNo || '').trim()) {
+      const { data: dupe } = await admin.from('insurance_claims').select('id')
+        .eq('vendor_id', caller.vendor.id).eq('insurer_customer_id', insurerCustomerId)
+        .ilike('claim_no', String(claimNo).trim()).maybeSingle()
+      if (dupe) return NextResponse.json({ error: 'This claim number already exists for that insurer' }, { status: 409 })
+    }
 
     const { data, error } = await admin.from('insurance_claims').insert({
       vendor_id: caller.vendor.id, insurer_customer_id: insurerCustomerId,
-      claim_no: String(claimNo).trim(), vehicle_no: vehicleNo?.trim() || null,
+      claim_no: String(claimNo || '').trim() || null, vehicle_no: vehicleNo?.trim() || null,
       workshop_job_ref: jobRef?.trim() || null, notes: notes?.trim() || null,
       created_by: caller.email,
     }).select().single()
@@ -119,8 +125,21 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'update') {
-    const { claimId, status, vehicleNo, jobRef, notes } = body
+    const { claimId, status, vehicleNo, jobRef, notes, claimNo } = body
     const patch: any = { updated_at: new Date().toISOString() }
+    if (claimNo !== undefined) {
+      const cn = String(claimNo || '').trim()
+      if (cn) {
+        const { data: me } = await admin.from('insurance_claims').select('insurer_customer_id')
+          .eq('id', claimId).eq('vendor_id', caller.vendor.id).single()
+        if (!me) return NextResponse.json({ error: 'Claim not found' }, { status: 404 })
+        const { data: dupe } = await admin.from('insurance_claims').select('id')
+          .eq('vendor_id', caller.vendor.id).eq('insurer_customer_id', me.insurer_customer_id)
+          .ilike('claim_no', cn).neq('id', claimId).maybeSingle()
+        if (dupe) return NextResponse.json({ error: 'That claim number is already on another claim for this insurer' }, { status: 409 })
+      }
+      patch.claim_no = cn || null
+    }
     if (status !== undefined) {
       if (!['open', 'settling', 'closed'].includes(status)) return NextResponse.json({ error: 'Bad status' }, { status: 400 })
       patch.status = status

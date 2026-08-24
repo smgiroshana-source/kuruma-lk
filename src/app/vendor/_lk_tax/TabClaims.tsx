@@ -123,7 +123,7 @@ export default function TabClaims({ showToast }: { showToast: (m: string) => voi
               <option value="">Choose…</option>
               {insurers.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
             </select>
-            <label className="text-[11px] font-bold text-slate-500 block mb-1">Claim number *</label>
+            <label className="text-[11px] font-bold text-slate-500 block mb-1">Claim number <span className="font-normal text-slate-400">(leave blank if not known yet)</span></label>
             <input value={newClaim.claimNo} onChange={e => setNewClaim(p => ({ ...p, claimNo: e.target.value }))}
               className="w-full px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm font-mono font-bold outline-none focus:border-orange-400 mb-3" />
             <div className="grid grid-cols-2 gap-2 mb-3">
@@ -140,7 +140,7 @@ export default function TabClaims({ showToast }: { showToast: (m: string) => voi
             </div>
             <div className="flex justify-end gap-2 mt-2">
               <button onClick={() => setShowNew(false)} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500">Cancel</button>
-              <button onClick={createClaim} disabled={busy || !newClaim.insurerCustomerId || !newClaim.claimNo.trim()}
+              <button onClick={createClaim} disabled={busy || !newClaim.insurerCustomerId || (!newClaim.claimNo.trim() && !newClaim.vehicleNo.trim())}
                 className="px-5 py-2 rounded-lg bg-orange-500 text-white text-sm font-bold disabled:opacity-40">
                 {busy ? 'Saving…' : 'Create claim'}
               </button>
@@ -155,7 +155,7 @@ export default function TabClaims({ showToast }: { showToast: (m: string) => voi
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
           <div className="text-3xl mb-2">🛡️</div>
           <p className="text-sm font-semibold text-slate-500">No claims yet</p>
-          <p className="text-xs text-slate-400 mt-1">Type the claim number on an insurance sale at the POS and the claim appears here on its own.</p>
+          <p className="text-xs text-slate-400 mt-1">Bill an insurance customer at the POS and the claim appears here on its own — keyed by vehicle, the claim number added later when the insurer's papers arrive.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -167,7 +167,9 @@ export default function TabClaims({ showToast }: { showToast: (m: string) => voi
                   className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono font-black text-slate-800">{c.claim_no}</span>
+                      {c.claim_no
+                        ? <span className="font-mono font-black text-slate-800">{c.claim_no}</span>
+                        : <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">NO CLAIM № YET</span>}
                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${STATUS_BADGE[c.status]}`}>{c.status.toUpperCase()}</span>
                       {c.vehicle_no && <span className="text-xs font-mono font-bold text-slate-500">{c.vehicle_no}</span>}
                     </div>
@@ -184,6 +186,13 @@ export default function TabClaims({ showToast }: { showToast: (m: string) => voi
 
                 {isOpen && (
                   <div className="px-4 pb-4 bg-slate-50/60 border-t border-slate-100">
+                    {/* Claim number — usually attached AFTER billing, when the
+                        insurer's paperwork (which always carries it) arrives */}
+                    <div className="flex items-center gap-2 mt-3 mb-1">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wide shrink-0">Claim №</span>
+                      <ClaimNoEditor claim={c} onSave={(v: string) => post({ action: 'update', claimId: c.id, claimNo: v }, v ? '✅ Claim number saved' : 'Claim number cleared')} />
+                    </div>
+
                     {/* Our invoices */}
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-wide mt-3 mb-1.5">Our invoices</p>
                     {c.sales.length === 0 ? (
@@ -291,5 +300,30 @@ export default function TabClaims({ showToast }: { showToast: (m: string) => voi
         </div>
       )}
     </div>
+  )
+}
+
+// Inline claim-number editor — the number usually arrives with the insurer's
+// paperwork long after billing, so it is set here, not at the POS.
+function ClaimNoEditor({ claim, onSave }: { claim: any; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [v, setV] = useState(claim.claim_no || '')
+  useEffect(() => { setV(claim.claim_no || '') }, [claim.claim_no])
+  if (!editing) {
+    return (
+      <span className="flex items-center gap-2 min-w-0">
+        <span className="font-mono text-xs font-bold text-slate-700 truncate">{claim.claim_no || '— not known yet —'}</span>
+        <button onClick={() => setEditing(true)} className="text-[10px] font-bold text-sky-600">edit</button>
+      </span>
+    )
+  }
+  return (
+    <span className="flex items-center gap-1.5 flex-1">
+      <input value={v} onChange={e => setV(e.target.value)} autoFocus
+        placeholder="e.g. MTR/2026/48291"
+        className="flex-1 min-w-0 px-2 py-1 rounded-lg border-2 border-sky-300 text-xs font-mono font-bold outline-none focus:border-sky-400" />
+      <button onClick={() => { setEditing(false); onSave(v.trim()) }} className="text-[10px] font-black text-emerald-600">SAVE</button>
+      <button onClick={() => { setEditing(false); setV(claim.claim_no || '') }} className="text-[10px] font-bold text-slate-400">✕</button>
+    </span>
   )
 }

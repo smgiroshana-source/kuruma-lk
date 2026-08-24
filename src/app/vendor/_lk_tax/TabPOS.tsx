@@ -1304,8 +1304,8 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                       <div>
                         <input value={posClaimNo} onChange={e => setPosClaimNo(e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border-2 border-amber-200 bg-amber-50/50 text-sm outline-none font-mono font-bold focus:border-amber-400"
-                          placeholder="Claim number (links this bill to the claim)" />
-                        <p className="text-[10px] text-slate-400 mt-1">The parts bill and the workshop&apos;s repair bill meet on the claim record — one number ties them together.</p>
+                          placeholder="Claim number (optional — leave blank if not known)" />
+                        <p className="text-[10px] text-slate-400 mt-1">Not known yet? Leave blank &mdash; the bill links to the vehicle&apos;s open claim on its own; add the number on the Claims screen when the insurer&apos;s papers arrive. Type it only when the vehicle has more than one claim running.</p>
                       </div>
                     )}
                     {posCustomerVatReg && (

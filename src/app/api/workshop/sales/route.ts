@@ -228,7 +228,7 @@ export async function POST(req: NextRequest) {
   // Claim spine: an insurance job's invoice is tagged with its claim so the
   // repair bill and the parts bill meet on one claim record. Best-effort.
   let claimWarning: string | null = null
-  if (claimNo && customerId) {
+  if ((claimNo || customerIsInsurance) && customerId) {
     const link = await linkSaleToClaim(admin, vendorId, sale.id, customerId, claimNo,
       { vehicleNo: vehicleNo || null, jobRef: jobRef || null, createdBy: 'workshop' })
     claimWarning = link.warning
