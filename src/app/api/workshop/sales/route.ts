@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { linkSaleToClaim } from '@/lib/claims'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Workshop Pulse → official invoices (WHEEL MART vendor, workshop entities).
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
     customerName, customerPhone, customerAddress, customerTin,
     customerVatRegistered, customerIsInsurance,
     vehicleNo, items, payments: paymentLines, discount, notes, jobRef,
+    claimNo,
   } = body
 
   if (entityKind !== 'tax_invoice' && entityKind !== 'receipt') {
@@ -223,6 +225,15 @@ export async function POST(req: NextRequest) {
     return json({ error: saleErr.message }, 400)
   }
 
+  // Claim spine: an insurance job's invoice is tagged with its claim so the
+  // repair bill and the parts bill meet on one claim record. Best-effort.
+  let claimWarning: string | null = null
+  if (claimNo && customerId) {
+    const link = await linkSaleToClaim(admin, vendorId, sale.id, customerId, claimNo,
+      { vehicleNo: vehicleNo || null, jobRef: jobRef || null, createdBy: 'workshop' })
+    claimWarning = link.warning
+  }
+
   const saleItems = normItems.map(i => ({
     sale_id: sale.id, product_id: null, product_name: i.description,
     product_sku: null, quantity: i.qty, unit_price: i.unitPrice,
@@ -256,6 +267,7 @@ export async function POST(req: NextRequest) {
       date_supply: todayStr, created_at: sale.created_at,
       items: normItems,
     },
+    claimWarning,
     entity: { name: entity.name, address: entity.address, tin: entity.tin },
   })
 }

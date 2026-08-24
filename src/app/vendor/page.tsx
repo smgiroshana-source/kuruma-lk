@@ -24,6 +24,7 @@ import IncomingTransfers from './_shared/IncomingTransfers'
 import TabCredit from './_shared/TabCredit'
 import ProductThumb from '@/components/ProductThumb'
 import TabCreditNotes from './_lk_tax/TabCreditNotes'
+import TabClaims from './_lk_tax/TabClaims'
 import WheelMartSidebar from './_lk_tax/WheelMartSidebar'
 import TabOverview from './_lk_tax/TabOverview'
 import TabSuppliers from './_lk_tax/TabSuppliers'
@@ -36,7 +37,7 @@ import StaffLogins from './_shared/StaffLogins'
 import TabCash from './_lk_tax/TabCash'
 import TabReports from './_lk_tax/TabReports'
 
-type VendorTab = 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'imports' | 'tax' | 'settings'
+type VendorTab = 'claims' | 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'imports' | 'tax' | 'settings'
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
 const TYRE_WIDTHS  = [135,145,155,165,175,185,195,205,215,225,235,245,255,265,275,285,295,305,315,325]
@@ -3912,6 +3913,11 @@ ${customerRows.map(c => `<tr>
             </div>
           )}
         </div>)}
+
+        {/* INSURANCE CLAIMS — WHEEL MART only */}
+        {tab === 'claims' && isLkTax && (
+          <TabClaims showToast={showToast} />
+        )}
 
         {/* CREDIT */}
         {tab === 'credit' && (

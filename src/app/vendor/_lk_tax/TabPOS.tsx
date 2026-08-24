@@ -400,6 +400,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const [posCustomerTin, setPosCustomerTin] = useState('')
   const [posCustomerVatReg, setPosCustomerVatReg] = useState(false)
   const [posCustomerIsInsurance, setPosCustomerIsInsurance] = useState(false)
+  const [posClaimNo, setPosClaimNo] = useState('')
   const [showManualLine, setShowManualLine] = useState(false)
   const [manualLine, setManualLine] = useState({ name: '', qty: '1', price: '' })
   // Typed wording drifts ("alignment", "Wheel align", "W/A") and makes the
@@ -565,6 +566,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     const isInsurance = !!customer.is_insurance
     setPosCustomerIsInsurance(isInsurance)
     setPosNoVehicle(false) // "no vehicle" acknowledgement never carries across customers
+    if (!isInsurance) setPosClaimNo('') // claim numbers belong to insurance sales only
     if (posIsVatEntity) {
       setPosPriceMode(isInsurance ? 'excl' : 'incl')
       if (isInsurance) showToast('🏢 Insurance customer — enter prices EXCLUDING VAT (+' + posVatRate + '% added)')
@@ -596,7 +598,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     if (posCart.length > 0 && !confirm('Clear the current sale and start a new one?')) return
     setPosCart([]); setPosDraftId(null); setPosDraftInvoiceNo('')
     setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
-    setPosVehicleNo(''); setPosNoVehicle(false); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false)
+    setPosVehicleNo(''); setPosNoVehicle(false); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false); setPosClaimNo('')
     setPosDiscount(''); setPosNotes(''); setPosErrors({}); setUseAdvance(false)
     setPosPriceMode('incl') // ex-VAT entry is per-job (insurance) — never carry into the next sale
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
@@ -822,6 +824,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               customerAddress: posCustomerAddress.trim() || null,
               customerVatRegistered: posCustomerVatReg,
               customerIsInsurance: posCustomerIsInsurance,
+              claimNo: posCustomerIsInsurance ? posClaimNo.trim() || null : null,
               customerTin: posCustomerVatReg ? posCustomerTin.trim() || null : null,
             } : {}),
           }
@@ -844,6 +847,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               customerAddress: posCustomerAddress.trim() || null,
               customerVatRegistered: posCustomerVatReg,
               customerIsInsurance: posCustomerIsInsurance,
+              claimNo: posCustomerIsInsurance ? posClaimNo.trim() || null : null,
               customerTin: posCustomerVatReg ? posCustomerTin.trim() || null : null,
             } : {}),
           }
@@ -1296,6 +1300,14 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                       <input type="checkbox" checked={posCustomerIsInsurance} onChange={e => { const v = e.target.checked; setPosCustomerIsInsurance(v); if (posIsVatEntity) setPosPriceMode(v ? 'excl' : 'incl') }} className="w-4 h-4 accent-amber-500" />
                       <span className="text-xs font-bold text-slate-600">🏢 Insurance Company <span className="font-normal text-slate-400">(quotes excl. VAT — remembered for next time)</span></span>
                     </label>
+                    {posCustomerIsInsurance && (
+                      <div>
+                        <input value={posClaimNo} onChange={e => setPosClaimNo(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border-2 border-amber-200 bg-amber-50/50 text-sm outline-none font-mono font-bold focus:border-amber-400"
+                          placeholder="Claim number (links this bill to the claim)" />
+                        <p className="text-[10px] text-slate-400 mt-1">The parts bill and the workshop&apos;s repair bill meet on the claim record — one number ties them together.</p>
+                      </div>
+                    )}
                     {posCustomerVatReg && (
                       <input value={posCustomerTin} onChange={e => { setPosCustomerTin(e.target.value.replace(/[^0-9]/g, '').slice(0, 9)); if ((posErrors as any).tin) setPosErrors(prev => ({ ...prev, tin: false })) }} className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono ${(posErrors as any).tin ? 'border-red-400 bg-red-50' : 'border-slate-200 focus:border-orange-400'}`} placeholder="Purchaser TIN (9 digits) *" />
                     )}

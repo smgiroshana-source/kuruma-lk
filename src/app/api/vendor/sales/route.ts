@@ -6,6 +6,7 @@ import { checkPromotable, checkReversible, mayReversePromotion, PROMOTE_WINDOW_D
 import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows } from '@/lib/fetchAll'
 import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnSales } from '@/lib/branchScope'
+import { linkSaleToClaim } from '@/lib/claims'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -472,6 +473,7 @@ export async function POST(req: NextRequest) {
       // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
       invoiceEntityId, documentType,
       customerAddress, customerTin, customerVatRegistered, customerIsInsurance,
+      claimNo,
     } = body
 
     if (!items || items.length === 0) return NextResponse.json({ error: 'No items in sale' }, { status: 400 })
@@ -682,6 +684,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: itemsError.message }, { status: 400 })
     }
 
+    // Insurance claim spine: tag the invoice with its claim. Best-effort — a
+    // linking problem is a warning on the receipt, never a failed sale.
+    let claimWarning: string | null = null
+    if (claimNo && resolvedCustomerId) {
+      const link = await linkSaleToClaim(admin, vendor.id, sale.id, resolvedCustomerId, claimNo,
+        { vehicleNo: vehicleNo || null, createdBy: null })
+      claimWarning = link.warning
+    }
+
     // Record all payment lines in one batch insert
     const paymentRecords: any[] = []
     for (const pl of (paymentLines || [])) {
@@ -801,6 +812,7 @@ export async function POST(req: NextRequest) {
     if (settledInvoices.length > 0) msg += ` (cleared: ${settledInvoices.join(', ')})`
     const finalAdvance = excessPayment > excessAppliedToOutstanding ? excessPayment - excessAppliedToOutstanding : 0
     if (finalAdvance > 0) msg += ` | Rs.${finalAdvance.toLocaleString()} to advance`
+    if (claimWarning) msg += ` | ⚠️ ${claimWarning}`
 
     // Calculate total amount due across ALL invoices for this customer and save to DB.
     // Use resolvedCustomerId (covers phone-matched and auto-created customers, not
@@ -1454,6 +1466,7 @@ export async function POST(req: NextRequest) {
       discount, vehicleNo, notes, saleDate, customerName, customerPhone,
       // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
       invoiceEntityId, customerAddress, customerTin, customerVatRegistered, customerIsInsurance,
+      claimNo,
     } = body
     const { data: draft } = await admin.from('sales').select('*, items:sale_items(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!draft) return NextResponse.json({ error: 'Draft not found' }, { status: 404 })
@@ -1708,6 +1721,12 @@ export async function POST(req: NextRequest) {
       // Update the original draft: remove confirmed items' prices, zero out totals
       await admin.from('sales').update({ subtotal: 0, total: 0, paid_amount: 0, balance_due: 0 }).eq('id', saleId)
 
+      // Claim spine: the partial invoice carries the claim too (best-effort)
+      if (claimNo && resolvedCustomerId) {
+        await linkSaleToClaim(admin, vendor.id, newSale.id, resolvedCustomerId, claimNo,
+          { vehicleNo: vehicleNo || draft.vehicle_no || null, createdBy: null })
+      }
+
       return NextResponse.json({
         success: true, sale: newSale,
         remainingDraft: { id: saleId, invoice_no: draft.invoice_no, pendingCount: pendingItems.length },
@@ -1795,6 +1814,12 @@ export async function POST(req: NextRequest) {
         }).then(() => {}, () => {})
       }
       return NextResponse.json({ error: finalizeUpdateErr.message }, { status: 400 })
+    }
+
+    // Claim spine: the finalized invoice carries the claim (best-effort)
+    if (claimNo && resolvedCustomerId) {
+      await linkSaleToClaim(admin, vendor.id, saleId, resolvedCustomerId, claimNo,
+        { vehicleNo: vehicleNo || draft.vehicle_no || null, createdBy: null })
     }
 
     // FIFO cost consumption — consume cost layers for product items now that sale is finalized
