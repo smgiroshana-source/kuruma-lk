@@ -189,6 +189,49 @@ export async function GET(req: NextRequest) {
     .order('credit_note_date')
   const supplierCreditTotal = (supCredits || []).reduce((t: number, c: any) => t + r0(c.net_amount), 0)
 
+  // Salary cycle runs 25th → 24th, paid ~25th. A report window that ends
+  // before that payday contains almost no salary cost (only advances), so
+  // profit reads a full payroll better than it is. Say so, with a rough size:
+  // the sum of active monthly cash pay items less advances already in the
+  // window's expenses.
+  let salaryNote: any = null
+  {
+    const endDay = Number(String(to).slice(8, 10))
+    const endYm = String(to).slice(0, 7)
+    // The cycle the window's end date sits in: day ≥ 25 belongs to the cycle
+    // ending the 24th of NEXT month.
+    let cyclePeriod = endYm
+    if (endDay >= 25) {
+      const [cy, cm] = endYm.split('-').map(Number)
+      const d = new Date(cy, cm, 1)
+      cyclePeriod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    }
+    const { data: cycleRun } = await admin.from('payroll_runs')
+      .select('status').eq('vendor_id', caller.vendor.id).eq('period', cyclePeriod).maybeSingle()
+    if (!cycleRun || cycleRun.status !== 'paid') {
+      const { data: emps } = await admin.from('employees')
+        .select('id').eq('vendor_id', caller.vendor.id).eq('active', true)
+      const ids = (emps || []).map((e: any) => e.id)
+      const { data: items } = ids.length
+        ? await admin.from('employee_pay_items').select('employee_id, kind, unit, period, amount')
+            .in('employee_id', ids).eq('active', true)
+        : { data: [] as any[] }
+      const estGross = (items || [])
+        .filter((i: any) => i.kind !== 'epf' && i.unit !== 'percent' && i.period === 'monthly')
+        .reduce((s: number, i: any) => s + r0(i.amount), 0)
+      const advancesInWindow = r0(expenseByCat.get('salaries') || 0)
+      if (estGross > 0) {
+        const [cy, cm] = cyclePeriod.split('-').map(Number)
+        const cf = new Date(cy, cm - 2, 25), ct = new Date(cy, cm - 1, 24)
+        const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+        salaryNote = {
+          cycle: `${fmt(cf)} – ${fmt(ct)}`,
+          estPending: Math.max(0, estGross - advancesInWindow),
+        }
+      }
+    }
+  }
+
   const realGp = realRev - realCogs
   const roughGp = roughRev - roughCogs
   const knownRev = realRev + roughRev + serviceRev
@@ -218,6 +261,7 @@ export async function GET(req: NextRequest) {
       saleCount: (sales || []).length,
       lineCount: detail.length,
     },
+    salaryNote,
     detail,
     byProduct: [...productAgg.values()].sort((a, b) => b.profit - a.profit),
     noCost: [...noCostAgg.values()].sort((a, b) => b.revenue - a.revenue),

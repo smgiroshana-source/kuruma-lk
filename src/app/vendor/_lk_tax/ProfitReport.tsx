@@ -59,7 +59,13 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
           ${s.supplierCreditTotal > 0 ? row('Supplier discounts received', '+ ' + money(s.supplierCreditTotal), { bold: true, color: '#15803d' }) : ''}
           ${row('NET PROFIT', money(s.netProfit), { bold: true, color: s.netProfit >= 0 ? '#15803d' : '#dc2626' })}
         </tbody>
-      </table>`
+      </table>
+      ${data.salaryNote ? `
+      <p class="note" style="border-left:3px solid #b45309;padding-left:10px;color:#92400e">
+        ⚠️ Salary for the cycle <strong>${escapeHtml(data.salaryNote.cycle)}</strong> is not paid yet
+        (payday is ~the 25th). This profit is shown before roughly <strong>${money(data.salaryNote.estPending)}</strong> of salary
+        — only advances taken so far appear in the expenses below.
+      </p>` : ''}`
 
     // The no-cost block is deliberately OUTSIDE the profit arithmetic
     const noCostBlock = s.noCostRevenue > 0 ? `

@@ -6,7 +6,8 @@ import { recomputeSessionForDate } from '@/lib/cash'
 // ─────────────────────────────────────────────────────────────────────────────
 // Monthly payroll run — WHEEL MART, owner only.
 //
-// GET  ?period=YYYY-MM  → the saved run if there is one, otherwise a fresh
+// GET  ?period=YYYY-MM  (the month the 25th→24th cycle ends / is paid in)
+//                        → the saved run if there is one, otherwise a fresh
 //                         proposal computed from pay items, attendance and
 //                         the advances each person has taken.
 // POST save_draft       → store the run as edited (nothing hits the books yet)
@@ -29,11 +30,26 @@ async function getOwner() {
 
 const r0 = (n: number) => Math.round(Number(n) || 0)
 
-// Days in a Colombo month, and the month's date bounds
-function monthBounds(period: string) {
+// WHEEL MART pays salary for a 25th → 24th cycle (owner, 2026-08-24): period
+// "2026-08" means 25 Jul – 24 Aug, paid ~25 Aug. The period key is the month
+// the cycle ENDS in (= the month it is paid in), so "from April" on a raise
+// means the cycle 25 Mar – 24 Apr. Attendance, proration, daily allowances
+// and the advance cutoff all use these bounds.
+function cycleBounds(period: string) {
   const [y, m] = period.split('-').map(Number)
-  const last = new Date(y, m, 0).getDate()
-  return { from: `${period}-01`, to: `${period}-${String(last).padStart(2, '0')}`, days: last }
+  const py = m === 1 ? y - 1 : y
+  const pm = m === 1 ? 12 : m - 1
+  return { from: `${py}-${String(pm).padStart(2, '0')}-25`, to: `${period}-24` }
+}
+
+// "25 Jul – 24 Aug 2026" — for payslips and the expense line, so nobody has
+// to remember what a period key means.
+function cycleLabel(period: string) {
+  const { from, to } = cycleBounds(period)
+  const f = new Date(from + 'T00:00:00')
+  const t = new Date(to + 'T00:00:00')
+  const d = (x: Date, y: boolean) => x.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(y ? { year: 'numeric' } : {}) })
+  return `${d(f, f.getFullYear() !== t.getFullYear())} – ${d(t, true)}`
 }
 
 // How much of a day this component pays when the day was worked as a half day
@@ -124,20 +140,21 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const period = url.searchParams.get('period') || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }).slice(0, 7)
   if (!/^\d{4}-\d{2}$/.test(period)) return NextResponse.json({ error: 'period must be YYYY-MM' }, { status: 400 })
-  const { from, to } = monthBounds(period)
+  const { from, to } = cycleBounds(period)
 
   const { data: run } = await admin.from('payroll_runs')
     .select('*').eq('vendor_id', caller.vendor.id).eq('period', period).maybeSingle()
 
-  // Advances taken in this month — shown whether the run is saved or not, so
-  // the owner can always see what has already gone out against the month.
+  // Advances taken against this cycle — shown whether the run is saved or
+  // not, so the owner can always see what has already gone out against it.
   const { data: employees } = await admin.from('employees')
     .select('*').eq('vendor_id', caller.vendor.id).eq('active', true).order('branch').order('name')
   const empIds = (employees || []).map((e: any) => e.id)
 
-  // EVERY advance still unsettled up to the end of this month — not just the
-  // ones taken during it. An advance from July that no run has deducted has to
-  // come off August's pay, or it sits against the person for ever.
+  // EVERY advance still unsettled up to the cycle end (the 24th) — not just
+  // ones taken during it. An advance from a past cycle that no run deducted
+  // has to come off this pay, or it sits against the person for ever. One
+  // taken on the 26th belongs to the NEXT cycle and is excluded by the cutoff.
   const { data: advances } = empIds.length
     ? await admin.from('staff_advances').select('*').eq('vendor_id', caller.vendor.id)
         .lte('date', to).is('settled_in_run', null).order('date')
@@ -158,7 +175,7 @@ export async function GET(req: NextRequest) {
     : { data: [] as any[] }
 
   const lines = (employees || [])
-    // Someone who joined after the month ended has nothing to be paid for it
+    // Someone who joined after the cycle ended has nothing to be paid for it
     .filter((e: any) => !e.join_date || e.join_date <= to)
     .map((e: any) => proposeLine(
       e,
@@ -259,7 +276,7 @@ export async function POST(req: NextRequest) {
       if (r0(l.net_pay) <= 0) continue   // fully covered by advances — no cash moves
       const { data: exp, error } = await admin.from('expenses').insert({
         vendor_id: caller.vendor.id, expense_date: date, category: 'salaries',
-        description: `Salary ${run.period} — ${l.employee_name}`,
+        description: `Salary cycle ${cycleLabel(run.period)} — ${l.employee_name}`,
         amount: r0(l.net_pay), payment_method: method,
         cash_session_id: sessionId, created_by: caller.userId,
       }).select('id').single()
@@ -276,7 +293,7 @@ export async function POST(req: NextRequest) {
     // Settle the advances this run actually deducted — and only those. If the
     // owner zeroed someone's advance line, their advances stay outstanding and
     // roll into the next run rather than being quietly written off.
-    const { to } = monthBounds(run.period)
+    const { to } = cycleBounds(run.period)
     const deductedFrom = lines.filter((l: any) => r0(l.advances) > 0).map((l: any) => l.employee_id)
     if (deductedFrom.length > 0) {
       await admin.from('staff_advances').update({ settled_in_run: runId })

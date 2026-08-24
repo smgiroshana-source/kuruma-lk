@@ -21,11 +21,23 @@ const KIND_LABEL: Record<string, string> = {
 
 type Line = any
 
+// Salary cycle runs 25th → 24th; the period key is the month the cycle ends
+// in (= is paid in). "2026-08" ⇒ 25 Jul – 24 Aug, paid ~25 Aug.
+function cycleLabel(p: string): string {
+  const [y, m] = p.split('-').map(Number)
+  const f = new Date(y, m - 2, 25), t = new Date(y, m - 1, 24)
+  const fmt = (d: Date, yr: boolean) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(yr ? { year: 'numeric' } : {}) })
+  return fmt(f, f.getFullYear() !== t.getFullYear()) + ' – ' + fmt(t, true)
+}
+
 export default function PayrollRun({ showToast, vendorName }: { showToast: (m: string) => void; vendorName?: string }) {
   const [period, setPeriod] = useState(() => {
-    // Default to LAST month — payroll is run after a month ends
-    const [y, m] = colomboToday().slice(0, 7).split('-').map(Number)
-    const d = new Date(y, m - 2, 1)
+    // Default to the cycle that most recently ENDED: from the 25th that is the
+    // current month (cycle ended on the 24th just past); before it, last month.
+    const today = colomboToday()
+    const [y, m] = today.slice(0, 7).split('-').map(Number)
+    const day = Number(today.slice(8, 10))
+    const d = day >= 25 ? new Date(y, m - 1, 1) : new Date(y, m - 2, 1)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
   const [lines, setLines] = useState<Line[]>([])
@@ -137,7 +149,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
         @media print{@page{size:A5;margin:10mm}}
       </style></head><body>
       <h2>${escapeHtml(vendorName || 'MacForce Auto Engineering (Pvt) Ltd')}</h2>
-      <div class="sub">PAYSLIP — ${period}</div>
+      <div class="sub">PAYSLIP — salary cycle ${cycleLabel(period)}</div>
       <table>
         <tr><td><strong>${escapeHtml(l.employee_name)}</strong><div class="sub">${escapeHtml(l.branch || '')}</div></td>
             <td style="text-align:right" class="sub">Days worked: ${Number(l.payable_days)}${
@@ -146,7 +158,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
       <div class="sec">Earnings</div>
       <table>${rows(earn)}<tr><td><strong>Gross</strong></td><td style="text-align:right"><strong>Rs.${r0(l.gross).toLocaleString()}</strong></td></tr></table>
       ${ded.length || r0(l.advances) ? `<div class="sec">Deductions</div><table>${rows(ded)}${
-        r0(l.advances) ? `<tr><td>Advances taken during ${period}</td><td style="text-align:right">Rs.${r0(l.advances).toLocaleString()}</td></tr>` : ''
+        r0(l.advances) ? `<tr><td>Advances taken during the cycle</td><td style="text-align:right">Rs.${r0(l.advances).toLocaleString()}</td></tr>` : ''
       }</table>` : ''}
       <table><tr class="net"><td>NET PAID</td><td style="text-align:right">Rs.${r0(l.net_pay).toLocaleString()}</td></tr></table>
       ${l.note ? `<p class="sub">${escapeHtml(String(l.note))}</p>` : ''}
@@ -171,7 +183,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
       th,td{border:1px solid #ddd;padding:5px 7px}th{background:#f2f2f2;font-size:11px;text-transform:uppercase}
       @media print{@page{size:A4;margin:10mm}}</style></head><body>
       <h2 style="font-size:15px;margin:0">${escapeHtml(vendorName || 'MacForce Auto Engineering (Pvt) Ltd')}</h2>
-      <div style="font-size:12px;color:#666;margin-bottom:10px">Payroll — ${period}${
+      <div style="font-size:12px;color:#666;margin-bottom:10px">Payroll — cycle ${cycleLabel(period)}${
         run?.status === 'paid' ? ` · paid ${escapeHtml(String(run.paid_date))} by ${escapeHtml(String(run.payment_method))}` : ' · DRAFT'}</div>
       <table><thead><tr><th>Employee</th><th>Days</th><th>Gross</th><th>Deductions</th><th>Advances</th><th>Net</th><th>Signature</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -197,6 +209,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
           <input type="month" value={period} max={colomboToday().slice(0, 7)}
             onChange={e => setPeriod(e.target.value)}
             className="px-3 py-2 rounded-xl border-2 border-slate-200 text-sm font-bold outline-none focus:border-orange-400" />
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">Cycle {cycleLabel(period)}</span>
           {isPaid
             ? <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
                 PAID {run.paid_date} · {run.payment_method}

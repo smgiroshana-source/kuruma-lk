@@ -108,10 +108,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
+    // "From April" means the salary cycle PAID in April: 25 Mar – 24 Apr,
+    // paid ~25 Apr (owner decision 2026-08-24). The reminder falls due on the
+    // 1st, three weeks before that cycle's payday, so the owner applies it
+    // before running the month's payroll.
     const when = new Date(`${effective}T00:00:00+05:30`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })
+    const cyc = (() => {
+      const [y, m] = effective.split('-').map(Number)
+      const f = new Date(y, m - 2, 25), t = new Date(y, m - 1, 24)
+      const fmt = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+      return `${fmt(f)} – ${fmt(t)}`
+    })()
     return NextResponse.json({
       ok: true, increment: created,
-      message: `${emp.name}: ${itemLabel} rises to Rs.${amount.toLocaleString()} from ${when}${target ? ` (now Rs.${Number(target.amount).toLocaleString()})` : ''}`,
+      message: `${emp.name}: ${itemLabel} rises to Rs.${amount.toLocaleString()} from ${when} — the salary cycle ${cyc}, paid ~25th${target ? ` (now Rs.${Number(target.amount).toLocaleString()})` : ''}`,
     })
   }
 
