@@ -147,6 +147,16 @@ export async function POST(req: NextRequest) {
   }
 
   // Get all outstanding sales for a customer
+  // HARD BLOCK (insurance claims): a sale whose shortfall was written down or
+  // discounted took its VAT reduction — no further receipt may land on it.
+  // The money route for such a sale is reclassification, never a quiet receipt.
+  async function wdDiscBlockedIds(saleIds: string[]): Promise<Set<string>> {
+    if (!saleIds.length) return new Set()
+    const { data } = await admin.from('claim_shortfalls')
+      .select('sale_id').in('sale_id', saleIds).in('classification', ['WD', 'DISC'])
+    return new Set((data || []).map((r: any) => r.sale_id))
+  }
+
   if (action === 'get_outstanding') {
     const { customerId } = body
 
@@ -233,6 +243,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No outstanding invoices to offset against' }, { status: 400 })
     }
 
+    // WD/DISC-classified claim sales take no receipts — advance included
+    const offsetBlocked = await wdDiscBlockedIds(outstandingSales.map((x: any) => x.id))
+    const offsetTargets = outstandingSales.filter((x: any) => !offsetBlocked.has(x.id))
+    if (offsetTargets.length === 0) {
+      return NextResponse.json({ error: 'Every outstanding invoice here was written down or discounted under a claim — no receipts may land on them' }, { status: 400 })
+    }
+
     // Compute all apply amounts upfront, then batch insert payments + parallel update sales
     let totalApplied = 0
     const settledInvoices: string[] = []
@@ -240,7 +257,7 @@ export async function POST(req: NextRequest) {
     const paymentInserts: any[] = []
     const saleUpdates: any[] = []
 
-    for (const sale of outstandingSales) {
+    for (const sale of offsetTargets) {
       if (advance <= 0) break
       const balance = parseFloat(sale.balance_due)
       const applyAmount = Math.min(advance, balance)
@@ -290,13 +307,18 @@ export async function POST(req: NextRequest) {
       .neq('payment_status', 'voided')
       .order('created_at', { ascending: true })
 
-    const totalOutstanding = (outstandingSales || []).reduce((s: number, sale: any) => s + parseFloat(sale.balance_due), 0)
+    // Exclude WD/DISC-classified claim sales — their balances are not collectable
+    const blockedSet = await wdDiscBlockedIds((outstandingSales || []).map((x: any) => x.id))
+    const blockedInvoices = (outstandingSales || []).filter((x: any) => blockedSet.has(x.id)).map((x: any) => x.invoice_no)
+    const collectable = (outstandingSales || []).filter((x: any) => !blockedSet.has(x.id))
+
+    const totalOutstanding = collectable.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due), 0)
 
     // Apply to invoices oldest first, recording payments per-invoice
     let remaining = totalPayment
     const settledInvoices: string[] = []
 
-    for (const sale of (outstandingSales || [])) {
+    for (const sale of collectable) {
       if (remaining <= 0) break
       const balance = parseFloat(sale.balance_due)
       const applyAmount = Math.min(remaining, balance)
@@ -345,6 +367,7 @@ export async function POST(req: NextRequest) {
     if (remaining > 0) msg += ` Rs.${remaining.toLocaleString()} added to advance.`
     const newOutstanding = Math.max(0, totalOutstanding - applied)
     if (newOutstanding > 0) msg += ` Remaining outstanding: Rs.${newOutstanding.toLocaleString()}.`
+    if (blockedInvoices.length > 0) msg += ` ⚠️ Skipped (written down/discounted under a claim — no receipts allowed): ${blockedInvoices.join(', ')}.`
 
     return NextResponse.json({ success: true, message: msg })
   }

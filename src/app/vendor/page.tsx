@@ -3916,7 +3916,7 @@ ${customerRows.map(c => `<tr>
 
         {/* INSURANCE CLAIMS — WHEEL MART only */}
         {tab === 'claims' && isLkTax && (
-          <TabClaims showToast={showToast} />
+          <TabClaims showToast={showToast} staffRole={staffRole} />
         )}
 
         {/* CREDIT */}

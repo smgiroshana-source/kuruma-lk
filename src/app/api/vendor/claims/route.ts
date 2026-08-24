@@ -34,12 +34,14 @@ async function getCaller() {
 const r0 = (n: any) => Math.round(Number(n) || 0)
 
 async function claimWithDetail(admin: any, vendorId: string, claim: any) {
-  const [{ data: sales }, { data: bills }, { data: insurer }] = await Promise.all([
+  const [{ data: sales }, { data: bills }, { data: insurer }, { data: settlements }, { data: shortfalls }] = await Promise.all([
     admin.from('sales')
       .select('id, invoice_no, tax_serial, receipt_no, document_type, invoice_entity_id, total, net_amount, vat_amount, paid_amount, balance_due, payment_status, created_at, entity:invoice_entities(serial_qqqq, name)')
       .eq('claim_id', claim.id).eq('vendor_id', vendorId).order('created_at'),
     admin.from('claim_third_party_bills').select('*').eq('claim_id', claim.id).order('created_at'),
     admin.from('customers').select('id, name, tin').eq('id', claim.insurer_customer_id).single(),
+    admin.from('claim_settlements').select('*').eq('claim_id', claim.id).order('received_date'),
+    admin.from('claim_shortfalls').select('*').eq('claim_id', claim.id).order('created_at'),
   ])
   const liveSales = (sales || []).filter((x: any) => x.payment_status !== 'voided')
   const invoiced = liveSales.reduce((t: number, x: any) => t + r0(x.total), 0)
@@ -51,6 +53,8 @@ async function claimWithDetail(admin: any, vendorId: string, claim: any) {
     insurer: insurer ? { id: insurer.id, name: insurer.name, tin: insurer.tin } : null,
     sales: sales || [],
     bills: bills || [],
+    settlements: settlements || [],
+    shortfalls: shortfalls || [],
     totals: {
       invoiced, received, invoiceBalance: invoiced - received,
       billsSubmitted, billsReimbursed, billsOutstanding: billsSubmitted - billsReimbursed,
