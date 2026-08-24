@@ -73,7 +73,7 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const purchaserPhone   = escapeHtml(sale.customer_phone)
   const vehicleNo        = escapeHtml(sale.vehicle_no)
   const logoHtml = (s.logo_url && s.invoice_show_logo !== false)
-    ? `<img src="${escapeHtml(s.logo_url)}" style="height:38px;max-width:95px;object-fit:contain;display:block;margin-bottom:3px">`
+    ? `<img src="${escapeHtml(s.logo_url)}" style="height:44px;max-width:110px;object-fit:contain;display:block;margin-bottom:3px">`
     : ''
   const lineRows = items.map((i: any, idx: number) => `
     <tr>
@@ -100,87 +100,92 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
 html{background:#8c9194;min-height:100%;padding:8mm 0 16mm}
 body{
   font-family:Arial,'Helvetica Neue',sans-serif;
-  font-size:11px;color:#111;line-height:1.45;
+  font-size:12.5px;color:#111;line-height:1.5;
   width:210mm;min-height:148mm;
-  margin:0 auto;padding:7mm 10mm 6mm;
+  margin:0 auto;padding:6mm 10mm 5mm;
   background:#fff;
   box-shadow:0 4px 24px rgba(0,0,0,.4);
   display:flex;flex-direction:column;
 }
 @media print{
   html{background:#fff;padding:0}
-  body{width:100%;min-height:148mm;margin:0;padding:7mm 10mm 6mm;box-shadow:none}
+  body{width:100%;min-height:148mm;margin:0;padding:6mm 10mm 5mm;box-shadow:none}
 }
 /* ─── Header ─────────────────────────────────────────────── */
 .hdr{display:flex;justify-content:space-between;align-items:flex-start;
-     gap:10px;padding-bottom:8px;border-bottom:2.5px solid #000;margin-bottom:9px}
+     gap:14px;padding-bottom:7px;border-bottom:3px solid #000;margin-bottom:8px}
 .hl{flex:1}
-.hl-name{font-size:16px;font-weight:900;line-height:1.15}
-.hl-sub{font-size:9.5px;color:#444;margin-top:3px}
-.hl-tin{font-size:10px;font-weight:700;margin-top:3px}
+.hl-name{font-size:19px;font-weight:900;line-height:1.15}
+.hl-sub{font-size:11px;color:#444;margin-top:2px}
+.hl-tin{font-size:11.5px;font-weight:700;margin-top:2px}
 .hr{text-align:right;flex-shrink:0}
-.hr-badge{display:inline-block;border:2.5px solid #000;padding:5px 12px;
-          font-size:15px;font-weight:900;letter-spacing:1.8px;line-height:1.2}
-.hr-sno{font-size:9.5px;font-weight:700;margin-top:5px;
+.hr-badge{display:inline-block;border:3px solid #000;padding:6px 16px;
+          font-size:18px;font-weight:900;letter-spacing:2px;line-height:1.2}
+.hr-sno{font-size:11px;font-weight:700;margin-top:5px;
         font-family:'Courier New',monospace;letter-spacing:.3px}
 /* ─── Unified info box (parties + dates) ─────────────────── */
-.ibox{border:1.5px solid #000;margin-bottom:9px}
+.ibox{border:1.5px solid #000;margin-bottom:7px}
 /* flex (not fixed 2-col grid): rows hold 1–3 cells — full-width purchaser,
    and dates row fits Vehicle No when present */
 .irow{display:flex}
 .irow+.irow{border-top:1px solid #000}
-.ic{flex:1;padding:6px 9px}
+.ic{flex:1;padding:6px 12px}
 .ic+.ic{border-left:1px solid #000}
-.ic-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.2px;
-        color:#666;border-bottom:1px solid #e0e0e0;padding-bottom:3px;margin-bottom:4px}
-.ic-name{font-size:12.5px;font-weight:700}
-.ic-sub{font-size:10px;color:#333;margin-top:2px;line-height:1.4}
-.ic-tin{font-size:10px;font-weight:700;margin-top:3px}
-.ic-tinna{font-size:9.5px;color:#bbb;margin-top:3px}
-.ic-dlbl{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#666}
-.ic-dval{font-size:11.5px;font-weight:700;font-family:'Courier New',monospace;margin-top:3px}
+.ic-lbl{font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:1.3px;
+        color:#666;border-bottom:1px solid #e0e0e0;padding-bottom:3px;margin-bottom:5px}
+.ic-name{font-size:14.5px;font-weight:700}
+.ic-sub{font-size:11.5px;color:#333;margin-top:2px;line-height:1.4}
+.ic-tin{font-size:11.5px;font-weight:700;margin-top:3px}
+.ic-tinna{font-size:11px;color:#bbb;margin-top:3px}
+.ic-buyer{flex:1.55}
+.ic-meta{flex:1;display:flex;flex-direction:column;justify-content:center;gap:7px}
+.im{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.im-l{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#666;white-space:nowrap}
+.im-v{font-size:13px;font-weight:700;font-family:'Courier New',monospace;white-space:nowrap}
+.ic-dlbl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:#666}
+.ic-dval{font-size:13px;font-weight:700;font-family:'Courier New',monospace;margin-top:3px}
 /* ─── Line-items table ───────────────────────────────────── */
-table{width:100%;border-collapse:collapse;margin-bottom:8px}
-th{font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;
-   padding:5px 5px;text-align:left;
+table{width:100%;border-collapse:collapse;margin-bottom:6px}
+th{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+   padding:5px 8px;text-align:left;
    border-top:2px solid #000;border-bottom:2px solid #000}
-td{font-size:11px;padding:6px 5px;border-bottom:1px solid #e8e8e8;vertical-align:top}
-.c-no{width:20px;text-align:center}
-.c-qty{width:34px;text-align:center}
-.c-price{width:80px;text-align:right;white-space:nowrap}
-.c-amt{width:80px;text-align:right;font-weight:700;white-space:nowrap}
+td{font-size:12.5px;padding:5.5px 8px;border-bottom:1px solid #e8e8e8;vertical-align:top}
+.c-no{width:26px;text-align:center}
+.c-qty{width:44px;text-align:center}
+.c-price{width:105px;text-align:right;white-space:nowrap}
+.c-amt{width:110px;text-align:right;font-weight:700;white-space:nowrap}
 tbody tr:last-child td{border-bottom:2px solid #000}
 /* ─── Totals band: words + payment left, totals right — the landscape
        sheet is wide and short, so this row is where the height is saved ─── */
-.band{display:flex;gap:7px;align-items:stretch;margin-bottom:7px}
-.band-l{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.band{display:flex;gap:7px;align-items:stretch;margin-bottom:5px}
+.band-l{flex:1;display:flex;flex-direction:column;gap:5px;min-width:0}
 .band-l .words{flex:1;margin-bottom:0}
 .band-l .pmt{margin-bottom:0}
-.ttbl{width:80mm;flex-shrink:0;border:1.5px solid #000;border-collapse:collapse;margin-bottom:0}
-.ttbl td{font-size:11px;padding:5px 8px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
+.ttbl{width:84mm;flex-shrink:0;border:1.5px solid #000;border-collapse:collapse;margin-bottom:0}
+.ttbl td{font-size:12.5px;padding:6px 10px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
 .ttbl tbody tr:last-child td{border-bottom:none}
 .tlbl{color:#333;border-right:1px solid #e8e8e8;white-space:nowrap}
 .tval{text-align:right;font-weight:700;white-space:nowrap}
-.ttbl .grand td{border-top:2px double #000;font-size:14px;font-weight:900;padding:7px 8px}
+.ttbl .grand td{border-top:2px double #000;font-size:16px;font-weight:900;padding:8px 10px}
 .ttbl .grand .tlbl{border-right:1px solid #bbb}
 /* ─── Amount in words ─────────────────────────────────────── */
-.words{border:1.5px solid #000;padding:6px 9px;margin-bottom:7px}
-.wlbl{font-size:7.5px;font-weight:900;text-transform:uppercase;
-      letter-spacing:1px;color:#666;margin-bottom:3px}
-.wval{font-size:10.5px;font-weight:700}
+.words{border:1.5px solid #000;padding:6px 12px;margin-bottom:7px}
+.wlbl{font-size:8.5px;font-weight:900;text-transform:uppercase;
+      letter-spacing:1.1px;color:#666;margin-bottom:3px}
+.wval{font-size:12.5px;font-weight:700}
 /* ─── Payment ────────────────────────────────────────────── */
-.pmt{border:1px solid #ddd;padding:5px 9px;margin-bottom:0}
-.pmt-lbl{font-size:7.5px;font-weight:900;text-transform:uppercase;
-         letter-spacing:1px;color:#666;margin-bottom:3px}
-.pmt-val{font-size:10.5px;font-weight:700}
+.pmt{border:1px solid #ddd;padding:5px 12px;margin-bottom:0}
+.pmt-lbl{font-size:8.5px;font-weight:900;text-transform:uppercase;
+         letter-spacing:1.1px;color:#666;margin-bottom:3px}
+.pmt-val{font-size:12px;font-weight:700}
 /* ─── Flexible spacer + signatures + footer ──────────────── */
-.push{flex:1;min-height:3mm}
-.sigs{display:flex;justify-content:space-between;gap:24px}
+.push{flex:1;min-height:0}
+.sigs{display:flex;justify-content:space-between;gap:40px}
 .sig{flex:1;text-align:center}
 .sig-line{border-top:1px solid #000;padding-top:5px;
-          font-size:8.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#555}
-.footer{text-align:center;font-size:8px;color:#888;
-        margin-top:8px;padding-top:6px;border-top:1px dashed #ccc}
+          font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#555}
+.footer{text-align:center;font-size:9.5px;color:#888;
+        margin-top:6px;padding-top:4px;border-top:1px dashed #ccc}
 </style></head><body>
 
 <!-- Header -->
@@ -200,7 +205,7 @@ tbody tr:last-child td{border-bottom:2px solid #000}
 <!-- Purchaser / Dates (supplier appears once, in the letterhead — gazette: top-left) -->
 <div class="ibox">
   <div class="irow">
-    <div class="ic">
+    <div class="ic ic-buyer">
       <div class="ic-lbl">Bill To (Purchaser)</div>
       <div class="ic-name">${purchaserName || '&mdash;'}</div>
       ${purchaserAddress ? `<div class="ic-sub">${purchaserAddress}</div>` : ''}
@@ -209,21 +214,11 @@ tbody tr:last-child td{border-bottom:2px solid #000}
         ? `<div class="ic-tin">TIN: ${purchaserTin}</div>`
         : `<div class="ic-tinna">TIN: Not Registered</div>`}
     </div>
-  </div>
-  <div class="irow">
-    <div class="ic">
-      <div class="ic-dlbl">Date of Invoice</div>
-      <div class="ic-dval">${invoiceDate}</div>
+    <div class="ic ic-meta">
+      <div class="im"><span class="im-l">Date of Invoice</span><span class="im-v">${invoiceDate}</span></div>
+      <div class="im"><span class="im-l">Date of Supply</span><span class="im-v">${supplyDate}</span></div>
+      ${vehicleNo ? `<div class="im"><span class="im-l">Vehicle No</span><span class="im-v">${vehicleNo}</span></div>` : ''}
     </div>
-    <div class="ic">
-      <div class="ic-dlbl">Date of Supply</div>
-      <div class="ic-dval">${supplyDate}</div>
-    </div>
-    ${vehicleNo ? `
-    <div class="ic">
-      <div class="ic-dlbl">Vehicle No</div>
-      <div class="ic-dval">${vehicleNo}</div>
-    </div>` : ''}
   </div>
 </div>
 
@@ -293,7 +288,7 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
   const termsHtml = (!isThermal && s.invoice_terms) ? `<div style="margin-top:12px;padding:10px;border:2px solid #000;border-radius:6px;font-size:13px;color:#000;font-weight:600;line-height:1.5"><strong>Terms & Conditions:</strong><br/>${escapeHtml(s.invoice_terms).replace(/\n/g, '<br/>')}</div>` : ''
   const paymentLines = payments.map((p: any) => `<div style="display:flex;justify-content:space-between;font-size:${isThermal ? '10px' : '13px'};font-weight:${isThermal ? '700' : '600'};color:#000;padding:3px 0"><span>${escapeHtml((p.payment_method || 'cash').toUpperCase())}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</span><span>Rs.${parseFloat(p.amount).toLocaleString()}</span></div>`).join('')
   // The shop prints on A5 paper (owner, 2026-08-24)
-  const a5Style = `@page{size:A5 landscape;margin:7mm 10mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:11px;color:#222;font-weight:400;max-width:640px;margin:0 auto;padding:12px 16px}@media print{body{padding:0;max-width:100%}}.header{text-align:center;padding:10px 0 8px;margin-bottom:0}.shop-name{font-size:17px;font-weight:700;color:#000;letter-spacing:-0.3px}.header-sub{font-size:9px;color:#444;margin-top:2px;line-height:1.5}.invoice-title{display:flex;justify-content:space-between;align-items:center;padding:7px 0;margin-top:9px;border-top:2px solid #000;border-bottom:1px solid #aaa}.invoice-title h2{font-size:13px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:1.5px}.invoice-no{font-size:13px;font-weight:700;color:#000;font-family:'Courier New',monospace}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:8px 0}.info-cell{padding:5px 0;font-size:10px;border-bottom:1px solid #ccc}.info-cell:nth-child(even){text-align:right}.info-label{color:#555;font-size:7.5px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;display:block;margin-bottom:1px}.info-value{font-weight:600;color:#000;font-size:10.5px}table{width:100%;border-collapse:collapse;margin:9px 0}thead{background:#eee}th{text-align:left;font-size:8.5px;font-weight:700;padding:5px 6px;color:#222;text-transform:uppercase;letter-spacing:.4px;border-bottom:2px solid #aaa}td{padding:6px;font-size:10.5px;font-weight:500;color:#111;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{margin-top:6px;border-top:1px solid #aaa;padding-top:4px}.total-row{display:flex;justify-content:space-between;padding:3px 6px;font-size:10.5px;font-weight:600;color:#222}.grand-total{display:flex;justify-content:space-between;font-weight:800;font-size:15px;color:#000;padding:8px 6px;margin-top:4px;background:#eee;border-radius:4px}.balance-due{font-weight:700;font-size:12px;text-align:right;margin-top:9px;padding:8px 10px;border:2px solid #000;color:#000;border-radius:4px}.payments-section{margin-top:6px;padding:5px 6px;background:#f0f0f0;border-radius:4px}.payments-label{font-size:7.5px;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px}.note-section{margin-top:6px;padding:5px 8px;font-size:10px;font-style:italic;color:#333;border-left:3px solid #999}.footer{text-align:center;padding:14px 0 6px;font-size:8px;color:#888;margin-top:16px;border-top:1px solid #ccc}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}thead{background:#eee !important}.grand-total{background:#eee !important}}`
+  const a5Style = `@page{size:A5 landscape;margin:7mm 10mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif;font-size:13px;color:#222;font-weight:400;max-width:700px;margin:0 auto;padding:14px 20px}@media print{body{padding:0;max-width:100%}}.header{text-align:center;padding:10px 0 8px;margin-bottom:0}.shop-name{font-size:21px;font-weight:700;color:#000;letter-spacing:-0.4px}.header-sub{font-size:10.5px;color:#444;margin-top:2px;line-height:1.5}.invoice-title{display:flex;justify-content:space-between;align-items:center;padding:8px 0;margin-top:10px;border-top:2px solid #000;border-bottom:1px solid #aaa}.invoice-title h2{font-size:15px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:1.8px}.invoice-no{font-size:15px;font-weight:700;color:#000;font-family:'Courier New',monospace}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:9px 0}.info-cell{padding:6px 0;font-size:11px;border-bottom:1px solid #ccc}.info-cell:nth-child(even){text-align:right}.info-label{color:#555;font-size:8.5px;font-weight:600;text-transform:uppercase;letter-spacing:.9px;display:block;margin-bottom:1px}.info-value{font-weight:600;color:#000;font-size:12px}table{width:100%;border-collapse:collapse;margin:10px 0}thead{background:#eee}th{text-align:left;font-size:9.5px;font-weight:700;padding:6px 8px;color:#222;text-transform:uppercase;letter-spacing:.5px;border-bottom:2px solid #aaa}td{padding:7px 8px;font-size:12.5px;font-weight:500;color:#111;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{margin-top:7px;border-top:1px solid #aaa;padding-top:4px}.total-row{display:flex;justify-content:space-between;padding:3px 8px;font-size:12.5px;font-weight:600;color:#222}.grand-total{display:flex;justify-content:space-between;font-weight:800;font-size:17px;color:#000;padding:9px 8px;margin-top:4px;background:#eee;border-radius:4px}.balance-due{font-weight:700;font-size:13px;text-align:right;margin-top:10px;padding:9px 12px;border:2px solid #000;color:#000;border-radius:4px}.payments-section{margin-top:7px;padding:6px 8px;background:#f0f0f0;border-radius:4px}.payments-label{font-size:8.5px;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:.9px;margin-bottom:3px}.note-section{margin-top:7px;padding:6px 10px;font-size:11px;font-style:italic;color:#333;border-left:3px solid #999}.footer{text-align:center;padding:14px 0 6px;font-size:9px;color:#888;margin-top:16px;border-top:1px solid #ccc}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}thead{background:#eee !important}.grand-total{background:#eee !important}}`
   const thermalStyle = `@page{size:80mm auto;margin:2mm}*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Courier New',monospace;font-size:12px;color:#000;width:300px;max-width:100%;margin:0 auto}.header{text-align:center;padding:5px 0;border-bottom:1px dashed #000}.shop-name{font-size:16px;font-weight:900}table{width:100%;border-collapse:collapse;margin:5px 0}th{text-align:left;font-size:10px;font-weight:900;padding:3px 2px;border-bottom:1px dashed #000}td{padding:3px 2px;font-size:11px;border-bottom:1px solid #ddd}.text-right{text-align:right}.totals{border-top:1px dashed #000;padding-top:5px}.total-row{display:flex;justify-content:space-between;padding:2px 0;font-size:12px;font-weight:700}.grand-total{font-weight:900;font-size:16px;border-top:1px dashed #000;border-bottom:1px dashed #000;padding:5px 0;margin-top:5px}.footer{text-align:center;padding:8px 0 5px;font-size:10px;border-top:1px dashed #000;margin-top:5px}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}`
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${escapeHtml(sale.invoice_no)}</title>
 <style>${isThermal ? thermalStyle : a5Style}</style></head><body>
