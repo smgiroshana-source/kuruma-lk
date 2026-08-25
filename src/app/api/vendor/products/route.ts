@@ -114,7 +114,8 @@ export async function POST(req: NextRequest) {
       model_code: pd.model_code || null, year: pd.year || null, condition: pd.condition || 'Reconditioned',
       side: pd.side || null, color: pd.color || null, oem_code: pd.oem_code || null,
       price: pd.price ? parseInt(pd.price) : null, cost: pd.cost ? parseInt(pd.cost) : null,
-      show_price: pd.show_price !== false, quantity: parseInt(pd.quantity) || 1,
+      // 0 must stay 0 (GRN pre-creates at zero stock) — only ABSENT quantity defaults to 1
+      show_price: pd.show_price !== false, quantity: Number.isFinite(parseInt(pd.quantity)) ? Math.max(0, parseInt(pd.quantity)) : 1,
       added_date: pd.added_date || null, is_active: true, slug,
       loc_store: pd.loc_store || null, loc_floor: pd.loc_floor || null,
       loc_sub1: pd.loc_sub1 || null, loc_sub2: pd.loc_sub2 || null,
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
     revalidatePath('/')
     // Auto-seed FIFO cost layer if opening stock + cost both provided
-    const initQty  = parseInt(pd.quantity) || 1
+    const initQty  = Number.isFinite(parseInt(pd.quantity)) ? Math.max(0, parseInt(pd.quantity)) : 1
     const initCost = parseInt(pd.cost)
     if (initQty > 0 && initCost > 0 && product) {
       await admin.from('cost_layers').insert({
