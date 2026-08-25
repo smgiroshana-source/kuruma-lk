@@ -52,9 +52,13 @@ const ACCESSORY_TYPES = [
   { v: 'sticker_weight',        l: 'Sticker Weight',        loose: true },
   { v: 'clip_weight',           l: 'Clip Weight',           loose: true },
 ]
-// "400R8 TVS Eurogrip Tube" — size, make, then what it is.
+// "400R8 TVS Eurogrip Tube" — size, make, then what it is. People also type
+// the type word into Make ("Euro Grip Tube TVS") — never append it twice.
 function accessoryName(t: { l: string }, size: string, make: string): string {
-  return [size.trim(), make.trim(), t.l].filter(Boolean).join(' ')
+  const base = [size.trim(), make.trim()].filter(Boolean).join(' ')
+  const escaped = t.l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const already = new RegExp('\\b' + escaped + '\\b', 'i')
+  return already.test(base) ? base : [base, t.l].filter(Boolean).join(' ')
 }
 
 export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed }: TabStockLkTaxProps) {
