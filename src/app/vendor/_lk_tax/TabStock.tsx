@@ -996,10 +996,13 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
               )}
               {/* Inline new product form */}
               {grnInlineCreate && (
-                <div className={`border rounded-xl p-4 mb-3 space-y-3 ${grnNewProduct.category === 'Wheels & Tires' ? 'border-sky-200 bg-sky-50' : 'border-orange-200 bg-orange-50'}`}>
+                <div className="border border-orange-200 bg-orange-50 rounded-xl p-4 mb-3 space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className={`text-xs font-bold uppercase ${grnNewProduct.category === 'Wheels & Tires' ? 'text-sky-700' : 'text-orange-700'}`}>
-                      {grnNewProduct.category === 'Wheels & Tires' ? '🏎️ New Tyre' : 'New Product'}
+                    <h4 className="text-xs font-bold uppercase text-orange-700">
+                      {(() => {
+                        const acc = ACCESSORY_TYPES.find(t => t.v === grnNewProduct.accessoryType)
+                        return acc ? `🔩 New ${acc.l}` : grnNewProduct.category === 'Wheels & Tires' ? '🏎️ New Tyre' : 'New Product'
+                      })()}
                     </h4>
                     {grnNewProduct.category !== 'Wheels & Tires' && (
                       <button onClick={() => setGrnNewProduct(p => ({ ...p, category: 'Wheels & Tires', tyre_width: '', tyre_profile: '', tyre_rim: '', accessoryType: '' }))}
