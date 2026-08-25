@@ -4,4 +4,18 @@
   body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
+
+  /* No spinner arrows on number fields. These are money, mileage and quantity
+     boxes on a shop counter: the arrows are too small to hit, and a stray
+     scroll over a focused field silently changes the figure. Typing is the
+     only way a number changes. (JS blocks the wheel — see ScrollToTop.) */
+  input[type='number'] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
 }

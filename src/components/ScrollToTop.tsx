@@ -13,6 +13,19 @@ export default function ScrollToTop() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  // A wheel over a FOCUSED number input changes its value — a mileage or a
+  // price silently altered by scrolling past it. Blur instead, so the page
+  // scrolls and the figure stays whatever was typed. (The spinner arrows
+  // themselves are removed in globals.css.)
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      const el = document.activeElement as HTMLInputElement | null
+      if (el?.type === 'number' && el === e.target) el.blur()
+    }
+    document.addEventListener('wheel', onWheel, { passive: true })
+    return () => document.removeEventListener('wheel', onWheel)
+  }, [])
+
   const scrollToTop = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
