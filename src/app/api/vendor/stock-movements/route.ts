@@ -23,6 +23,25 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
 
   const productId = req.nextUrl.searchParams.get('product_id')
+  const date = req.nextUrl.searchParams.get('date')
+
+  // Daily-report mode: every ADJUSTMENT of one Colombo day, with the product
+  // name attached — recounts and initial stock are part of the day's story.
+  if (!productId && date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const fromTs = new Date(date + 'T00:00:00+05:30').toISOString()
+    const toTs = new Date(date + 'T23:59:59.999+05:30').toISOString()
+    const { data: adj, error: adjErr } = await admin
+      .from('stock_movements')
+      .select('*, product:products(name, product_type)')
+      .eq('vendor_id', vendor.id)
+      .eq('movement_type', 'adjustment')
+      .gte('created_at', fromTs)
+      .lte('created_at', toTs)
+      .order('created_at')
+    if (adjErr) return NextResponse.json({ error: adjErr.message }, { status: 500 })
+    return NextResponse.json({ movements: adj || [] })
+  }
+
   if (!productId) {
     return NextResponse.json({ error: 'product_id is required' }, { status: 400 })
   }

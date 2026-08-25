@@ -39,6 +39,24 @@ interface TabStockLkTaxProps {
 
 const STOCK_VIEWS: StockMainView[] = ['stocktake', 'suppliers', 'receive', 'history', 'transfer']
 
+// Accessories the shop sells beside tyres. Tubes and flaps are countable
+// units; the small consumables are LOOSE-COUNTED (owner, 2026-08-25) — the
+// count is approximate and may go negative, which is information, not error.
+const ACCESSORY_TYPES = [
+  { v: 'tube',                  l: 'Tube',                  loose: false },
+  { v: 'flap',                  l: 'Flap',                  loose: false },
+  { v: 'tubeless_valve',        l: 'Tubeless Valve',        loose: true },
+  { v: 'tubeless_nickel_valve', l: 'Tubeless Nickel Valve', loose: true },
+  { v: 'tubeless_patch',        l: 'Tubeless Patch',        loose: true },
+  { v: 'tube_patch',            l: 'Tube Patch',            loose: true },
+  { v: 'sticker_weight',        l: 'Sticker Weight',        loose: true },
+  { v: 'clip_weight',           l: 'Clip Weight',           loose: true },
+]
+// "400R8 TVS Eurogrip Tube" — size, make, then what it is.
+function accessoryName(t: { l: string }, size: string, make: string): string {
+  return [size.trim(), make.trim(), t.l].filter(Boolean).join(' ')
+}
+
 export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed }: TabStockLkTaxProps) {
   const [stockMainView, setStockMainView] = useState<StockMainView>('stocktake')
   // Stock sent by the other shop waits for an answer here — say so on the tab,
@@ -100,7 +118,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const supplierVatRate = (supplierId: string) =>
     suppliers.find((x: any) => x.id === supplierId)?.vat_registered ? vatRate : 0
   const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '' })
-  const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any }>>([])
+  const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any; productType?: string; packs?: any; piecesPerPack?: any; foreignCurrency?: string; foreignAmount?: string }>>([])
   const [grnCsvPreview, setGrnCsvPreview] = useState<Array<{ matched: boolean; grnItem: any }> | null>(null)
   const [grnCsvFileName, setGrnCsvFileName] = useState('')
   const [grnProductSearch, setGrnProductSearch] = useState('')
@@ -125,7 +143,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [supplierDeleting, setSupplierDeleting] = useState<string | null>(null)
   // GRN inline product creation
   const [grnInlineCreate, setGrnInlineCreate] = useState(false)
-  const [grnNewProduct, setGrnNewProduct] = useState({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '' })
+  const [grnNewProduct, setGrnNewProduct] = useState({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '', accessoryType: '', size: '' })
   const [grnInlineCreating, setGrnInlineCreating] = useState(false)
   // GRN draft edit
   const [editingGrnId, setEditingGrnId] = useState<string | null>(null)
@@ -411,17 +429,19 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   }
 
   async function grnInlineCreateProduct() {
-    if (!grnNewProduct.name.trim()) { showToast('Product name required'); return }
+    if (!grnNewProduct.name.trim() && !grnNewProduct.accessoryType) { showToast('Product name required'); return }
     setGrnInlineCreating(true)
     try {
-      const isTyre = grnNewProduct.category === 'Wheels & Tires'
+      const isTyre = grnNewProduct.category === 'Wheels & Tires' && !grnNewProduct.accessoryType
+      const acc = ACCESSORY_TYPES.find(t => t.v === grnNewProduct.accessoryType)
+      const accName = acc ? accessoryName(acc, grnNewProduct.size || '', grnNewProduct.make || '') : ''
       const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create', data: {
-          name: grnNewProduct.name, category: grnNewProduct.category,
+          name: acc ? accName : grnNewProduct.name, category: acc ? (acc.loose ? 'Other' : 'Wheels & Tires') : grnNewProduct.category,
           condition: grnNewProduct.condition, make: grnNewProduct.make,
           model: isTyre ? '' : grnNewProduct.model, price: grnNewProduct.price,
           quantity: 0, show_price: true,
-          product_type: isTyre ? 'tyre' : 'part',
+          product_type: isTyre ? 'tyre' : acc?.loose ? 'consumable' : 'part',
           tyre_width:   isTyre && grnNewProduct.tyre_width   ? parseInt(grnNewProduct.tyre_width)   : null,
           tyre_profile: isTyre && grnNewProduct.tyre_profile ? parseInt(grnNewProduct.tyre_profile) : null,
           tyre_rim:     isTyre && grnNewProduct.tyre_rim     ? parseInt(grnNewProduct.tyre_rim)     : null,
@@ -429,9 +449,9 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       const j = await r.json()
       if (j.success && j.product) {
         const p = j.product
-        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', quantity: 1, unitCost: 0, vatRate: supplierVatRate(grnForm.supplierId), foreignCurrency: '', foreignAmount: '' }])
+        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', productType: p.product_type, quantity: 1, unitCost: 0, vatRate: supplierVatRate(grnForm.supplierId), foreignCurrency: '', foreignAmount: '' }])
         setGrnInlineCreate(false)
-        setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '' })
+        setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '', accessoryType: '', size: '' })
         setGrnProductSearch('')
         await onDataChanged()
         showToast('Product created and added to GRN')
@@ -477,13 +497,15 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
     setStocktakeSaving(true)
     try {
+      // adjust_stock (not a bare update): every quantity change writes an
+      // audited stock_movements row that the daily report lists.
       const responses = await Promise.all([
         ...qtyEntries.map(([id, qty]) =>
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'update', productId: id, data: { quantity: qty, last_stock_confirmed_at: now } }) })),
+            body: JSON.stringify({ action: 'adjust_stock', productId: id, newQuantity: qty, reason: 'stocktake' }) })),
         ...confirmOnly.map(id =>
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'update', productId: id, data: { last_stock_confirmed_at: now } }) }))
+            body: JSON.stringify({ action: 'adjust_stock', productId: id, confirmOnly: true }) }))
       ])
       const failedCount = responses.filter(r => !r.ok).length
       if (failedCount > 0) {
@@ -899,6 +921,13 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 }} className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-700 bg-sky-50 border border-sky-200 px-3 py-1.5 rounded-lg hover:bg-sky-100 active:bg-sky-200">
                   🏎️ Quick Add Tyre
                 </button>
+                <button onClick={() => {
+                  setGrnInlineCreate(true)
+                  setGrnNewProduct(p => ({ ...p, category: 'Other', accessoryType: 'tube', size: '', make: '' }))
+                  setGrnProductSearch('')
+                }} className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 active:bg-amber-200 ml-1.5">
+                  🔩 Tube / Accessory
+                </button>
               </div>
               {/* Search */}
               <div className="relative mb-3">
@@ -916,7 +945,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     return (
                       <button key={p.id} onClick={() => {
                         if (alreadyAdded) { showToast('Already in list — adjust qty below'); return }
-                        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', quantity: 1, unitCost: 0, vatRate: supplierVatRate(grnForm.supplierId) }])
+                        setGrnItems(prev => [...prev, { productId: p.id, productName: p.name, productSku: p.sku || '', productType: p.product_type, quantity: 1, unitCost: 0, vatRate: supplierVatRate(grnForm.supplierId) }])
                         setGrnProductSearch('')
                       }} className={`w-full text-left px-3 py-2.5 flex justify-between items-center border-b border-slate-100 last:border-0 active:bg-slate-50 ${alreadyAdded ? 'opacity-40' : ''}`}>
                         <div>
@@ -949,6 +978,42 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       <button onClick={() => setGrnNewProduct(p => ({ ...p, category: 'Wheels & Tires', tyre_width: '', tyre_profile: '', tyre_rim: '' }))}
                         className="text-[10px] text-sky-600 underline hover:text-sky-800">Switch to Tyre mode →</button>
                     )}
+                  </div>
+
+                  {/* Accessory quick path: pick what it is, size + make build the name */}
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">What is it?</label>
+                    <div className="flex gap-1 flex-wrap">
+                      <button onClick={() => setGrnNewProduct(p => ({ ...p, accessoryType: '' }))}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${!grnNewProduct.accessoryType ? 'border-orange-400 bg-orange-100 text-orange-700' : 'border-slate-200 text-slate-500 bg-white'}`}>
+                        Part / Tyre
+                      </button>
+                      {ACCESSORY_TYPES.map(t => (
+                        <button key={t.v} onClick={() => setGrnNewProduct(p => ({ ...p, accessoryType: t.v }))}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${grnNewProduct.accessoryType === t.v ? 'border-amber-500 bg-amber-100 text-amber-800' : 'border-slate-200 text-slate-500 bg-white'}`}>
+                          {t.l}{t.loose ? ' ◦' : ''}
+                        </button>
+                      ))}
+                    </div>
+                    {grnNewProduct.accessoryType && (() => {
+                      const t = ACCESSORY_TYPES.find(x => x.v === grnNewProduct.accessoryType)!
+                      return (
+                        <div className="mt-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input value={grnNewProduct.size} onChange={e => setGrnNewProduct(p => ({ ...p, size: e.target.value }))}
+                              placeholder={t.loose ? 'Spec (optional, e.g. 5g)' : 'Size (e.g. 400R8)'}
+                              className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-amber-400 font-mono" />
+                            <input value={grnNewProduct.make} onChange={e => setGrnNewProduct(p => ({ ...p, make: e.target.value }))}
+                              placeholder="Make (e.g. TVS Eurogrip)"
+                              className="px-2 py-2 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-amber-400" />
+                          </div>
+                          <p className="text-[11px] font-bold text-slate-600 mt-1.5">
+                            → {accessoryName(t, grnNewProduct.size || '', grnNewProduct.make || '') || '…'}
+                            {t.loose && <span className="font-normal text-slate-400"> · loose count — sold per piece, count may go minus</span>}
+                          </p>
+                        </div>
+                      )
+                    })()}
                   </div>
 
                   {/* Category + Condition */}
@@ -1065,11 +1130,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   </div>
 
                   <div className="flex gap-2">
-                    <button onClick={grnInlineCreateProduct} disabled={grnInlineCreating || !grnNewProduct.name.trim()}
+                    <button onClick={grnInlineCreateProduct} disabled={grnInlineCreating || (!grnNewProduct.name.trim() && !grnNewProduct.accessoryType)}
                       className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-lg">
                       {grnInlineCreating ? 'Creating…' : 'Create & Add to GRN'}
                     </button>
-                    <button onClick={() => { setGrnInlineCreate(false); setGrnProductSearch(''); setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '' }) }}
+                    <button onClick={() => { setGrnInlineCreate(false); setGrnProductSearch(''); setGrnNewProduct({ name: '', category: 'Other', condition: 'Reconditioned', make: '', model: '', price: '', tyre_width: '', tyre_profile: '', tyre_rim: '', accessoryType: '', size: '' }) }}
                       className="text-xs font-bold text-slate-500 px-4 py-2 rounded-lg hover:bg-slate-100">Cancel</button>
                   </div>
                 </div>
@@ -1198,12 +1263,35 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                           </td>
                           <td className="py-2 text-center">
                             <input type="number" min="1" value={item.quantity}
-                              onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, quantity: Math.max(1, parseInt(e.target.value) || 1) } : x))}
+                              onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, quantity: Math.max(1, parseInt(e.target.value) || 1), packs: '', piecesPerPack: '' } : x))}
                               className="w-16 px-1.5 py-1 border border-slate-200 rounded text-center text-sm" />
+                            {item.productType === 'consumable' && (
+                              <div className="flex items-center gap-1 justify-center mt-1">
+                                <input type="number" min="1" value={item.packs || ''} placeholder="pk"
+                                  title="Packets received"
+                                  onChange={e => setGrnItems(prev => prev.map((x, j) => {
+                                    if (j !== i) return x
+                                    const packs = parseInt(e.target.value) || 0
+                                    const per = parseInt(x.piecesPerPack) || 0
+                                    return { ...x, packs: e.target.value, quantity: packs > 0 && per > 0 ? packs * per : x.quantity }
+                                  }))}
+                                  className="w-10 px-1 py-0.5 border border-amber-200 rounded text-center text-[11px]" />
+                                <span className="text-[10px] text-slate-400">×</span>
+                                <input type="number" min="1" value={item.piecesPerPack || ''} placeholder="pcs"
+                                  title="Pieces per packet"
+                                  onChange={e => setGrnItems(prev => prev.map((x, j) => {
+                                    if (j !== i) return x
+                                    const per = parseInt(e.target.value) || 0
+                                    const packs = parseInt(x.packs) || 0
+                                    return { ...x, piecesPerPack: e.target.value, quantity: packs > 0 && per > 0 ? packs * per : x.quantity }
+                                  }))}
+                                  className="w-10 px-1 py-0.5 border border-amber-200 rounded text-center text-[11px]" />
+                              </div>
+                            )}
                           </td>
                           <td className="py-2">
                             <input type="number" min="0" value={item.unitCost || ''}
-                              placeholder="LKR excl. VAT"
+                              placeholder={item.productType === 'consumable' && item.piecesPerPack ? 'per PIECE' : 'LKR excl. VAT'}
                               onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, unitCost: Math.max(0, parseInt(e.target.value) || 0) } : x))}
                               className="w-28 px-1.5 py-1 border border-slate-200 rounded text-right text-sm" />
                           </td>

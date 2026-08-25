@@ -584,9 +584,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ── Cart ───────────────────────────────────────────────────────────────
   function addToCart(product: any) {
     setPosCart(prev => {
+      const loose = product.product_type === 'consumable'
       const ex = prev.find(i => i.productId === product.id)
-      if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: Math.min(i.quantity + 1, product.quantity) } : i)
-      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: product.quantity, cost: product.cost ?? null }]
+      if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: loose ? i.quantity + 1 : Math.min(i.quantity + 1, product.quantity) } : i)
+      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: loose ? null : product.quantity, cost: product.cost ?? null }]
     })
     setPosSearch('')
   }
@@ -713,7 +714,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     const s = posSearch.toLowerCase()
     const tyreSize = parseTyreSize(posSearch.trim())
     return (products || []).filter((p: any) => {
-      if (p.quantity <= 0) return false
+      // Loose-counted consumables sell even at 0 or minus — the count is
+      // approximate by design and must never block a sale.
+      if (p.quantity <= 0 && p.product_type !== 'consumable') return false
       // Tyre-size match takes priority when a size pattern is detected
       if (tyreSize && p.product_type === 'tyre') {
         return p.tyre_width === tyreSize.width &&
@@ -740,7 +743,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   }, [quickPickKey])
   const quickPicks = useMemo(() =>
     quickPickIds
-      .map(id => (products || []).find((p: any) => p.id === id && p.quantity > 0))
+      .map(id => (products || []).find((p: any) => p.id === id && (p.quantity > 0 || p.product_type === 'consumable')))
       .filter(Boolean)
       .slice(0, 10),
   [quickPickIds, products])

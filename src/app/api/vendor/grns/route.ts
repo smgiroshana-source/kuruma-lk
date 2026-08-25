@@ -97,6 +97,9 @@ export async function POST(req: NextRequest) {
         total_cost:       totalLine,
         foreign_currency: item.foreignCurrency || null,
         foreign_amount:   item.foreignAmount   || null,
+        // pack purchases (consumables): audit fact only — quantity is pieces
+        packs:            item.packs ? Math.round(Number(item.packs)) : null,
+        pieces_per_pack:  item.piecesPerPack ? Math.round(Number(item.piecesPerPack)) : null,
       })
     }
     const totalCost = netCost + inputVat
@@ -286,6 +289,9 @@ export async function POST(req: NextRequest) {
         total_cost:       totalLine,
         foreign_currency: item.foreignCurrency || null,
         foreign_amount:   item.foreignAmount   || null,
+        // pack purchases (consumables): audit fact only — quantity is pieces
+        packs:            item.packs ? Math.round(Number(item.packs)) : null,
+        pieces_per_pack:  item.piecesPerPack ? Math.round(Number(item.piecesPerPack)) : null,
       })
     }
     const totalCost = netCost + inputVat

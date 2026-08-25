@@ -16,10 +16,10 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return vendor
+  if (vendor) return { ...vendor, callerUserId: user.id }
   // Check if staff member
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return staffLink.vendor
+  if (staffLink?.vendor) return { ...staffLink.vendor, callerUserId: user.id }
   return null
 }
 
@@ -444,6 +444,56 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── SEED COST LAYER — for stocktake upward adjustments ───
+  // ─── ADJUST STOCK (audited) ───
+  // The count screen and initial-stock entry go through here, NOT a bare
+  // quantity update: every change writes a stock_movements row so the daily
+  // report can show who moved what and why. Consumables (loose-counted
+  // accessories) may go negative — a negative count is information.
+  if (action === 'adjust_stock') {
+    const { productId, newQuantity, reason, note, unitCost, confirmOnly } = body
+    const { data: p } = await admin.from('products')
+      .select('id, vendor_id, sku, name, quantity, product_type').eq('id', productId).single()
+    if (!p || p.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
+
+    const now = new Date().toISOString()
+    if (confirmOnly) {
+      await admin.from('products').update({ last_stock_confirmed_at: now }).eq('id', productId)
+      return NextResponse.json({ success: true, quantity: p.quantity })
+    }
+
+    const target = Math.round(Number(newQuantity))
+    if (!Number.isFinite(target)) return NextResponse.json({ success: false, error: 'newQuantity required' }, { status: 400 })
+    if (target < 0 && p.product_type !== 'consumable') {
+      return NextResponse.json({ success: false, error: 'Only loose-counted consumables can go below zero' }, { status: 400 })
+    }
+    const delta = target - Number(p.quantity || 0)
+
+    const { error: upErr } = await admin.from('products')
+      .update({ quantity: target, last_stock_confirmed_at: now }).eq('id', productId)
+    if (upErr) return NextResponse.json({ success: false, error: upErr.message }, { status: 400 })
+
+    if (delta !== 0) {
+      await admin.from('stock_movements').insert({
+        vendor_id: vendor.id, product_id: productId, product_sku: p.sku || '',
+        movement_type: 'adjustment',
+        quantity_change: delta, quantity_before: Number(p.quantity || 0), quantity_after: target,
+        notes: [reason || 'stocktake', note?.trim() || null].filter(Boolean).join(' — '),
+        created_by: (vendor as any).callerUserId || null,
+      })
+      // Initial stock / found stock with a cost → seed a FIFO layer so later
+      // sales carry a real cost instead of zero.
+      const cost = Math.round(Number(unitCost) || 0)
+      if (delta > 0 && cost > 0) {
+        await admin.from('cost_layers').insert({
+          vendor_id: vendor.id, product_id: productId,
+          quantity_received: delta, quantity_remaining: delta,
+          unit_cost: cost, received_at: now.slice(0, 10),
+        })
+      }
+    }
+    return NextResponse.json({ success: true, quantity: target, delta })
+  }
+
   if (action === 'seed_cost_layer') {
     const { productId, unitCost, quantity, receivedAt } = body
     if (!productId || !unitCost || !quantity) return NextResponse.json({ success: false, error: 'productId, unitCost, quantity required' }, { status: 400 })

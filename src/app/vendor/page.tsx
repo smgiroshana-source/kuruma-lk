@@ -1519,7 +1519,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[], dayCreditNotes?: any[], daySupplierCredits?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[], dayCreditNotes?: any[], daySupplierCredits?: any[], stockAdjustments?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1738,6 +1738,20 @@ ${(dayWriteoffs || []).length > 0 ? (() => {
           ' \u2014 Rs.' + parseInt(w.total_cost || 0).toLocaleString() + '</div>').join('') +
         '<div style="font-size:12px;font-weight:800;color:#92400e;border-top:1px solid #fde68a;margin-top:6px;padding-top:6px">Total cost lost: Rs.' + woTotal.toLocaleString() + '</div>' +
         '<div style="font-size:10px;color:#a16207;margin-top:4px">Goods off the shelf without a sale. No cash moved \u2014 this is stock value, not a drawer payment.</div>' +
+        '</div>'
+    })() : ''}
+
+${(stockAdjustments || []).length > 0 ? (() => {
+      // Counts changed by hand today — recounts, initial stock, corrections.
+      // The owner reads this page, so an adjustment cannot happen quietly.
+      return '<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Stock Adjustments</h3>' +
+        '<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 12px">' +
+        (stockAdjustments || []).map((m: any) =>
+          '<div style="font-size:12px;color:#0c4a6e;padding:2px 0">\u2022 <strong>' + escapeHtml(m.product?.name || m.product_sku || '?') + '</strong> ' +
+          (Number(m.quantity_change) > 0 ? '+' : '') + Number(m.quantity_change).toLocaleString() +
+          ' (' + Number(m.quantity_before).toLocaleString() + ' \u2192 ' + Number(m.quantity_after).toLocaleString() + ')' +
+          (m.notes ? ' \u00b7 ' + escapeHtml(m.notes) : '') + '</div>').join('') +
+        '<div style="font-size:10px;color:#0369a1;margin-top:4px">Counts changed by hand \u2014 recounts, initial stock and corrections. Not sales, not GRNs.</div>' +
         '</div>'
     })() : ''}
 
@@ -1983,7 +1997,7 @@ ${customerRows.map(c => `<tr>
       // Early-morning Colombo sales (+5:30) are stored under yesterday's UTC date;
       // fetch the previous UTC day too and pin each row to its Colombo day.
       const prev = new Date(date + 'T00:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1)
-      const [r, cs, ex, wo, cn, scn] = await Promise.all([
+      const [r, cs, ex, wo, cn, scn, sm] = await Promise.all([
         fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${date}`),
         fetch(`/api/vendor/cash-sessions?date=${date}`),
         fetch(`/api/vendor/expenses?date=${date}`),
@@ -1995,6 +2009,9 @@ ${customerRows.map(c => `<tr>
         // send reduce what we owe.
         fetch('/api/vendor/credit-notes'),
         fetch('/api/vendor/supplier-credit-notes'),
+        // Counts changed by hand today — the report lists them so an
+        // adjustment can never happen quietly.
+        fetch('/api/vendor/stock-movements?date=' + date),
       ])
       if (!r.ok) { showToast(`Failed (${r.status})`) }
       else {
@@ -2046,7 +2063,9 @@ ${customerRows.map(c => `<tr>
               .filter((c: any) => String(c.credit_note_date || '').slice(0, 10) === date)
           }
         } catch {}
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs, dayCreditNotes, daySupplierCredits)
+        let stockAdjustments: any[] = []
+        try { if (sm.ok) { const sj = await sm.json(); stockAdjustments = sj.movements || [] } } catch {}
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs, dayCreditNotes, daySupplierCredits, stockAdjustments)
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)
