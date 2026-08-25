@@ -60,3 +60,9 @@ select 'adjust_product_quantity' as item,
 union all
 select 'grn_items.packs', (select count(*) from information_schema.columns
   where table_name = 'grn_items' and column_name = 'packs');
+
+-- The original schema's check constraint predates consumables — without this,
+-- creating any loose-counted accessory fails on insert (found by probe).
+alter table public.products drop constraint if exists products_product_type_check;
+alter table public.products add constraint products_product_type_check
+  check (product_type in ('part', 'tyre', 'consumable'));
