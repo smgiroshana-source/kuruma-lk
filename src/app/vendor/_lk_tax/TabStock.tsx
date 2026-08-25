@@ -36,6 +36,10 @@ interface TabStockLkTaxProps {
   // once on arrival, then cleared via onInitialViewConsumed.
   initialView?: string | null
   onInitialViewConsumed?: () => void
+  // Reducing stock past the small-correction limit is a manager decision —
+  // the server enforces it too, this only shapes what the screen offers.
+  staffRole?: string
+  onNavigate?: (tab: string) => void
 }
 
 const STOCK_VIEWS: StockMainView[] = ['stocktake', 'suppliers', 'receive', 'history', 'transfer']
@@ -62,7 +66,22 @@ function accessoryName(t: { l: string }, size: string, make: string): string {
   return already.test(base) ? base : [base, t.l].filter(Boolean).join(' ')
 }
 
-export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed }: TabStockLkTaxProps) {
+// Mirrors the server rule in /api/vendor/products (adjust_stock). A count
+// correction may shrink stock a little; past either limit the goods are gone,
+// which is a Write-off — reason recorded, cost charged to profit.
+const SMALL_DROP_UNITS = 2
+const SMALL_DROP_VALUE = 5000
+// Damaged / lost / theft are deliberately absent: those belong in Write-offs.
+const DROP_REASONS: { v: string; l: string }[] = [
+  { v: 'miscounted',       l: 'Miscounted before' },
+  { v: 'found_elsewhere',  l: 'Found in another place' },
+  { v: 'used_in_shop',     l: 'Used in the shop, not billed' },
+  { v: 'data_entry_error', l: 'Typed in wrong earlier' },
+]
+type DropPrompt = { id: string; name: string; units: number; oldQty: number; newQty: number; value: number; tooBig: boolean; reason: string }
+
+export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed, staffRole, onNavigate }: TabStockLkTaxProps) {
+  const mayWriteDown = staffRole === 'owner' || staffRole === 'manager'
   const [stockMainView, setStockMainView] = useState<StockMainView>('stocktake')
   // Stock sent by the other shop waits for an answer here — say so on the tab,
   // otherwise the only notice is opening the tab and finding it.
@@ -160,6 +179,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [grnReversing, setGrnReversing] = useState<string | null>(null)
   // Stocktake cost prompt
   const [stocktakeCostPrompt, setStocktakeCostPrompt] = useState<Array<{id:string,name:string,delta:number,oldQty:number,newQty:number,cost:string}> | null>(null)
+  const [stocktakeDropPrompt, setStocktakeDropPrompt] = useState<DropPrompt[] | null>(null)
+  const [stocktakeDropSaving, setStocktakeDropSaving] = useState(false)
   const [stocktakeCostSaving, setStocktakeCostSaving] = useState(false)
 
   useEffect(() => { fetchSuppliers(); fetchGrnList() }, [])
@@ -508,11 +529,40 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     setSupplierDeleting(null)
   }
 
-  async function saveAllStockChanges(skipCostPrompt = false) {
+  // Reasons chosen in the drop prompt, keyed by product — read by the save
+  // call that follows it.
+  const dropReasonsRef = useRef<Record<string, string>>({})
+  const dropReasons = dropReasonsRef.current
+
+  async function saveAllStockChanges(skipCostPrompt = false, skipDropPrompt = false) {
     const now = new Date().toISOString()
     const qtyEntries = Object.entries(stockQtyEdits)
     const confirmOnly = [...stockConfirmSet].filter(id => !(id in stockQtyEdits))
     if (!qtyEntries.length && !confirmOnly.length) return
+
+    // Stock going DOWN has to say why. Profit only ever sees a loss through
+    // Write-offs, so a count quietly reduced here loses goods with no reason
+    // and no cost charged anywhere. Small corrections take a reason; anything
+    // bigger is a write-off, not a miscount.
+    if (!skipDropPrompt) {
+      const drops = qtyEntries
+        .map(([id, newQty]) => {
+          const product = allProducts.find((p: any) => p.id === id)
+          const oldQty = product?.quantity ?? 0
+          const delta = newQty - oldQty
+          if (delta >= 0) return null
+          const units = Math.abs(delta)
+          const unitCost = Math.round(Number(product?.cost) || 0)
+          const value = units * unitCost
+          return {
+            id, name: product?.name || id, units, oldQty, newQty, value,
+            tooBig: units > SMALL_DROP_UNITS || value > SMALL_DROP_VALUE,
+            reason: 'miscounted',
+          }
+        })
+        .filter(Boolean) as DropPrompt[]
+      if (drops.length > 0) { setStocktakeDropPrompt(drops); return }
+    }
 
     // Check for upward qty adjustments — prompt for cost if not already prompted
     if (!skipCostPrompt) {
@@ -537,7 +587,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       const responses = await Promise.all([
         ...qtyEntries.map(([id, qty]) =>
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'adjust_stock', productId: id, newQuantity: qty, reason: 'stocktake' }) })),
+            body: JSON.stringify({ action: 'adjust_stock', productId: id, newQuantity: qty, reason: dropReasons[id] || 'miscounted' }) })),
         ...confirmOnly.map(id =>
           fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'adjust_stock', productId: id, confirmOnly: true }) }))
@@ -576,7 +626,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         }
       }))
       setStocktakeCostPrompt(null)
-      await saveAllStockChanges(true) // proceed without re-prompting
+      await saveAllStockChanges(true, true) // proceed without re-prompting
     } catch { showToast('Error seeding cost layers') }
     setStocktakeCostSaving(false)
   }
@@ -1992,6 +2042,76 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       )}{/* end stocktake view */}
 
       {/* ── STOCKTAKE COST PROMPT MODAL ── */}
+      {/* Stock going down — say why, and send the big ones to Write-offs.
+          A count reduced silently loses goods with no reason and no cost
+          charged to profit; that is also how a theft is buried. */}
+      {stocktakeDropPrompt && (() => {
+        const blocked = stocktakeDropPrompt.filter(d => d.tooBig && !mayWriteDown)
+        const canSave = blocked.length === 0
+        return (
+          <div className="fixed inset-0 bg-black/50 z-[80] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
+              <div className="bg-red-50 px-5 py-4 border-b border-red-100">
+                <h3 className="font-bold text-base text-red-800">📉 Stock is going down — why?</h3>
+                <p className="text-xs text-red-600 mt-1">
+                  A smaller count means goods left the shelf. Say what happened, so the shortage is explained rather than just gone.
+                </p>
+              </div>
+              <div className="px-5 py-4 space-y-3 max-h-[22rem] overflow-y-auto">
+                {stocktakeDropPrompt.map((d, i) => (
+                  <div key={d.id} className={`rounded-xl border-2 px-3 py-2.5 ${d.tooBig && !mayWriteDown ? 'border-red-300 bg-red-50' : 'border-slate-200'}`}>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="font-bold text-sm text-slate-800 truncate">{d.name}</p>
+                      <p className="text-xs font-mono font-bold text-red-600 shrink-0">
+                        {d.oldQty} → {d.newQty} · −{d.units}
+                      </p>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {d.value > 0 ? `Rs.${d.value.toLocaleString()} of stock` : 'no cost on record'}
+                    </p>
+                    {d.tooBig && !mayWriteDown ? (
+                      <p className="text-[11px] font-bold text-red-700 mt-1.5">
+                        Too big for a count correction. Record it as a <button onClick={() => { setStocktakeDropPrompt(null); onNavigate?.('writeoffs') }} className="underline">Write-off</button> so the loss reaches profit — or ask a manager.
+                      </p>
+                    ) : (
+                      <>
+                        <select value={d.reason}
+                          onChange={e => setStocktakeDropPrompt(prev => prev!.map((x, j) => j === i ? { ...x, reason: e.target.value } : x))}
+                          className="w-full mt-1.5 px-2.5 py-1.5 rounded-lg border-2 border-slate-200 text-xs bg-white outline-none focus:border-orange-400">
+                          {DROP_REASONS.map(r => <option key={r.v} value={r.v}>{r.l}</option>)}
+                        </select>
+                        {d.tooBig && (
+                          <p className="text-[11px] font-bold text-amber-700 mt-1">
+                            ⚠ Rs.{d.value.toLocaleString()} is large for a miscount — if the stock is damaged, lost or stolen, use Write-offs so the loss hits profit.
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex gap-2 justify-end">
+                <button onClick={() => setStocktakeDropPrompt(null)}
+                  className="px-4 py-2 rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-500">Cancel</button>
+                <button
+                  onClick={async () => {
+                    setStocktakeDropSaving(true)
+                    for (const d of stocktakeDropPrompt) dropReasonsRef.current[d.id] = d.reason
+                    setStocktakeDropPrompt(null)
+                    await saveAllStockChanges(false, true)
+                    setStocktakeDropSaving(false)
+                  }}
+                  disabled={!canSave || stocktakeDropSaving}
+                  title={canSave ? '' : 'One or more reductions are too big for a count correction'}
+                  className="px-5 py-2 rounded-lg bg-slate-900 text-white text-sm font-bold disabled:opacity-40">
+                  {stocktakeDropSaving ? 'Saving…' : 'Save with these reasons'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {stocktakeCostPrompt && (
         <div className="fixed inset-0 bg-black/50 z-[80] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">

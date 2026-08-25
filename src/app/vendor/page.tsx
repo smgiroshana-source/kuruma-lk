@@ -4397,6 +4397,8 @@ ${customerRows.map(c => `<tr>
             onDataChanged={fetchData}
             initialView={stockInitialView}
             onInitialViewConsumed={() => setStockInitialView(null)}
+            staffRole={staffRole}
+            onNavigate={(t) => startTransition(() => setTab(t as VendorTab))}
           />
         )}
         {tab === 'stocktake' && !isLkTax && (

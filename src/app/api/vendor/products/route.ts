@@ -16,12 +16,21 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { ...vendor, callerUserId: user.id }
+  if (vendor) return { ...vendor, callerUserId: user.id, callerRole: 'owner' }
   // Check if staff member
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { ...staffLink.vendor, callerUserId: user.id }
+  if (staffLink?.vendor) return { ...staffLink.vendor, callerUserId: user.id, callerRole: staffLink.role || 'cashier' }
   return null
 }
+
+// A count correction may shrink stock only a little. Beyond either limit the
+// goods have not been "miscounted" — they are gone, and that is a Write-off,
+// which names a reason and charges the loss to profit. Owner-set 2026-08-25.
+const SMALL_DROP_UNITS = 2
+const SMALL_DROP_VALUE = 5000
+// Deliberately excludes damaged / lost / theft: those must go through
+// Write-offs, not vanish inside a stocktake.
+const DROP_REASONS = ['miscounted', 'found_elsewhere', 'used_in_shop', 'data_entry_error']
 
 function generateSKU() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -453,7 +462,7 @@ export async function POST(req: NextRequest) {
   if (action === 'adjust_stock') {
     const { productId, newQuantity, reason, note, unitCost, confirmOnly } = body
     const { data: p } = await admin.from('products')
-      .select('id, vendor_id, sku, name, quantity, product_type').eq('id', productId).single()
+      .select('id, vendor_id, sku, name, quantity, product_type, cost').eq('id', productId).single()
     if (!p || p.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
     const now = new Date().toISOString()
@@ -468,6 +477,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Only loose-counted consumables can go below zero' }, { status: 400 })
     }
     const delta = target - Number(p.quantity || 0)
+
+    // ── Guard rails on stock going DOWN (owner, 2026-08-25) ─────────────────
+    // Profit only ever sees a loss through stock_writeoffs. A count reduced
+    // here makes goods vanish with no cost of loss and no reason recorded — an
+    // accounting hole, and the obvious way to bury a theft. So a decrease must
+    // say why, and once it is big enough to matter it belongs in Write-offs
+    // (reason + cost charged to profit) or needs a manager.
+    if (delta < 0) {
+      const units = Math.abs(delta)
+      const unitCostOf = Math.round(Number(p.cost) || 0)
+      const value = units * unitCostOf
+      const isSmall = units <= SMALL_DROP_UNITS && value <= SMALL_DROP_VALUE
+      const role = (vendor as any).callerRole
+
+      if (!String(reason || '').trim() || reason === 'stocktake') {
+        return NextResponse.json({
+          success: false, error: 'DROP_NEEDS_REASON',
+          detail: { name: p.name, units, value, isSmall },
+        }, { status: 400 })
+      }
+      if (!DROP_REASONS.includes(reason)) {
+        return NextResponse.json({
+          success: false,
+          error: 'Damaged, lost or stolen stock goes through Write-offs so the loss reaches profit. Count corrections accept: ' + DROP_REASONS.join(', '),
+        }, { status: 400 })
+      }
+      if (!isSmall && role !== 'owner' && role !== 'manager') {
+        return NextResponse.json({
+          success: false, error: 'DROP_TOO_BIG',
+          detail: {
+            name: p.name, units, value,
+            message: units + ' × ' + p.name + ' is Rs.' + value.toLocaleString()
+              + ' of stock — too big for a count correction. Record it as a Write-off so the loss reaches profit, or ask a manager.',
+          },
+        }, { status: 403 })
+      }
+    }
 
     const { error: upErr } = await admin.from('products')
       .update({ quantity: target, last_stock_confirmed_at: now }).eq('id', productId)
