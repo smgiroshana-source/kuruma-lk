@@ -53,6 +53,12 @@ export async function POST(req: NextRequest) {
   // ── CREATE (or update draft) ──────────────────────────────────────────────
   if (action === 'create_grn') {
     const { supplierId, supplierName, supplierInvoiceNo, supplierInvoiceDate, receivedAt, notes, items } = body
+
+    // A GRN records who the goods came from — supplierless receipts made the
+    // payables ledger and the VAT trail silently incomplete (owner-reported).
+    if (!supplierId && !String(supplierName || '').trim()) {
+      return NextResponse.json({ error: 'Pick the supplier (or type a name for a one-off) before saving the GRN' }, { status: 400 })
+    }
     // items: [{ productId, productName, productSku, quantity, unitCost, vatRate }]
 
     // Snapshot supplier TIN + VAT status at the time of receiving
@@ -146,6 +152,20 @@ export async function POST(req: NextRequest) {
 
   // ── POST GRN (update stock + create cost layers) ──────────────────────────
   if (action === 'post_grn') {
+    // Zero-cost lines post only when explicitly confirmed as free-of-charge:
+    // a forgotten cost otherwise becomes a 0-cost FIFO layer and every later
+    // sale of it books 100% margin.
+    {
+      const { data: zeroCheck } = await admin.from('grn_items')
+        .select('product_name, unit_cost').eq('grn_id', body.grnId)
+      const zeros = (zeroCheck || []).filter((i: any) => Number(i.unit_cost || 0) <= 0)
+      if (zeros.length > 0 && body.allowZeroCost !== true) {
+        return NextResponse.json({
+          error: 'ZERO_COST',
+          zeroCostItems: zeros.map((i: any) => i.product_name),
+        }, { status: 400 })
+      }
+    }
     const { grnId } = body
     if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
 

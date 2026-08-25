@@ -171,6 +171,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
   async function createGrn(postNow = false) {
     if (grnItems.length === 0) { showToast('Add at least one item'); return }
+    if (!grnForm.supplierId && !grnForm.supplierName.trim()) { showToast('⚠️ Pick the supplier first — the GRN records who the goods came from'); return }
     setGrnLoading(true)
     try {
       // Auto-create any new products from CSV rows before saving GRN
@@ -210,11 +211,25 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         const supplierIdAtSave = grnForm.supplierId
         if (postNow && j.grn?.id) {
           // Same motion: stock in, cost layers, payable, pay-now question
-          const pr = await fetch('/api/vendor/grns', {
+          let pr = await fetch('/api/vendor/grns', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'post_grn', grnId: j.grn.id }),
           })
-          const pj = await pr.json()
+          let pj = await pr.json()
+          if (!pr.ok && pj.error === 'ZERO_COST') {
+            if (confirmZeroCost(pj.zeroCostItems || [])) {
+              pr = await fetch('/api/vendor/grns', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'post_grn', grnId: j.grn.id, allowZeroCost: true }),
+              })
+              pj = await pr.json()
+            } else {
+              showToast('💾 Saved as draft — add the costs, then post from GRN History')
+              setGrnLoading(false)
+              fetchGrnList()
+              return
+            }
+          }
           if (pr.ok) {
             showToast('✅ ' + pj.message)
             if (pj.payable) setPayNow({ payable: pj.payable, supplierId: supplierIdAtSave || null })
@@ -255,8 +270,14 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     if (!confirm('Post this GRN? Stock quantities will be updated and cannot be undone.')) return
     setGrnPosting(grnId)
     try {
-      const r = await fetch('/api/vendor/grns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'post_grn', grnId }) })
-      const j = await r.json()
+      let r = await fetch('/api/vendor/grns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'post_grn', grnId }) })
+      let j = await r.json()
+      if (!r.ok && j.error === 'ZERO_COST') {
+        if (confirmZeroCost(j.zeroCostItems || [])) {
+          r = await fetch('/api/vendor/grns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'post_grn', grnId, allowZeroCost: true }) })
+          j = await r.json()
+        } else { setGrnPosting(null); return }
+      }
       if (r.ok) {
         showToast('✅ ' + j.message)
         fetchGrnList(); onDataChanged()
@@ -267,6 +288,12 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       else showToast('⚠️ ' + j.error)
     } catch { showToast('Network error') }
     setGrnPosting(null)
+  }
+
+  // Zero-cost lines need an explicit "yes, free of charge" — a forgotten cost
+  // becomes a 0-cost FIFO layer and sells at 100% margin forever after.
+  function confirmZeroCost(items: string[]): boolean {
+    return confirm(`These lines have Rs.0 cost:\n\n• ${items.join('\n• ')}\n\nPost only if they are genuinely FREE OF CHARGE (bonus stock). A forgotten cost makes their profit read 100%.\n\nPost as free-of-charge?`)
   }
 
   // Supplier id for a GRN already in the loaded list (needed by record_payment)
