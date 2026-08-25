@@ -1,4 +1,5 @@
 'use client'
+import React from 'react'
 import { colomboToday } from '@/lib/dates'
 import SupplierForm from './SupplierForm'
 import { useState, useEffect, useRef } from 'react'
@@ -122,7 +123,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const supplierVatRate = (supplierId: string) =>
     suppliers.find((x: any) => x.id === supplierId)?.vat_registered ? vatRate : 0
   const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '' })
-  const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any; productType?: string; packs?: any; piecesPerPack?: any; foreignCurrency?: string; foreignAmount?: string }>>([])
+  const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any; productType?: string; packs?: any; piecesPerPack?: any; packCost?: any; foreignCurrency?: string; foreignAmount?: string }>>([])
   const [grnCsvPreview, setGrnCsvPreview] = useState<Array<{ matched: boolean; grnItem: any }> | null>(null)
   const [grnCsvFileName, setGrnCsvFileName] = useState('')
   const [grnProductSearch, setGrnProductSearch] = useState('')
@@ -1292,7 +1293,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     </tr></thead>
                     <tbody>
                       {grnItems.map((item, i) => (
-                        <tr key={i} className="border-t border-slate-50">
+                        <React.Fragment key={i}>
+                        <tr className="border-t border-slate-50">
                           <td className="py-2">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <p className="font-semibold">{item.productName}</p>
@@ -1302,31 +1304,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                           </td>
                           <td className="py-2 text-center">
                             <input type="number" min="1" value={item.quantity}
-                              onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, quantity: Math.max(1, parseInt(e.target.value) || 1), packs: '', piecesPerPack: '' } : x))}
+                              onChange={e => setGrnItems(prev => prev.map((x, j) => j === i ? { ...x, quantity: Math.max(1, parseInt(e.target.value) || 1), packs: '', piecesPerPack: '', packCost: '' } : x))}
                               className="w-16 px-1.5 py-1 border border-slate-200 rounded text-center text-sm" />
-                            {item.productType === 'consumable' && (
-                              <div className="flex items-center gap-1 justify-center mt-1">
-                                <input type="number" min="1" value={item.packs || ''} placeholder="pk"
-                                  title="Packets received"
-                                  onChange={e => setGrnItems(prev => prev.map((x, j) => {
-                                    if (j !== i) return x
-                                    const packs = parseInt(e.target.value) || 0
-                                    const per = parseInt(x.piecesPerPack) || 0
-                                    return { ...x, packs: e.target.value, quantity: packs > 0 && per > 0 ? packs * per : x.quantity }
-                                  }))}
-                                  className="w-10 px-1 py-0.5 border border-amber-200 rounded text-center text-[11px]" />
-                                <span className="text-[10px] text-slate-400">×</span>
-                                <input type="number" min="1" value={item.piecesPerPack || ''} placeholder="pcs"
-                                  title="Pieces per packet"
-                                  onChange={e => setGrnItems(prev => prev.map((x, j) => {
-                                    if (j !== i) return x
-                                    const per = parseInt(e.target.value) || 0
-                                    const packs = parseInt(x.packs) || 0
-                                    return { ...x, piecesPerPack: e.target.value, quantity: packs > 0 && per > 0 ? packs * per : x.quantity }
-                                  }))}
-                                  className="w-10 px-1 py-0.5 border border-amber-200 rounded text-center text-[11px]" />
-                              </div>
-                            )}
                           </td>
                           <td className="py-2">
                             <input type="number" min="0" value={item.unitCost || ''}
@@ -1355,6 +1334,64 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                             <button onClick={() => setGrnItems(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 font-bold">✕</button>
                           </td>
                         </tr>
+                        {/* Consumables come as packets and are billed per pack —
+                            type the bill's numbers, the per-piece cost is derived. */}
+                        {item.productType === 'consumable' && (
+                          <tr>
+                            <td colSpan={6} className="pb-3">
+                              <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 flex items-center gap-2 flex-wrap">
+                                <span className="text-[11px] font-bold text-amber-800 shrink-0">📦 By the pack:</span>
+                                <input type="number" min="1" value={item.packs || ''} placeholder="Packs"
+                                  onChange={e => setGrnItems(prev => prev.map((x, j) => {
+                                    if (j !== i) return x
+                                    const n = { ...x, packs: e.target.value }
+                                    const packs = parseInt(n.packs) || 0, per = parseInt(n.piecesPerPack) || 0, pc = parseInt(n.packCost) || 0
+                                    if (packs > 0 && per > 0) n.quantity = packs * per
+                                    if (per > 0 && pc > 0) n.unitCost = Math.round(pc / per)
+                                    return n
+                                  }))}
+                                  className="w-20 px-2 py-1.5 border-2 border-amber-200 rounded-lg text-center text-sm font-bold bg-white" />
+                                <span className="text-xs text-slate-400">×</span>
+                                <input type="number" min="1" value={item.piecesPerPack || ''} placeholder="Pieces"
+                                  onChange={e => setGrnItems(prev => prev.map((x, j) => {
+                                    if (j !== i) return x
+                                    const n = { ...x, piecesPerPack: e.target.value }
+                                    const packs = parseInt(n.packs) || 0, per = parseInt(n.piecesPerPack) || 0, pc = parseInt(n.packCost) || 0
+                                    if (packs > 0 && per > 0) n.quantity = packs * per
+                                    if (per > 0 && pc > 0) n.unitCost = Math.round(pc / per)
+                                    return n
+                                  }))}
+                                  className="w-20 px-2 py-1.5 border-2 border-amber-200 rounded-lg text-center text-sm font-bold bg-white" />
+                                <span className="text-xs text-slate-400">@</span>
+                                <input type="number" min="0" value={item.packCost || ''} placeholder="Price / pack"
+                                  onChange={e => setGrnItems(prev => prev.map((x, j) => {
+                                    if (j !== i) return x
+                                    const n = { ...x, packCost: e.target.value }
+                                    const per = parseInt(n.piecesPerPack) || 0, pc = parseInt(n.packCost) || 0
+                                    if (per > 0 && pc > 0) n.unitCost = Math.round(pc / per)
+                                    return n
+                                  }))}
+                                  className="w-28 px-2 py-1.5 border-2 border-amber-200 rounded-lg text-right text-sm font-bold bg-white" />
+                                {(() => {
+                                  const packs = parseInt(item.packs) || 0, per = parseInt(item.piecesPerPack) || 0, pc = parseInt(item.packCost) || 0
+                                  if (per <= 0 || pc <= 0) return <span className="text-[11px] text-amber-700">as billed by the supplier (excl. VAT)</span>
+                                  const billed = (packs || 1) * pc
+                                  const lineTotal = item.quantity * item.unitCost
+                                  const drift = packs > 0 ? billed - lineTotal : 0
+                                  return (
+                                    <span className="text-[11px] font-bold text-amber-800">
+                                      = {item.quantity} pcs · Rs.{item.unitCost.toLocaleString()}/piece
+                                      {drift !== 0 && (
+                                        <span className="text-red-600 font-normal"> · line Rs.{lineTotal.toLocaleString()} vs bill Rs.{billed.toLocaleString()} — Rs.{Math.abs(drift).toLocaleString()} rounding; adjust pieces or price if it must match exactly</span>
+                                      )}
+                                    </span>
+                                  )
+                                })()}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>
