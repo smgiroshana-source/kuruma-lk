@@ -432,16 +432,6 @@ export function QuickIncomeModal({
     addLine({ name: p.name, price: Math.round(Number(p.price) || 0) || '', productId: p.id, sku: p.sku || '', stock: p.quantity })
   }
 
-  const results = (catalog || [])
-    .filter((p: any) => p.is_active !== false)
-    // sold-out counted items can't be quick-sold; loose consumables always can
-    .filter((p: any) => p.quantity > 0 || p.product_type === 'consumable')
-    .filter((p: any) => {
-      const q = search.toLowerCase()
-      return q.length >= 2 && (p.name?.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
-    })
-    .slice(0, 6)
-
   const total = lines.reduce((t, l) => t + l.qty * (Number(l.price) || 0), 0)
   const stockLines = lines.filter(l => l.productId)
 
@@ -503,30 +493,17 @@ export function QuickIncomeModal({
         ))}
       </div>
 
-      {/* Anything else in the catalog, or a job with no preset */}
-      <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="Other item or job — search, or type and press Enter"
-        onKeyDown={e => {
-          if (e.key === 'Enter' && search.trim() && results.length === 0) {
-            addLine({ name: search.trim() }); setSearch('')
-          }
-        }}
-        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
-      {results.length > 0 && (
-        <div className="border border-slate-200 rounded-lg mt-1 overflow-hidden">
-          {results.map((p: any) => (
-            <button key={p.id} onClick={() => {
-              addLine({ name: p.name, price: Math.round(Number(p.price) || 0) || '', productId: p.id, sku: p.sku || '', stock: p.quantity })
-              setSearch('')
-            }} className="w-full text-left px-3 py-2 flex justify-between items-center border-b border-slate-100 last:border-0 hover:bg-emerald-50 text-sm">
-              <span className="truncate">{p.name}</span>
-              <span className="text-xs text-slate-400 shrink-0 ml-2">
-                {p.product_type === 'consumable' ? '◦ ' : ''}{p.quantity} in stock
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Anything else: a description and an amount. Selling actual items
+          belongs in the POS (owner, 2026-08-25) — this stays a job pad. */}
+      <div className="flex gap-1.5">
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Other income — what was it?"
+          onKeyDown={e => { if (e.key === 'Enter' && search.trim()) { addLine({ name: search.trim() }); setSearch('') } }}
+          className="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
+        <button onClick={() => { if (search.trim()) { addLine({ name: search.trim() }); setSearch('') } }}
+          disabled={!search.trim()}
+          className="px-3.5 py-2 rounded-lg bg-slate-800 text-white text-sm font-bold disabled:opacity-30 shrink-0">+ Add</button>
+      </div>
 
       {/* The job list */}
       {lines.map((l, idx) => (
@@ -581,7 +558,7 @@ export function QuickIncomeModal({
         {method === 'cash'
           ? 'Goes into today’s till and the drawer count.'
           : 'Settles to the bank — it does not change the drawer count.'}
-        {' '}If the customer wants a receipt or pays later, use the POS instead.
+        {' '}Selling items, a receipt, or paying later — use the POS instead.
       </p>
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
