@@ -123,6 +123,9 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const supplierVatRate = (supplierId: string) =>
     suppliers.find((x: any) => x.id === supplierId)?.vat_registered ? vatRate : 0
   const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '' })
+  // The delivery paperwork (invoice no/date, notes) is folded away: the work at
+  // a receiving door is the ITEMS, and the form was pushing them below the fold.
+  const [grnPaperOpen, setGrnPaperOpen] = useState(false)
   const [grnItems, setGrnItems] = useState<Array<{ productId: string | null; productName: string; productSku: string; quantity: number; unitCost: number; vatRate: number; needsCreate?: boolean; productData?: any; productType?: string; packs?: any; piecesPerPack?: any; packCost?: any; foreignCurrency?: string; foreignAmount?: string }>>([])
   const [grnCsvPreview, setGrnCsvPreview] = useState<Array<{ matched: boolean; grnItem: any }> | null>(null)
   const [grnCsvFileName, setGrnCsvFileName] = useState('')
@@ -862,13 +865,17 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
         return (
           <div className="space-y-4">
-            {/* Header fields */}
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <h3 className="font-bold text-sm text-slate-800 mb-4">📥 New Goods Received Note</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Supplier */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Supplier</label>
+            {/* ── Delivery header ──────────────────────────────────────────
+                One strip: who delivered, and when. Everything the operator
+                only sometimes needs — invoice number, invoice date, notes —
+                folds away, and opens itself the moment input VAT is claimed
+                (Schedule 02 needs those fields, so hiding them then would be
+                a trap). */}
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <div className="flex items-end gap-2 flex-wrap">
+                {/* Supplier — required, so it leads */}
+                <div className="flex-1 min-w-[220px]">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Delivery from <span className="text-red-500">*</span></label>
                   <select value={grnForm.supplierId} onChange={e => {
                     const s = suppliers.find(x => x.id === e.target.value)
                     const wasDefault = supplierVatRate(grnForm.supplierId)
@@ -886,65 +893,79 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     <option value="">— Select supplier —</option>
                     {suppliers.map(s => <option key={s.id} value={s.id}>{s.supplier_code ? `${s.supplier_code} · ` : ''}{s.name} {s.country !== 'LK' ? `(${s.country})` : ''}</option>)}
                   </select>
-                  {grnForm.supplierId && (
-                    suppliers.find((x: any) => x.id === grnForm.supplierId)?.vat_registered
-                      ? <p className="text-[10px] font-bold text-emerald-600 mt-1">VAT-registered — lines default to {vatRate}%, claimable as input VAT</p>
-                      : <p className="text-[10px] font-bold text-slate-400 mt-1">Not VAT-registered — no input VAT to claim on this purchase</p>
-                  )}
-                  {grnVatGaps.includes('supplier TIN') && (
-                    <p className="text-[10px] font-bold text-red-600 mt-1">
-                      No TIN on record for {grnSupplier?.name || 'this supplier'} — Schedule 02 can&apos;t list the claim without it.{' '}
-                      <button onClick={() => { setGrnSupplierEditId(grnForm.supplierId); setNewSupplierOpen(true) }}
-                        className="underline">Add TIN</button>
-                    </p>
-                  )}
-                  <button onClick={() => { setGrnSupplierEditId(null); setNewSupplierOpen(true) }}
-                    className="mt-2 text-xs font-bold text-orange-600 px-3 py-1.5 rounded border border-orange-200 hover:bg-orange-50">
-                    + New supplier
-                  </button>
                 </div>
-                {/* Supplier invoice no */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
-                    Supplier Invoice No.{grnInputVat > 0 && <span className="text-red-500"> * required for VAT</span>}
-                  </label>
-                  <input type="text" value={grnForm.supplierInvoiceNo} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceNo: e.target.value }))}
-                    placeholder="e.g. INV-2026-1234"
-                    className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice number') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
-                </div>
-                {/* Supplier invoice date — VAT Schedule 02 lists the supplier's
-                    invoice date, which isn't always the day we received goods */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
-                    Supplier Invoice Date{grnInputVat > 0 && <span className="text-red-500"> * required for VAT</span>}
-                  </label>
-                  <input type="date" value={grnForm.supplierInvoiceDate} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceDate: e.target.value }))}
-                    className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice date') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    {grnInputVat > 0
-                      ? 'The date on the supplier\u2019s invoice \u2014 not always the day the goods arrived.'
-                      : 'Only needed when claiming input VAT.'}
-                  </p>
-                </div>
-                {/* Date */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Date Received</label>
+
+                {/* Received date sits beside the supplier — both are always needed */}
+                <div className="w-[150px]">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Received</label>
                   <input type="date" value={grnForm.receivedAt} onChange={e => setGrnForm(f => ({ ...f, receivedAt: e.target.value }))}
                     className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                 </div>
-                {/* Notes */}
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Notes (optional)</label>
-                  <input type="text" value={grnForm.notes} onChange={e => setGrnForm(f => ({ ...f, notes: e.target.value }))}
-                    placeholder="e.g. Japan container June" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
-                </div>
+
+                <button onClick={() => { setGrnSupplierEditId(null); setNewSupplierOpen(true) }}
+                  className="text-xs font-bold text-orange-600 px-3 py-2.5 rounded-lg border-2 border-orange-200 hover:bg-orange-50 shrink-0">
+                  + New
+                </button>
+                <button onClick={() => setGrnPaperOpen(o => !o)}
+                  className={`text-xs font-bold px-3 py-2.5 rounded-lg border-2 shrink-0 ${grnVatGaps.length > 0 ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                  📄 Invoice details{grnVatGaps.length > 0 ? ' — needed' : ''} {(grnPaperOpen || grnVatGaps.length > 0) ? '▾' : '▸'}
+                </button>
               </div>
+
+              {/* What this supplier means for VAT — one line, always visible */}
+              {grnForm.supplierId && (
+                <p className={`text-[10px] font-bold mt-1.5 ${grnSupplier?.vat_registered ? 'text-emerald-600' : 'text-slate-400'}`}>
+                  {grnSupplier?.vat_registered
+                    ? `VAT-registered — lines default to ${vatRate}%, claimable as input VAT`
+                    : 'Not VAT-registered — no input VAT to claim on this purchase'}
+                  {grnVatGaps.includes('supplier TIN') && (
+                    <span className="text-red-600">
+                      {' '}· No TIN on record —{' '}
+                      <button onClick={() => { setGrnSupplierEditId(grnForm.supplierId); setNewSupplierOpen(true) }} className="underline">add it</button>
+                    </span>
+                  )}
+                </p>
+              )}
+
+              {/* Paperwork — open on demand, forced open while VAT is claimed */}
+              {(grnPaperOpen || grnVatGaps.length > 0) && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                      Supplier Invoice No.{grnInputVat > 0 && <span className="text-red-500"> *</span>}
+                    </label>
+                    <input type="text" value={grnForm.supplierInvoiceNo} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceNo: e.target.value }))}
+                      placeholder="e.g. INV-2026-1234"
+                      className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice number') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
+                      Invoice Date{grnInputVat > 0 && <span className="text-red-500"> *</span>}
+                    </label>
+                    <input type="date" value={grnForm.supplierInvoiceDate} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceDate: e.target.value }))}
+                      className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice date') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                    <p className="text-[10px] text-slate-400 mt-1">The date on their invoice — not always the delivery day.</p>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Notes</label>
+                    <input type="text" value={grnForm.notes} onChange={e => setGrnForm(f => ({ ...f, notes: e.target.value }))}
+                      placeholder="e.g. Japan container June" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Product search + add items */}
             <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold text-sm text-slate-800">Items Received</h3>
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <h3 className="font-bold text-sm text-slate-800 mr-auto">
+                  Items Received
+                  {grnItems.length > 0 && (
+                    <span className="ml-2 text-[11px] font-bold text-slate-400">
+                      {grnItems.length} line{grnItems.length !== 1 ? 's' : ''} · {grnItems.reduce((t, i) => t + i.quantity, 0)} unit{grnItems.reduce((t, i) => t + i.quantity, 0) !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </h3>
                 {/* Quick Add Tyre shortcut */}
                 <button onClick={() => {
                   setGrnInlineCreate(true)
@@ -957,7 +978,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   setGrnInlineCreate(true)
                   setGrnNewProduct(p => ({ ...p, category: 'Other', accessoryType: 'tube', size: '', make: '' }))
                   setGrnProductSearch('')
-                }} className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 active:bg-amber-200 ml-1.5">
+                }} className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 active:bg-amber-200">
                   🔩 Tube / Accessory
                 </button>
               </div>
@@ -1279,7 +1300,15 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 </div>
               )}
               {grnItems.length === 0 ? (
-                <div className="text-center py-8 text-slate-300"><p className="text-3xl mb-2">📦</p><p className="text-sm">Search above to add items</p></div>
+                <div className="text-center py-10 px-4">
+                  <p className="text-3xl mb-2">📦</p>
+                  <p className="text-sm font-bold text-slate-500">Nothing on this note yet</p>
+                  <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                    Search above for something you already stock — or use<br className="hidden sm:block" />
+                    <strong className="text-sky-600"> Quick Add Tyre</strong> /
+                    <strong className="text-amber-600"> Tube&nbsp;/&nbsp;Accessory</strong> for something new, or upload the supplier&apos;s CSV.
+                  </p>
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
@@ -1398,9 +1427,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 </div>
               )}
 
-              {/* Totals + submit */}
+              {/* Totals + submit. Fixed to the foot of the screen: a delivery of
+                  twenty lines used to push these buttons far below the fold,
+                  so the operator scrolled to find the thing they came to do. */}
               {grnItems.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="mt-4 pt-4 border-t border-slate-100 lg:pb-0 pb-2">
                   <div className="flex flex-col items-end gap-1 text-sm mb-4">
                     <div className="flex gap-8"><span className="text-slate-400">Net Cost (ex VAT)</span><span className="font-semibold w-32 text-right">Rs.{grnNetCost.toLocaleString()}</span></div>
                     <div className="flex gap-8"><span className="text-slate-400">Input VAT</span><span className="font-semibold w-32 text-right text-orange-600">Rs.{grnInputVat.toLocaleString()}</span></div>
@@ -1418,23 +1449,45 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       </p>
                     </div>
                   )}
-                  <div className="flex gap-3">
-                    <button onClick={() => createGrn(false)} disabled={grnLoading}
-                      className="bg-white border-2 border-slate-300 hover:bg-slate-50 disabled:opacity-50 text-slate-700 font-bold text-sm py-3 px-5 rounded-xl">
-                      {grnLoading ? '⏳' : '💾 Save as Draft'}
-                    </button>
-                    <button onClick={() => createGrn(true)} disabled={grnLoading || grnVatGaps.length > 0}
-                      title={grnVatGaps.length > 0 ? `Missing the ${grnVatGaps.join(', ')}` : ''}
-                      className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-sm py-3 rounded-xl">
-                      {grnLoading ? '⏳ Saving…' : '✅ Post & Update Stock'}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-400 text-center mt-2">
+                  <p className="text-[10px] text-slate-400 text-right">
                     Post = stock counted and checked against the delivery note. Draft = still unpacking — finish it later from GRN History.
                   </p>
                 </div>
               )}
             </div>
+
+            {/* Sticky foot — the running total and the two actions, always in
+                reach however long the delivery is. Mirrors the block above so
+                a short GRN needs no scrolling at all. */}
+            {grnItems.length > 0 && (
+              <div className="sticky bottom-0 -mx-2 px-2 pb-2 pt-1 z-20">
+                <div className="bg-white/95 backdrop-blur border-2 border-slate-200 rounded-2xl shadow-lg px-3 py-2.5 flex items-center gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase leading-none">
+                      {grnItems.length} line{grnItems.length !== 1 ? 's' : ''} · {grnItems.reduce((t, i) => t + i.quantity, 0)} units
+                      {grnInputVat > 0 && <span className="text-orange-500 normal-case"> · incl. Rs.{grnInputVat.toLocaleString()} VAT</span>}
+                    </p>
+                    <p className="text-lg font-black text-slate-800 leading-tight">Rs.{grnTotal.toLocaleString()}</p>
+                  </div>
+                  {/* Why Post is disabled, said HERE — the full explanation can be
+                      a screen away when the delivery is long. */}
+                  {grnVatGaps.length > 0 && (
+                    <p className="text-[11px] font-bold text-red-600 leading-tight max-w-[220px] hidden sm:block">
+                      Add the {grnVatGaps.join(', ')} to post — or save a draft.
+                    </p>
+                  )}
+                  <button onClick={() => createGrn(false)} disabled={grnLoading}
+                    className="ml-auto shrink-0 bg-white border-2 border-slate-300 hover:bg-slate-50 disabled:opacity-50 text-slate-700 font-bold text-xs py-2.5 px-3.5 rounded-xl">
+                    💾 Draft
+                  </button>
+                  <button onClick={() => createGrn(true)} disabled={grnLoading || grnVatGaps.length > 0}
+                    title={grnVatGaps.length > 0 ? `Missing the ${grnVatGaps.join(', ')}` : ''}
+                    className="shrink-0 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black text-xs py-2.5 px-5 rounded-xl">
+                    {grnLoading ? '⏳ Saving…' : '✅ Post & Update Stock'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )
       })()}
