@@ -351,6 +351,30 @@ export function QuickIncomeModal({
     { v: 'bank', l: '🏦 Online' },
     { v: 'cheque', l: '📝 Cheque' },
   ] as const
+  // Two kinds of undocumented cash: labour (service line, no stock) and
+  // ITEMS — flaps, valves, patches, weights sold over the counter with no
+  // paper. Items must go through as real product lines or the count drifts
+  // with every quick sale.
+  const [mode, setMode] = useState<'service' | 'items'>('service')
+  const [catalog, setCatalog] = useState<any[] | null>(null)
+  const [itemSearch, setItemSearch] = useState('')
+  const [picked, setPicked] = useState<{ productId: string; name: string; sku: string; price: number; qty: number; productType: string }[]>([])
+  useEffect(() => {
+    if (mode !== 'items' || catalog !== null) return
+    fetch('/api/vendor/data').then(r => r.json()).then(j => setCatalog(j.products || [])).catch(() => setCatalog([]))
+  }, [mode, catalog])
+  const itemResults = (catalog || [])
+    .filter((p: any) => p.is_active !== false)
+    // sold-out counted items can't be quick-sold; loose consumables always can
+    .filter((p: any) => p.quantity > 0 || p.product_type === 'consumable')
+    .filter((p: any) => {
+      const q = itemSearch.toLowerCase()
+      return q.length >= 2 && (p.name?.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
+    })
+    .sort((a: any, b: any) => (a.product_type === 'consumable' ? 0 : 1) - (b.product_type === 'consumable' ? 0 : 1))
+    .slice(0, 8)
+  const itemsTotal = picked.reduce((t, i) => t + i.qty * i.price, 0)
+
   const [method, setMethod] = useState<string>('cash')
   const [payRef, setPayRef] = useState('')
   const [desc, setDesc] = useState('')
@@ -394,7 +418,7 @@ export function QuickIncomeModal({
   }, [])
 
   async function save() {
-    if (amount === '' || Number(amount) <= 0) { showToast('Enter the amount'); return }
+    if (mode === 'service' && (amount === '' || Number(amount) <= 0)) { showToast('Enter the amount'); return }
     if (!propEntity) {
       showToast(entityError && entityError !== 'no-prop-entity'
         ? `Couldn't load the shop's entities — ${entityError}. Try again.`
@@ -402,7 +426,11 @@ export function QuickIncomeModal({
       return
     }
     if (method === 'cheque' && !payRef.trim()) { showToast('Enter the cheque number'); return }
-    const amt = Math.round(Number(amount))
+    if (mode === 'items') {
+      if (picked.length === 0) { showToast('Pick at least one item'); return }
+      if (picked.some(i => i.price <= 0)) { showToast('Every item needs a price'); return }
+    }
+    const amt = mode === 'items' ? itemsTotal : Math.round(Number(amount))
     setSaving(true)
     try {
       const r = await fetch('/api/vendor/sales', {
@@ -410,13 +438,15 @@ export function QuickIncomeModal({
         body: JSON.stringify({
           action: 'create_sale',
           invoiceEntityId: propEntity.id,
-          items: [{ productId: null, productName: desc.trim() || 'Service income', productSku: '', quantity: 1, unitPrice: amt, ssclStream: 'SVC' }],
+          items: mode === 'items'
+            ? picked.map(i => ({ productId: i.productId, productName: i.name, productSku: i.sku, quantity: i.qty, unitPrice: i.price, ssclStream: 'PART' }))
+            : [{ productId: null, productName: desc.trim() || 'Service income', productSku: '', quantity: 1, unitPrice: amt, ssclStream: 'SVC' }],
           payments: [{
             method, amount: amt,
             chequeNumber: method === 'cheque' ? payRef.trim() : null,
             bankRef: method === 'bank' ? (payRef.trim() || null) : null,
           }],
-          notes: 'Quick service income — no document issued',
+          notes: mode === 'items' ? 'Quick counter sale — no document issued' : 'Quick service income — no document issued',
         }),
       })
       const j = await r.json()
@@ -428,12 +458,71 @@ export function QuickIncomeModal({
   }
 
   return (
-    <Modal title="Service income — no invoice" onClose={onClose}>
-      <p className="text-xs text-slate-500 -mt-2 mb-4">
-        Quick cash jobs with no document. Counted as <strong>{propEntity?.name || 'Proprietor'}</strong> service
-        income — it goes into revenue and the drawer like any sale. No VAT.
+    <Modal title="Money in — no invoice" onClose={onClose}>
+      <p className="text-xs text-slate-500 -mt-2 mb-3">
+        No document issued — counted as <strong>{propEntity?.name || 'Proprietor'}</strong> income;
+        revenue and the drawer see it like any sale. No VAT.
       </p>
 
+      {/* Labour or goods? Goods must move stock. */}
+      <div className="grid grid-cols-2 gap-1.5 mb-3">
+        <button onClick={() => setMode('service')}
+          className={`py-2 rounded-lg border-2 text-xs font-bold ${mode === 'service' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
+          🔧 Service / labour
+        </button>
+        <button onClick={() => setMode('items')}
+          className={`py-2 rounded-lg border-2 text-xs font-bold ${mode === 'items' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
+          🔩 Items sold
+        </button>
+      </div>
+
+      {mode === 'items' && (
+        <div className="mb-3">
+          <input type="text" value={itemSearch} onChange={e => setItemSearch(e.target.value)} autoFocus
+            placeholder="Search item — valve, patch, flap, weight…"
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
+          {catalog === null && itemSearch.length >= 2 && <p className="text-[11px] text-slate-400 mt-1">Loading products…</p>}
+          {itemResults.length > 0 && (
+            <div className="border border-slate-200 rounded-lg mt-1 overflow-hidden">
+              {itemResults.map((p: any) => (
+                <button key={p.id} onClick={() => {
+                  setPicked(prev => {
+                    const ex = prev.find(i => i.productId === p.id)
+                    if (ex) return prev.map(i => i.productId === p.id ? { ...i, qty: i.qty + 1 } : i)
+                    return [...prev, { productId: p.id, name: p.name, sku: p.sku || '', price: Math.round(Number(p.price) || 0), qty: 1, productType: p.product_type }]
+                  })
+                  setItemSearch('')
+                }} className="w-full text-left px-3 py-2 flex justify-between items-center border-b border-slate-100 last:border-0 hover:bg-emerald-50 text-sm">
+                  <span className="truncate">{p.name}</span>
+                  <span className="text-xs text-slate-400 shrink-0 ml-2">{p.product_type === 'consumable' ? '◦ ' : ''}Rs.{Number(p.price || 0).toLocaleString()}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {picked.map((i, idx) => (
+            <div key={i.productId} className="flex items-center gap-2 mt-1.5 bg-slate-50 rounded-lg px-2.5 py-1.5">
+              <span className="flex-1 text-xs font-semibold text-slate-700 truncate">{i.name}</span>
+              <input type="number" min={1} value={i.qty}
+                onChange={e => setPicked(prev => prev.map((x, j) => j === idx ? { ...x, qty: Math.max(1, parseInt(e.target.value) || 1) } : x))}
+                className="w-12 px-1 py-1 border border-slate-200 rounded text-center text-xs" />
+              <span className="text-[10px] text-slate-400">×</span>
+              <input type="number" min={0} value={i.price}
+                onChange={e => setPicked(prev => prev.map((x, j) => j === idx ? { ...x, price: Math.max(0, Math.round(Number(e.target.value) || 0)) } : x))}
+                className="w-20 px-1.5 py-1 border border-slate-200 rounded text-right text-xs font-mono font-bold" />
+              <button onClick={() => setPicked(prev => prev.filter((_, j) => j !== idx))}
+                className="text-red-300 hover:text-red-500 font-bold text-sm leading-none">×</button>
+            </div>
+          ))}
+          {picked.length > 0 && (
+            <div className="flex justify-between items-center mt-2 px-1">
+              <span className="text-xs font-bold text-slate-500">Total — stock comes off each item</span>
+              <span className="text-lg font-black text-emerald-700">{formatRs(itemsTotal)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === 'service' && (<>
       <div className="flex flex-wrap gap-1.5 mb-2">
         {PRESETS.map(p => (
           <button key={p} onClick={() => setDesc(p)}
@@ -455,6 +544,7 @@ export function QuickIncomeModal({
           placeholder="0"
           className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-emerald-400" />
       </div>
+      </>)}
 
       <p className="text-xs font-bold text-slate-500 mb-1.5">How did they pay?</p>
       <div className="grid grid-cols-4 gap-1.5 mb-2">
@@ -482,7 +572,7 @@ export function QuickIncomeModal({
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || entityLoading || amount === '' || Number(amount) <= 0 || (method === 'cheque' && !payRef.trim())}
+        <button onClick={save} disabled={saving || entityLoading || (mode === 'items' ? picked.length === 0 || itemsTotal <= 0 : amount === '' || Number(amount) <= 0) || (method === 'cheque' && !payRef.trim())}
           className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-40">
           {saving ? 'Saving…' : amount !== '' && Number(amount) > 0 ? `Record ${formatRs(Number(amount))}` : 'Record'}
         </button>
