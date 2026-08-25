@@ -222,6 +222,7 @@ tbody tr:last-child td{border-bottom:1px solid #000}
       <div class="im"><span class="im-l">Date of Invoice</span><span class="im-v">${invoiceDate}</span></div>
       <div class="im"><span class="im-l">Date of Supply</span><span class="im-v">${supplyDate}</span></div>
       ${vehicleNo ? `<div class="im"><span class="im-l">Vehicle No</span><span class="im-v">${vehicleNo}</span></div>` : ''}
+      ${sale.mileage_km != null ? `<div class="im"><span class="im-l">Mileage</span><span class="im-v">${Number(sale.mileage_km).toLocaleString()} km</span></div>` : ''}
     </div>
   </div>
 </div>
@@ -297,7 +298,7 @@ function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${escapeHtml(sale.invoice_no)}</title>
 <style>${isThermal ? thermalStyle : a5Style}</style></head><body>
 <div class="header">${isThermal ? thermalLogoHtml : logoHtml}<div class="shop-name">${shopName}</div><div class="header-sub">${escapeHtml([vendor?.location, vendor?.address].filter(Boolean).join(', '))}${vendor?.phone ? `<br/>Tel: ${escapeHtml(vendor.phone)}${vendor?.whatsapp && vendor.whatsapp !== vendor.phone ? ' | WhatsApp: ' + escapeHtml(vendor.whatsapp) : ''}` : ''}${s.tax_id ? `<br/>Tax/VAT: ${escapeHtml(s.tax_id)}` : ''}${s.email ? `<br/>${escapeHtml(s.email)}` : ''}</div></div>
-${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${escapeHtml(sale.invoice_no)}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${escapeHtml(sale.vehicle_no)}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${escapeHtml(sale.invoice_no)}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${escapeHtml(sale.vehicle_no) || '—'}</span></div><div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
+${isThermal ? `<div style="padding:5px 0;font-size:11px"><div><strong>${sale.payment_status === 'draft' ? 'On Approval: ' : 'Invoice: '}</strong><strong style="font-size:12px">${escapeHtml(sale.invoice_no)}</strong></div><div><strong>Date: </strong><strong>${formatDate(sale.created_at)}</strong></div><div><strong>Customer: </strong><strong>${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</strong></div>${sale.vehicle_no ? `<div><strong>Vehicle: </strong><strong style="font-size:12px;letter-spacing:2px">${escapeHtml(sale.vehicle_no)}</strong></div>` : ''}</div>` : `<div class="invoice-title"><h2>${sale.payment_status === 'draft' ? 'On Approval' : 'Invoice'}</h2><span class="invoice-no">${escapeHtml(sale.invoice_no)}</span></div><div class="info-grid"><div class="info-cell"><span class="info-label">Date</span><span class="info-value">${formatDate(sale.created_at)}</span></div><div class="info-cell"><span class="info-label">Vehicle No</span><span class="info-value" style="font-size:14px;letter-spacing:2px;font-family:'Courier New',monospace">${escapeHtml(sale.vehicle_no) || '—'}</span></div>${sale.mileage_km != null ? `<div class="info-cell"><span class="info-label">Mileage</span><span class="info-value">${Number(sale.mileage_km).toLocaleString()} km</span></div>` : ''}<div class="info-cell"><span class="info-label">Customer</span><span class="info-value">${escapeHtml(sale.customer_name)}${sale.customer_phone ? ' (' + escapeHtml(sale.customer_phone) + ')' : ''}</span></div><div class="info-cell"><span class="info-label">Payment Status</span><span class="info-value">${sale.payment_status === 'draft' ? 'PENDING' : sale.payment_status === 'paid' ? 'PAID' : sale.payment_status === 'voided' ? 'VOID' : parseFloat(sale.balance_due) > 0 ? 'CREDIT' : 'PAID'}</span></div></div>`}
 <table><thead><tr><th>Item</th><th class="text-right">Qty</th><th class="text-right">Price</th><th class="text-right">Total</th></tr></thead><tbody>${items.map((i: any) => `<tr><td>${i.product_sku ? escapeHtml(i.product_sku) + ' - ' : ''}${escapeHtml(i.product_name)}</td><td class="text-right">${i.quantity}</td><td class="text-right">Rs.${parseFloat(i.unit_price).toLocaleString()}</td><td class="text-right">Rs.${parseFloat(i.total).toLocaleString()}</td></tr>`).join('')}</tbody></table>
 <div class="totals">${parseFloat(sale.discount) > 0 ? `<div class="total-row"><span>Subtotal</span><span>Rs.${parseFloat(sale.subtotal).toLocaleString()}</span></div><div class="total-row" style="color:#000"><span>Discount</span><span>-Rs.${parseFloat(sale.discount).toLocaleString()}</span></div>` : ''}<div class="total-row grand-total"><span>TOTAL</span><span>Rs.${parseFloat(sale.total).toLocaleString()}</span></div></div>
 ${paymentLines ? (isThermal ? `<div style="margin-top:6px"><div style="font-size:10px;font-weight:600;margin-bottom:3px">Payments</div>${paymentLines}</div>` : `<div class="payments-section"><div class="payments-label">Payments</div>${paymentLines}</div>`) : ''}
@@ -401,6 +402,10 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const [posCustomerVatReg, setPosCustomerVatReg] = useState(false)
   const [posCustomerIsInsurance, setPosCustomerIsInsurance] = useState(false)
   const [posClaimNo, setPosClaimNo] = useState('')
+  // Odometer at service time. Optional everywhere, prompted when the bill has
+  // alignment/service work — the shop records alignments against mileage.
+  const [posMileage, setPosMileage] = useState('')
+  const [posLastMileage, setPosLastMileage] = useState<{ km: number; at: string } | null>(null)
   const [showManualLine, setShowManualLine] = useState(false)
   const [manualLine, setManualLine] = useState({ name: '', qty: '1', price: '' })
   // Typed wording drifts ("alignment", "Wheel align", "W/A") and makes the
@@ -599,7 +604,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     if (posCart.length > 0 && !confirm('Clear the current sale and start a new one?')) return
     setPosCart([]); setPosDraftId(null); setPosDraftInvoiceNo('')
     setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
-    setPosVehicleNo(''); setPosNoVehicle(false); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false); setPosClaimNo('')
+    setPosVehicleNo(''); setPosNoVehicle(false); setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false); setPosClaimNo(''); setPosMileage(''); setPosLastMileage(null)
     setPosDiscount(''); setPosNotes(''); setPosErrors({}); setUseAdvance(false)
     setPosPriceMode('incl') // ex-VAT entry is per-job (insurance) — never carry into the next sale
     setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
@@ -708,6 +713,22 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     return { width: parseInt(w), profile: parseInt(pr), rim: parseInt(ri) }
   }
 
+  // Last recorded odometer for this vehicle — shows the interval since the
+  // previous alignment while the cashier is still typing.
+  useEffect(() => {
+    const v = posVehicleNo.trim()
+    if (v.length < 5) { setPosLastMileage(null); return }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/vendor/sales?last_mileage_vehicle=' + encodeURIComponent(v))
+        const j = await r.json()
+        if (!cancelled) setPosLastMileage(j.last ? { km: j.last.mileage_km, at: j.last.created_at } : null)
+      } catch { if (!cancelled) setPosLastMileage(null) }
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [posVehicleNo])
+
   // ── Filtered products for search ───────────────────────────────────────
   const posFilteredProducts = useMemo(() => {
     if (!posSearch || posSearch.length < 2) return []
@@ -734,6 +755,13 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
              ))
     })
   }, [products, posSearch])
+
+  // Alignment (and similar mileage-based work) wants the odometer. Matched on
+  // the line text so a typed service line counts as much as a catalog item.
+  const posNeedsMileage = useMemo(
+    () => posCart.some((i: any) => /align|balanc|rotat|servic/i.test(i.productName || '')),
+    [posCart]
+  )
 
   // ── Quick picks: most recently sold products (per-vendor, this device) ──
   const quickPickKey = 'kuruma-pos-recents-' + (vendor?.id || '')
@@ -817,6 +845,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
             payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
             discount: posDiscountAmt,
             vehicleNo: posVehicleNo || null,
+            mileageKm: posMileage.trim() ? parseInt(posMileage) : null,
             notes: posNotes || null,
             saleDate: posDate,
             customerName: posCustomer.name,
@@ -844,6 +873,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
             })),
             discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0),
             notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
+            mileageKm: posMileage.trim() ? parseInt(posMileage) : null,
             ...(isLkTax && posEntityId ? {
               invoiceEntityId: posEntityId,
               documentType: posDocType,
@@ -863,7 +893,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
         showToast(j.message)
         setPosCart([]); setPosCustomer({ id: null, name: '', phone: '', advance: 0, outstanding: 0, require_vehicle_no: false })
         setPosDiscount(''); setPosPayments([{ method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])
-        setPosNotes(''); setPosDate(colomboToday()); setPosVehicleNo(''); setPosNoVehicle(false); setUseAdvance(false)
+        setPosNotes(''); setPosDate(colomboToday()); setPosVehicleNo(''); setPosNoVehicle(false); setUseAdvance(false); setPosMileage(''); setPosLastMileage(null)
         setPosDraftId(null); setPosDraftInvoiceNo('')
         setPosCustomerAddress(''); setPosCustomerTin(''); setPosCustomerVatReg(false); setPosCustomerIsInsurance(false)
         setShowManualLine(false); setManualLine({ name: '', qty: '1', price: '' })
@@ -891,6 +921,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
           customerPhone: posCustomer.phone,
           items: posCart.map(i => ({ productId: i.productId, productName: i.productName, productSku: i.productSku, quantity: i.quantity, unitPrice: i.unitPrice, unitCost: i.unitCost })),
           vehicleNo: posVehicleNo || null,
+            mileageKm: posMileage.trim() ? parseInt(posMileage) : null,
         })
       })
       const j = await res.json()
@@ -1346,6 +1377,30 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                       <input type="checkbox" checked={posNoVehicle} onChange={e => { setPosNoVehicle(e.target.checked); if (e.target.checked) setPosErrors(prev => ({ ...prev, vehicle: false })) }} className="w-3.5 h-3.5 accent-amber-500" />
                       <span className="text-[10px] font-semibold text-slate-500">Vehicle number not available</span>
                     </label>
+                  )}
+                  {/* Odometer — alignment work is recorded against it */}
+                  {posVehicleNo.trim() && (
+                    <div className="mt-1.5">
+                      <div className="relative">
+                        <input type="number" min={0} value={posMileage}
+                          onChange={e => setPosMileage(e.target.value.replace(/[^0-9]/g, ''))}
+                          placeholder={posNeedsMileage ? 'Mileage (km) — for the alignment record' : 'Mileage (km) — optional'}
+                          className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none font-mono font-bold ' + (posNeedsMileage && !posMileage.trim() ? 'border-amber-300 bg-amber-50' : 'border-slate-200 focus:border-orange-400')} />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">km</span>
+                      </div>
+                      {posLastMileage && (
+                        <p className="text-[10px] text-slate-500 mt-1">
+                          Last recorded <strong className="font-mono">{posLastMileage.km.toLocaleString()} km</strong>
+                          {' '}on {new Date(posLastMileage.at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Colombo' })}
+                          {posMileage.trim() && parseInt(posMileage) > posLastMileage.km && (
+                            <span className="text-emerald-700 font-bold"> · +{(parseInt(posMileage) - posLastMileage.km).toLocaleString()} km since</span>
+                          )}
+                          {posMileage.trim() && parseInt(posMileage) < posLastMileage.km && (
+                            <span className="text-red-600 font-bold"> · ⚠️ lower than last reading — check the number</span>
+                          )}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
                 <input type="date" value={posDate} onChange={e => setPosDate(e.target.value)} className="flex-1 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />

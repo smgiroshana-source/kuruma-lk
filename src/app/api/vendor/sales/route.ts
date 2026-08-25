@@ -259,6 +259,21 @@ export async function GET(req: NextRequest) {
   }
 
   // Customer purchase history
+  // "What did this vehicle read last time?" — shown at the POS while the
+  // cashier types, so the interval since the last alignment is visible.
+  const mileageFor = url.searchParams.get('last_mileage_vehicle')
+  if (mileageFor?.trim()) {
+    const { data: last } = await admin.from('sales')
+      .select('mileage_km, created_at, invoice_no, tax_serial, receipt_no')
+      .eq('vendor_id', vendor.id)
+      .ilike('vehicle_no', mileageFor.trim())
+      .not('mileage_km', 'is', null)
+      .neq('payment_status', 'voided')
+      .order('created_at', { ascending: false })
+      .limit(1).maybeSingle()
+    return NextResponse.json({ last: last || null })
+  }
+
   const customerId = url.searchParams.get('customer_id')
   if (customerId) {
     const { data: custSales } = await admin
@@ -478,7 +493,7 @@ export async function POST(req: NextRequest) {
     const {
       customerId, customerName, customerPhone, items,
       discount, payments: paymentLines, notes, useAdvance, applyToOutstanding,
-      saleDate, vehicleNo,
+      saleDate, vehicleNo, mileageKm,
       // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
       invoiceEntityId, documentType,
       customerAddress, customerTin, customerVatRegistered, customerIsInsurance,
@@ -622,6 +637,8 @@ export async function POST(req: NextRequest) {
       payment_method: primaryMethod, payment_status: paymentStatus,
       notes: notes || null,
       vehicle_no: vehicleNo || null,
+      // Odometer at service time — wheel alignment is recorded against it
+      mileage_km: Number.isFinite(parseInt(mileageKm)) && parseInt(mileageKm) >= 0 ? parseInt(mileageKm) : null,
     }
     if (saleDate) {
       // A date with no time parses as midnight UTC, which is 5:30am Colombo —
@@ -1472,7 +1489,7 @@ export async function POST(req: NextRequest) {
   if (action === 'finalize_draft') {
     const {
       saleId, customerId: bodyCustomerId, useAdvance, items: finalItems, payments: paymentLines,
-      discount, vehicleNo, notes, saleDate, customerName, customerPhone,
+      discount, vehicleNo, mileageKm, notes, saleDate, customerName, customerPhone,
       // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
       invoiceEntityId, customerAddress, customerTin, customerVatRegistered, customerIsInsurance,
       claimNo,
@@ -1654,6 +1671,7 @@ export async function POST(req: NextRequest) {
         paid_amount: paidAmt, balance_due: balanceDue,
         payment_status: pStatus, payment_method: primaryMethod,
         vehicle_no: vehicleNo || draft.vehicle_no,
+      mileage_km: Number.isFinite(parseInt(mileageKm)) && parseInt(mileageKm) >= 0 ? parseInt(mileageKm) : draft.mileage_km,
         notes: notes || null,
         created_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
         ...lkTaxFields,
