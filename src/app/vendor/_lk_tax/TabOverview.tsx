@@ -68,6 +68,9 @@ type Props = {
   vendorSettings: any
   onNavigate: (tab: string, sub?: string) => void
   showToast: (msg: string) => void
+  // Re-pull the page-level catalog/stats after a popup writes something —
+  // without it the dashboard tiles kept yesterday's numbers until a reload.
+  onDataChanged?: () => void | Promise<void>
   // Opens the printable daily report directly (page.tsx owns the generator)
   onDailyReport?: () => void
 }
@@ -115,7 +118,7 @@ type FlowStep = {
   clickable?: boolean
 }
 
-export default function TabOverview({ vendor, stats, dashboard, staffRole, products, onNavigate, showToast, onDailyReport }: Props) {
+export default function TabOverview({ vendor, stats, dashboard, staffRole, products, onNavigate, showToast, onDailyReport, onDataChanged }: Props) {
   const role = staffRole || 'owner'
   const isCashier = role === 'cashier'
   const seesMoney = role === 'owner' || role === 'manager'
@@ -162,7 +165,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   useEffect(() => { refreshFlow() }, [refreshFlow])
 
   const closePopup = () => setPopup(null)
-  const popupSaved = () => { setPopup(null); setAmtIn(''); setAmtOut(''); refreshFlow() }
+  const popupSaved = () => { setPopup(null); setAmtIn(''); setAmtOut(''); refreshFlow(); onDataChanged?.() }
 
   // Green/red quick boxes: amount first, destination second
   function submitQuick(dir: 'in' | 'out') {

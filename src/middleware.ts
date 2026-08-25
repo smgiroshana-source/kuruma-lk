@@ -24,6 +24,18 @@ export async function middleware(request: NextRequest) {
     }
   )
   await supabase.auth.getUser()
+
+  // Shop data is never cacheable. Without an explicit header the browser is
+  // free to heuristically cache a GET — Safari does it eagerly — so a screen
+  // kept showing yesterday's stock or a sale that had already been recorded
+  // until someone hit reload (owner-reported, 2026-08-25). Every /api response
+  // says no-store; the storefront is not matched by this middleware and keeps
+  // its CDN caching.
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    response.headers.set('Cache-Control', 'no-store, must-revalidate')
+    response.headers.set('Pragma', 'no-cache')
+  }
+
   return response
 }
 

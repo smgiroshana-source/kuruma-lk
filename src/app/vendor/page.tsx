@@ -2404,6 +2404,7 @@ ${customerRows.map(c => `<tr>
             products={products}
             vendorSettings={vendorSettings}
             onDailyReport={() => runDailyReport(colomboToday())}
+            onDataChanged={() => fetchData(true, true)}
             onNavigate={(t, sub) => startTransition(() => {
               // Dashboard deep-links: sub targets a view inside the tab
               if (t === 'products' && sub === 'missing-cost') { setShowMissingCost(true); setTab('products'); return }
