@@ -325,14 +325,28 @@ export function MovementModal({
     </Modal>
   )
 }
+// ── Quick money in, no document (Proprietor) ─────────────────────────────────
+// The counter jobs that never get an invoice: a puncture patched, air filled,
+// a tyre changed, a valve fitted. One list, one flow.
+//
+// Four of these CONSUME a part from the shelf — a tubeless patch is not "sold"
+// to the customer, it is used doing the repair — so those presets carry a real
+// product line: the money is income and the piece comes off stock, FIFO cost
+// and all. The rest are pure labour with nothing to deduct.
+//
+// Presets bind to products by NAME so the owner can re-price or re-stock them
+// in Products without anyone touching this file.
+export const QUICK_JOBS: { l: string; product?: string }[] = [
+  { l: 'Air / nitrogen fill' },
+  { l: 'Tyre Change' },
+  { l: 'Wheel Change' },
+  { l: 'Tube fitting' },
+  { l: 'Tubeless valve',        product: 'Tubeless Valve' },
+  { l: 'Tubeless patch',        product: 'Tubeless Patch' },
+  { l: 'Tubeless nickel valve', product: 'Tubeless Nickel Valve' },
+  { l: 'Tube Patch',            product: 'Tube Patch' },
+]
 
-
-// ── Quick service income (Proprietor) ────────────────────────────────────────
-// Small cash jobs with no document — puncture, air fill, a quick fit. This is
-// INCOME, not a movement: it saves as a real Proprietorship receipt (RCP
-// series, SVC line, cash payment), so revenue, profit, the drawer and the
-// daily report all see it through the one sales pipeline. No VAT — the
-// Proprietorship isn't VAT-registered — and nothing touches the Pvt Ltd.
 export function QuickIncomeModal({
   onClose, onSaved, showToast, initialAmount,
 }: {
@@ -341,7 +355,6 @@ export function QuickIncomeModal({
   showToast: (m: string) => void
   initialAmount?: number
 }) {
-  const PRESETS = ['Puncture repair', 'Air / nitrogen fill', 'Tube fitting', 'Quick service']
   // Sales payments keep the POS vocabulary — 'bank' is what a transfer is
   // stored as across every sale, and the daily report's Payment Methods
   // breakdown counts cash/cheque/bank/card. Only the LABEL says "Online".
@@ -351,44 +364,28 @@ export function QuickIncomeModal({
     { v: 'bank', l: '🏦 Online' },
     { v: 'cheque', l: '📝 Cheque' },
   ] as const
-  // Two kinds of undocumented cash: labour (service line, no stock) and
-  // ITEMS — flaps, valves, patches, weights sold over the counter with no
-  // paper. Items must go through as real product lines or the count drifts
-  // with every quick sale.
-  const [mode, setMode] = useState<'service' | 'items'>('service')
-  const [catalog, setCatalog] = useState<any[] | null>(null)
-  const [itemSearch, setItemSearch] = useState('')
-  const [picked, setPicked] = useState<{ productId: string; name: string; sku: string; price: number; qty: number; productType: string }[]>([])
-  useEffect(() => {
-    if (mode !== 'items' || catalog !== null) return
-    fetch('/api/vendor/data').then(r => r.json()).then(j => setCatalog(j.products || [])).catch(() => setCatalog([]))
-  }, [mode, catalog])
-  const itemResults = (catalog || [])
-    .filter((p: any) => p.is_active !== false)
-    // sold-out counted items can't be quick-sold; loose consumables always can
-    .filter((p: any) => p.quantity > 0 || p.product_type === 'consumable')
-    .filter((p: any) => {
-      const q = itemSearch.toLowerCase()
-      return q.length >= 2 && (p.name?.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
-    })
-    .sort((a: any, b: any) => (a.product_type === 'consumable' ? 0 : 1) - (b.product_type === 'consumable' ? 0 : 1))
-    .slice(0, 8)
-  const itemsTotal = picked.reduce((t, i) => t + i.qty * i.price, 0)
 
+  type Line = { key: string; name: string; qty: number; price: number | ''; productId: string | null; sku: string; stock?: number }
+  const [lines, setLines] = useState<Line[]>([])
+  const [catalog, setCatalog] = useState<any[] | null>(null)
+  const [search, setSearch] = useState('')
   const [method, setMethod] = useState<string>('cash')
   const [payRef, setPayRef] = useState('')
-  const [desc, setDesc] = useState('')
-  const [amount, setAmount] = useState<number | ''>(initialAmount && initialAmount > 0 ? Math.round(initialAmount) : '')
   const [saving, setSaving] = useState(false)
   const [propEntity, setPropEntity] = useState<{ id: string; name: string } | null>(null)
   const [entityLoading, setEntityLoading] = useState(true)
+  const [entityError, setEntityError] = useState<string | null>(null)
+
+  // The catalog backs both the presets (name → product) and free search.
+  useEffect(() => {
+    fetch('/api/vendor/data').then(r => r.json()).then(j => setCatalog(j.products || [])).catch(() => setCatalog([]))
+  }, [])
 
   // "No Proprietorship entity configured" was reported for EVERY failure —
   // a 401, a dropped connection, anything — because the response was parsed
   // without checking r.ok and the catch was empty. The entity is configured;
   // the fetch was failing, and the message sent whoever saw it looking in
   // Settings for a problem that was not there.
-  const [entityError, setEntityError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -408,7 +405,7 @@ export function QuickIncomeModal({
             setEntityError(prop ? null : 'no-prop-entity')
           }
           break
-        } catch (e: any) {
+        } catch {
           if (attempt === 1 && !cancelled) setEntityError('Network error loading entities')
         }
       }
@@ -417,8 +414,41 @@ export function QuickIncomeModal({
     return () => { cancelled = true }
   }, [])
 
+  const findProduct = (name: string) =>
+    (catalog || []).find((p: any) => (p.name || '').toLowerCase().trim() === name.toLowerCase())
+
+  function addLine(l: Partial<Line>) {
+    setLines(prev => [...prev, {
+      key: Math.random().toString(36).slice(2),
+      name: l.name || '', qty: 1, price: l.price ?? '',
+      productId: l.productId ?? null, sku: l.sku || '', stock: l.stock,
+    }])
+  }
+
+  function addJob(job: { l: string; product?: string }) {
+    if (!job.product) { addLine({ name: job.l }); return }
+    const p = findProduct(job.product)
+    if (!p) { addLine({ name: job.l }); showToast(`“${job.product}” is not in Products yet — recorded without stock`); return }
+    addLine({ name: p.name, price: Math.round(Number(p.price) || 0) || '', productId: p.id, sku: p.sku || '', stock: p.quantity })
+  }
+
+  const results = (catalog || [])
+    .filter((p: any) => p.is_active !== false)
+    // sold-out counted items can't be quick-sold; loose consumables always can
+    .filter((p: any) => p.quantity > 0 || p.product_type === 'consumable')
+    .filter((p: any) => {
+      const q = search.toLowerCase()
+      return q.length >= 2 && (p.name?.toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
+    })
+    .slice(0, 6)
+
+  const total = lines.reduce((t, l) => t + l.qty * (Number(l.price) || 0), 0)
+  const stockLines = lines.filter(l => l.productId)
+
   async function save() {
-    if (mode === 'service' && (amount === '' || Number(amount) <= 0)) { showToast('Enter the amount'); return }
+    if (lines.length === 0) { showToast('Add what the job was'); return }
+    if (lines.some(l => !l.name.trim())) { showToast('Every line needs a description'); return }
+    if (total <= 0) { showToast('Enter the amount'); return }
     if (!propEntity) {
       showToast(entityError && entityError !== 'no-prop-entity'
         ? `Couldn't load the shop's entities — ${entityError}. Try again.`
@@ -426,11 +456,6 @@ export function QuickIncomeModal({
       return
     }
     if (method === 'cheque' && !payRef.trim()) { showToast('Enter the cheque number'); return }
-    if (mode === 'items') {
-      if (picked.length === 0) { showToast('Pick at least one item'); return }
-      if (picked.some(i => i.price <= 0)) { showToast('Every item needs a price'); return }
-    }
-    const amt = mode === 'items' ? itemsTotal : Math.round(Number(amount))
     setSaving(true)
     try {
       const r = await fetch('/api/vendor/sales', {
@@ -438,20 +463,24 @@ export function QuickIncomeModal({
         body: JSON.stringify({
           action: 'create_sale',
           invoiceEntityId: propEntity.id,
-          items: mode === 'items'
-            ? picked.map(i => ({ productId: i.productId, productName: i.name, productSku: i.sku, quantity: i.qty, unitPrice: i.price, ssclStream: 'PART' }))
-            : [{ productId: null, productName: desc.trim() || 'Service income', productSku: '', quantity: 1, unitPrice: amt, ssclStream: 'SVC' }],
+          items: lines.map(l => ({
+            productId: l.productId, productName: l.name.trim(), productSku: l.sku,
+            quantity: l.qty, unitPrice: Math.round(Number(l.price) || 0),
+            // A line with a product is goods off the shelf (PART); a bare
+            // labour line is a service (SVC). Same rule as the POS.
+            ssclStream: l.productId ? 'PART' : 'SVC',
+          })),
           payments: [{
-            method, amount: amt,
+            method, amount: total,
             chequeNumber: method === 'cheque' ? payRef.trim() : null,
             bankRef: method === 'bank' ? (payRef.trim() || null) : null,
           }],
-          notes: mode === 'items' ? 'Quick counter sale — no document issued' : 'Quick service income — no document issued',
+          notes: 'Quick counter job — no document issued',
         }),
       })
       const j = await r.json()
       if (!r.ok) throw new Error(j.error ?? 'Failed to record')
-      showToast(`✅ ${formatRs(amt)} recorded as ${propEntity.name} income${j.invoiceNo ? ` (${j.invoiceNo})` : ''}`)
+      showToast(`✅ ${formatRs(total)} recorded as ${propEntity.name} income${stockLines.length ? ` · ${stockLines.length} item${stockLines.length > 1 ? 's' : ''} off stock` : ''}`)
       onSaved()
     } catch (e: any) { showToast('⚠️ ' + e.message) }
     setSaving(false)
@@ -461,92 +490,77 @@ export function QuickIncomeModal({
     <Modal title="Money in — no invoice" onClose={onClose}>
       <p className="text-xs text-slate-500 -mt-2 mb-3">
         No document issued — counted as <strong>{propEntity?.name || 'Proprietor'}</strong> income;
-        revenue and the drawer see it like any sale. No VAT.
+        revenue and the drawer see it like any sale. No VAT. Parts used come off stock.
       </p>
 
-      {/* Labour or goods? Goods must move stock. */}
-      <div className="grid grid-cols-2 gap-1.5 mb-3">
-        <button onClick={() => setMode('service')}
-          className={`py-2 rounded-lg border-2 text-xs font-bold ${mode === 'service' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
-          🔧 Service / labour
-        </button>
-        <button onClick={() => setMode('items')}
-          className={`py-2 rounded-lg border-2 text-xs font-bold ${mode === 'items' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
-          🔩 Items sold
-        </button>
-      </div>
-
-      {mode === 'items' && (
-        <div className="mb-3">
-          <input type="text" value={itemSearch} onChange={e => setItemSearch(e.target.value)} autoFocus
-            placeholder="Search item — valve, patch, flap, weight…"
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
-          {catalog === null && itemSearch.length >= 2 && <p className="text-[11px] text-slate-400 mt-1">Loading products…</p>}
-          {itemResults.length > 0 && (
-            <div className="border border-slate-200 rounded-lg mt-1 overflow-hidden">
-              {itemResults.map((p: any) => (
-                <button key={p.id} onClick={() => {
-                  setPicked(prev => {
-                    const ex = prev.find(i => i.productId === p.id)
-                    if (ex) return prev.map(i => i.productId === p.id ? { ...i, qty: i.qty + 1 } : i)
-                    return [...prev, { productId: p.id, name: p.name, sku: p.sku || '', price: Math.round(Number(p.price) || 0), qty: 1, productType: p.product_type }]
-                  })
-                  setItemSearch('')
-                }} className="w-full text-left px-3 py-2 flex justify-between items-center border-b border-slate-100 last:border-0 hover:bg-emerald-50 text-sm">
-                  <span className="truncate">{p.name}</span>
-                  <span className="text-xs text-slate-400 shrink-0 ml-2">{p.product_type === 'consumable' ? '◦ ' : ''}Rs.{Number(p.price || 0).toLocaleString()}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {picked.map((i, idx) => (
-            <div key={i.productId} className="flex items-center gap-2 mt-1.5 bg-slate-50 rounded-lg px-2.5 py-1.5">
-              <span className="flex-1 text-xs font-semibold text-slate-700 truncate">{i.name}</span>
-              <input type="number" min={1} value={i.qty}
-                onChange={e => setPicked(prev => prev.map((x, j) => j === idx ? { ...x, qty: Math.max(1, parseInt(e.target.value) || 1) } : x))}
-                className="w-12 px-1 py-1 border border-slate-200 rounded text-center text-xs" />
-              <span className="text-[10px] text-slate-400">×</span>
-              <input type="number" min={0} value={i.price}
-                onChange={e => setPicked(prev => prev.map((x, j) => j === idx ? { ...x, price: Math.max(0, Math.round(Number(e.target.value) || 0)) } : x))}
-                className="w-20 px-1.5 py-1 border border-slate-200 rounded text-right text-xs font-mono font-bold" />
-              <button onClick={() => setPicked(prev => prev.filter((_, j) => j !== idx))}
-                className="text-red-300 hover:text-red-500 font-bold text-sm leading-none">×</button>
-            </div>
-          ))}
-          {picked.length > 0 && (
-            <div className="flex justify-between items-center mt-2 px-1">
-              <span className="text-xs font-bold text-slate-500">Total — stock comes off each item</span>
-              <span className="text-lg font-black text-emerald-700">{formatRs(itemsTotal)}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {mode === 'service' && (<>
-      <div className="flex flex-wrap gap-1.5 mb-2">
-        {PRESETS.map(p => (
-          <button key={p} onClick={() => setDesc(p)}
-            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 transition ${
-              desc === p ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300'
-            }`}>
-            {p}
+      {/* The counter jobs. Ones marked ◦ take a piece off the shelf. */}
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {QUICK_JOBS.map(j => (
+          <button key={j.l} onClick={() => addJob(j)}
+            className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 border-slate-200 bg-white text-slate-600 hover:border-emerald-400 hover:bg-emerald-50 transition">
+            {j.l}{j.product ? <span className="text-emerald-600"> ◦</span> : null}
           </button>
         ))}
       </div>
-      <input type="text" value={desc} onChange={e => setDesc(e.target.value)}
-        placeholder="Or type what the job was…"
-        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 mb-3" />
 
-      <div className="relative mb-3">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-lg font-bold text-slate-400">Rs.</span>
-        <input type="number" min={1} autoFocus value={amount}
-          onChange={e => setAmount(e.target.value === '' ? '' : Math.round(Number(e.target.value)))}
-          placeholder="0"
-          className="w-full border-2 border-slate-200 rounded-xl pl-14 pr-4 py-3 text-2xl font-black text-slate-800 focus:outline-none focus:border-emerald-400" />
-      </div>
-      </>)}
+      {/* Anything else in the catalog, or a job with no preset */}
+      <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="Other item or job — search, or type and press Enter"
+        onKeyDown={e => {
+          if (e.key === 'Enter' && search.trim() && results.length === 0) {
+            addLine({ name: search.trim() }); setSearch('')
+          }
+        }}
+        className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
+      {results.length > 0 && (
+        <div className="border border-slate-200 rounded-lg mt-1 overflow-hidden">
+          {results.map((p: any) => (
+            <button key={p.id} onClick={() => {
+              addLine({ name: p.name, price: Math.round(Number(p.price) || 0) || '', productId: p.id, sku: p.sku || '', stock: p.quantity })
+              setSearch('')
+            }} className="w-full text-left px-3 py-2 flex justify-between items-center border-b border-slate-100 last:border-0 hover:bg-emerald-50 text-sm">
+              <span className="truncate">{p.name}</span>
+              <span className="text-xs text-slate-400 shrink-0 ml-2">
+                {p.product_type === 'consumable' ? '◦ ' : ''}{p.quantity} in stock
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
-      <p className="text-xs font-bold text-slate-500 mb-1.5">How did they pay?</p>
+      {/* The job list */}
+      {lines.map((l, idx) => (
+        <div key={l.key} className="flex items-center gap-2 mt-2 bg-slate-50 rounded-lg px-2.5 py-2">
+          <div className="flex-1 min-w-0">
+            <input type="text" value={l.name}
+              onChange={e => setLines(prev => prev.map((x, j) => j === idx ? { ...x, name: e.target.value } : x))}
+              className="w-full bg-transparent text-xs font-semibold text-slate-700 outline-none" />
+            {l.productId
+              ? <span className="text-[10px] text-emerald-700 font-bold">◦ off stock · {l.stock ?? 0} on hand</span>
+              : <span className="text-[10px] text-slate-400">labour — no stock</span>}
+          </div>
+          <input type="number" min={1} value={l.qty}
+            onChange={e => setLines(prev => prev.map((x, j) => j === idx ? { ...x, qty: Math.max(1, parseInt(e.target.value) || 1) } : x))}
+            className="w-11 px-1 py-1 border border-slate-200 rounded text-center text-xs" />
+          <span className="text-[10px] text-slate-400">×</span>
+          <input type="number" min={0} value={l.price} placeholder="Rs."
+            onChange={e => setLines(prev => prev.map((x, j) => j === idx ? { ...x, price: e.target.value === '' ? '' : Math.max(0, Math.round(Number(e.target.value))) } : x))}
+            className="w-24 px-1.5 py-1 border border-slate-200 rounded text-right text-xs font-mono font-bold" />
+          <button onClick={() => setLines(prev => prev.filter((_, j) => j !== idx))}
+            className="text-red-300 hover:text-red-500 font-bold text-sm leading-none">×</button>
+        </div>
+      ))}
+
+      {lines.length > 0 && (
+        <div className="flex justify-between items-center mt-2.5 pt-2 border-t border-slate-100">
+          <span className="text-xs font-bold text-slate-500">
+            Total{stockLines.length > 0 && <span className="font-normal text-emerald-700"> · {stockLines.reduce((t, l) => t + l.qty, 0)} piece(s) come off stock</span>}
+          </span>
+          <span className="text-xl font-black text-emerald-700">{formatRs(total)}</span>
+        </div>
+      )}
+
+      <p className="text-xs font-bold text-slate-500 mb-1.5 mt-3">How did they pay?</p>
       <div className="grid grid-cols-4 gap-1.5 mb-2">
         {METHODS.map(m => (
           <button key={m.v} onClick={() => setMethod(m.v)}
@@ -572,9 +586,9 @@ export function QuickIncomeModal({
 
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-slate-100">
         <button onClick={onClose} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50">Cancel</button>
-        <button onClick={save} disabled={saving || entityLoading || (mode === 'items' ? picked.length === 0 || itemsTotal <= 0 : amount === '' || Number(amount) <= 0) || (method === 'cheque' && !payRef.trim())}
+        <button onClick={save} disabled={saving || entityLoading || lines.length === 0 || total <= 0 || (method === 'cheque' && !payRef.trim())}
           className="px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black disabled:opacity-40">
-          {saving ? 'Saving…' : amount !== '' && Number(amount) > 0 ? `Record ${formatRs(Number(amount))}` : 'Record'}
+          {saving ? 'Saving…' : total > 0 ? `Record ${formatRs(total)}` : 'Record'}
         </button>
       </div>
     </Modal>
