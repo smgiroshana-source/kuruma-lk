@@ -975,7 +975,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       {grnNewProduct.category === 'Wheels & Tires' ? '🏎️ New Tyre' : 'New Product'}
                     </h4>
                     {grnNewProduct.category !== 'Wheels & Tires' && (
-                      <button onClick={() => setGrnNewProduct(p => ({ ...p, category: 'Wheels & Tires', tyre_width: '', tyre_profile: '', tyre_rim: '' }))}
+                      <button onClick={() => setGrnNewProduct(p => ({ ...p, category: 'Wheels & Tires', tyre_width: '', tyre_profile: '', tyre_rim: '', accessoryType: '' }))}
                         className="text-[10px] text-sky-600 underline hover:text-sky-800">Switch to Tyre mode →</button>
                     )}
                   </div>
@@ -1016,6 +1016,10 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     })()}
                   </div>
 
+                  {/* Accessory mode collects everything above — the generic
+                      fields would only duplicate Make and demand a Name that
+                      is already auto-built. */}
+                  {!grnNewProduct.accessoryType && (<>
                   {/* Category + Condition */}
                   <div className="grid grid-cols-2 gap-2">
                     <div>
@@ -1121,6 +1125,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       </div>
                     </div>
                   )}
+                  </>)}
 
                   {/* Selling Price — both modes */}
                   <div>
