@@ -345,6 +345,10 @@ export const QUICK_JOBS: { l: string; product?: string }[] = [
   { l: 'Tubeless patch',        product: 'Tubeless Patch' },
   { l: 'Tubeless nickel valve', product: 'Tubeless Nickel Valve' },
   { l: 'Tube Patch',            product: 'Tube Patch' },
+  { l: 'Wheel nut',             product: 'Wheel Nut' },
+  { l: 'Camber shim',           product: 'Camber Shim' },
+  { l: 'Sticker weight',        product: 'Sticker Weight' },
+  { l: 'Clip weight',           product: 'Clip Weight' },
 ]
 
 export function QuickIncomeModal({
