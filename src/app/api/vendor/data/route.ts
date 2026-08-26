@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
   while (true) {
     const { data } = await admin
       .from('products')
-      .select('id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, cost, price, quantity, show_price, is_active, vendor_id, created_at, loc_store, loc_floor, loc_sub1, loc_sub2, last_stock_confirmed_at, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, images:product_images(id, url, sort_order)')
+      .select('id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, cost, cost_vat_rate, cost_includes_vat, cost_is_estimate, price, quantity, min_stock_level, show_price, is_active, vendor_id, created_at, loc_store, loc_floor, loc_sub1, loc_sub2, last_stock_confirmed_at, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, images:product_images(id, url, sort_order)')
       .eq('vendor_id', vendor.id)
       // created_at is NOT unique (bulk imports share a timestamp). Without a
       // unique tiebreaker, ties have no defined order across .range() batches,

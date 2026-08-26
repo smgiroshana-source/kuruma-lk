@@ -3,7 +3,7 @@ import { toWhatsAppNumber } from '@/lib/constants'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
-import { gpPercent, isBelowCost, netOfVat, costIncVat } from '@/lib/margin'
+import { gpPercent, isBelowCost, netOfVat, costIncVat, productCostIncVat } from '@/lib/margin'
 import { useState, useEffect, useMemo } from 'react'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
@@ -592,7 +592,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       const loose = product.product_type === 'consumable'
       const ex = prev.find(i => i.productId === product.id)
       if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: loose ? i.quantity + 1 : Math.min(i.quantity + 1, product.quantity) } : i)
-      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: loose ? null : product.quantity, cost: product.cost ?? null }]
+      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: loose ? null : product.quantity, cost: product.cost ?? null, cost_vat_rate: product.cost_vat_rate ?? 0, cost_includes_vat: product.cost_includes_vat ?? false }]
     })
     setPosSearch('')
   }
@@ -691,15 +691,17 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // reduced either — which means the cost it must clear is the full amount paid
   // for the goods, VAT included. Comparing a gross price against a net cost
   // would let a tube go out Rs.184 light and call it profit.
-  const posCostBasis = (c: number | null | undefined) =>
-    isLkTax && !posIsVatEntity ? costIncVat(c, posVatRate) : (Number(c) || 0)
+  // Takes the CART ITEM, not a bare cost: the VAT that applies is the one that
+  // applied when the goods were bought, and it travels on the product.
+  const posCostBasis = (it: any) =>
+    isLkTax && !posIsVatEntity ? productCostIncVat(it) : (Number(it?.cost) || 0)
 
   // The floor comes out the SAME on both entities, which is the point: Rs.1,207
   // either way for a tube that cost Rs.1,207. On the VAT entity the price is
   // taken net and compared to the net cost; on the proprietorship both sides
   // stay gross. One number for the operator to remember.
-  const posCostFloor = (c: number | null | undefined) =>
-    isLkTax ? costIncVat(c, posVatRate) : (Number(c) || 0)
+  const posCostFloor = (it: any) =>
+    isLkTax ? productCostIncVat(it) : (Number(it?.cost) || 0)
   // Ex-VAT price entry (insurance quotes): only meaningful on the VAT entity.
   const posEntryExcl = posIsVatEntity && posPriceMode === 'excl'
   const grossOfNet = (p: number) => Math.round((Number(p) || 0) * (100 + posVatRate) / 100)
@@ -821,9 +823,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     }
     // Below-cost warning — ONLY for items that have a cost (real or rough).
     // Items without any cost sell silently (owner rule): no errors, no noise.
-    const belowCost = posCart.filter(it => Number(it.cost) > 0 && isBelowCost(posMarginBase(it.unitPrice), posCostBasis(it.cost)))
+    const belowCost = posCart.filter(it => Number(it.cost) > 0 && isBelowCost(posMarginBase(it.unitPrice), posCostBasis(it)))
     if (belowCost.length > 0) {
-      const lines = belowCost.map(it => `• ${it.productName}: Rs.${Number(it.unitPrice).toLocaleString()} — needs Rs.${posCostFloor(it.cost).toLocaleString()} or more`).join('\n')
+      const lines = belowCost.map(it => `• ${it.productName}: Rs.${Number(it.unitPrice).toLocaleString()} — needs Rs.${posCostFloor(it).toLocaleString()} or more`).join('\n')
       if (!confirm(`⚠️ SELLING BELOW COST:\n\n${lines}\n\nContinue with this sale?`)) return
     }
     setPosPreview(true)

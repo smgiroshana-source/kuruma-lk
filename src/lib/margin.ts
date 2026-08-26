@@ -46,3 +46,28 @@ export function costIncVat(cost: number | null | undefined, vatRatePercent: numb
   if (c <= 0) return 0
   return Math.round(c * (100 + r) / 100)
 }
+
+/**
+ * What a unit of this product actually cost, VAT included — the figure that
+ * left the till.
+ *
+ * Three cases exist in this shop and the columns say which one applies:
+ *   · bought from a non-VAT supplier  → no VAT anywhere; show the figure
+ *   · CSV-imported stock              → cost already includes VAT; show it
+ *   · bought from a VAT supplier      → cost is net; add cost_vat_rate back
+ *
+ * Grossing every cost up by the standard rate invented VAT that was never
+ * paid on the first case and double-counted it on the second.
+ */
+export function productCostIncVat(p: { cost?: any; cost_vat_rate?: any; cost_includes_vat?: any } | null | undefined): number {
+  const c = Number(p?.cost) || 0
+  if (c <= 0) return 0
+  if (p?.cost_includes_vat) return Math.round(c)
+  const r = Number(p?.cost_vat_rate) || 0
+  return Math.round(c * (100 + r) / 100)
+}
+
+/** Is there VAT inside the figure productCostIncVat returns? Drives the label. */
+export function costHasVat(p: { cost_vat_rate?: any; cost_includes_vat?: any } | null | undefined): boolean {
+  return !!p?.cost_includes_vat || (Number(p?.cost_vat_rate) || 0) > 0
+}
