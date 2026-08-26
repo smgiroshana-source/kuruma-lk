@@ -536,6 +536,10 @@ export async function POST(req: NextRequest) {
           quantity_received: delta, quantity_remaining: delta,
           unit_cost: cost, received_at: now.slice(0, 10),
         })
+        // Reference cost too, when the product has none — see seed_cost_layer.
+        if (!(parseInt((p as any).cost) > 0)) {
+          await admin.from('products').update({ cost }).eq('id', productId)
+        }
       }
     }
     return NextResponse.json({ success: true, quantity: target, delta })
@@ -544,7 +548,7 @@ export async function POST(req: NextRequest) {
   if (action === 'seed_cost_layer') {
     const { productId, unitCost, quantity, receivedAt } = body
     if (!productId || !unitCost || !quantity) return NextResponse.json({ success: false, error: 'productId, unitCost, quantity required' }, { status: 400 })
-    const { data: p } = await admin.from('products').select('vendor_id').eq('id', productId).single()
+    const { data: p } = await admin.from('products').select('vendor_id, cost').eq('id', productId).single()
     if (!p || p.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     const { error } = await admin.from('cost_layers').insert({
       vendor_id:          vendor.id,
@@ -555,6 +559,14 @@ export async function POST(req: NextRequest) {
       received_at:        receivedAt || new Date().toISOString().slice(0, 10),
     })
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+    // The cost the operator just typed is also the product's reference cost.
+    // Seeding only the FIFO layer left products.cost null, so the item still
+    // read as "missing cost", showed no margin, and — since the stock-drop
+    // guard values a reduction at units × cost — was valued at zero by it.
+    // Only fill a cost that isn't set: an existing one is the owner's.
+    if (!(parseInt(p.cost as any) > 0)) {
+      await admin.from('products').update({ cost: Math.round(Number(unitCost)) }).eq('id', productId)
+    }
     return NextResponse.json({ success: true })
   }
 
