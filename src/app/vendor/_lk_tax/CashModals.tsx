@@ -369,7 +369,9 @@ export function QuickIncomeModal({
     { v: 'cheque', l: '📝 Cheque' },
   ] as const
 
-  type Line = { key: string; name: string; qty: number; price: number | ''; productId: string | null; sku: string; stock?: number }
+  // wantProduct: the preset this line came from, kept so a line added before
+  // the catalog arrived can still be attached to its product afterwards.
+  type Line = { key: string; name: string; qty: number; price: number | ''; productId: string | null; sku: string; stock?: number; wantProduct?: string }
   const [lines, setLines] = useState<Line[]>([])
   const [catalog, setCatalog] = useState<any[] | null>(null)
   const [search, setSearch] = useState('')
@@ -426,15 +428,40 @@ export function QuickIncomeModal({
       key: Math.random().toString(36).slice(2),
       name: l.name || '', qty: 1, price: l.price ?? '',
       productId: l.productId ?? null, sku: l.sku || '', stock: l.stock,
+      wantProduct: l.wantProduct,
     }])
   }
 
   function addJob(job: { l: string; product?: string }) {
     if (!job.product) { addLine({ name: job.l }); return }
+    // The catalog is a full product fetch and takes a moment. Tapping a preset
+    // before it lands used to silently drop the line to labour — the piece was
+    // sold and never came off stock. Hold the intent on the line instead; the
+    // effect below attaches it the moment the catalog is there.
+    if (catalog === null) { addLine({ name: job.l, wantProduct: job.product }); return }
     const p = findProduct(job.product)
     if (!p) { addLine({ name: job.l }); showToast(`“${job.product}” is not in Products yet — recorded without stock`); return }
     addLine({ name: p.name, price: Math.round(Number(p.price) || 0) || '', productId: p.id, sku: p.sku || '', stock: p.quantity })
   }
+
+  // Attach any line that was waiting on the catalog. Price is only filled in
+  // where the operator has not already typed one.
+  useEffect(() => {
+    if (!catalog) return
+    setLines(prev => {
+      if (!prev.some(l => l.wantProduct && !l.productId)) return prev
+      const missing: string[] = []
+      const next = prev.map((l): Line => {
+        if (!l.wantProduct || l.productId) return l
+        const p = findProduct(l.wantProduct)
+        if (!p) { missing.push(l.wantProduct); return { ...l, wantProduct: undefined } }
+        return { ...l, name: p.name, productId: p.id, sku: p.sku || '', stock: p.quantity,
+                 price: l.price === '' ? (Math.round(Number(p.price) || 0) || '') : l.price, wantProduct: undefined }
+      })
+      if (missing.length) showToast(`“${missing[0]}” is not in Products yet — recorded without stock`)
+      return next
+    })
+  }, [catalog])
 
   const total = lines.reduce((t, l) => t + l.qty * (Number(l.price) || 0), 0)
   const stockLines = lines.filter(l => l.productId)
@@ -442,6 +469,8 @@ export function QuickIncomeModal({
   async function save() {
     if (lines.length === 0) { showToast('Add what the job was'); return }
     if (lines.some(l => !l.name.trim())) { showToast('Every line needs a description'); return }
+    // Saving now would book a stock item as labour and leave the piece on hand.
+    if (lines.some(l => l.wantProduct)) { showToast('Still looking up stock — one moment'); return }
     if (total <= 0) { showToast('Enter the amount'); return }
     if (!propEntity) {
       showToast(entityError && entityError !== 'no-prop-entity'
@@ -518,7 +547,9 @@ export function QuickIncomeModal({
               className="w-full bg-transparent text-xs font-semibold text-slate-700 outline-none" />
             {l.productId
               ? <span className="text-[10px] text-emerald-700 font-bold">◦ off stock · {l.stock ?? 0} on hand</span>
-              : <span className="text-[10px] text-slate-400">labour — no stock</span>}
+              : l.wantProduct
+                ? <span className="text-[10px] text-slate-400">looking up stock…</span>
+                : <span className="text-[10px] text-slate-400">labour — no stock</span>}
           </div>
           <input type="number" min={1} value={l.qty}
             onChange={e => setLines(prev => prev.map((x, j) => j === idx ? { ...x, qty: Math.max(1, parseInt(e.target.value) || 1) } : x))}
