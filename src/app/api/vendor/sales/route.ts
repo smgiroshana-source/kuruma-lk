@@ -4,7 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { colomboDayOf } from '@/lib/dates'
 import { checkPromotable, checkReversible, mayReversePromotion, PROMOTE_WINDOW_DAYS } from '@/lib/promoteReceipt'
 import { adjustProductQuantity } from '@/lib/stock'
-import { fetchAllRows } from '@/lib/fetchAll'
+import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnSales } from '@/lib/branchScope'
 import { linkSaleToClaim } from '@/lib/claims'
 
@@ -487,9 +487,51 @@ export async function GET(req: NextRequest) {
   }
   const totalReturnsAll = returnsInPeriod.reduce((s: number, c: any) => s + c.amount, 0)
 
+  // ── What actually came back, from the stock record rather than the note ──
+  //
+  // Until now a return could only be named by parsing its free-text note
+  // ("RETURN: <item> x1"). sale_items.returned_quantity is the real record —
+  // it is what stock was restored against — so read the goods from there and
+  // report a piece count alongside the value.
+  //
+  // A return is dated by its payment, and sale_items carries no return date, so
+  // the lines are attached per sale. One Sakura sale has two returns; attaching
+  // its lines to both would count the same goods twice, so the lines go to the
+  // most recent return of that sale and the earlier one keeps its note. Better
+  // an honest gap on one row than a piece count that silently double-counts.
+  let totalPiecesReturned = 0
+  if (returnsInPeriod.length > 0) {
+    const returnSaleIds = [...new Set(returnsInPeriod.map((r: any) => r.sale_id).filter(Boolean))]
+    const returnedLines = await fetchAllByIds(returnSaleIds, (chunk, from, to) => admin
+      .from('sale_items')
+      .select('sale_id, product_name, product_sku, returned_quantity, unit_price')
+      .in('sale_id', chunk).gt('returned_quantity', 0)
+      .order('id').range(from, to))
+    const linesBySale: Record<string, any[]> = {}
+    for (const l of returnedLines) (linesBySale[l.sale_id] = linesBySale[l.sale_id] || []).push(l)
+
+    // Newest return of each sale is the one that carries that sale's lines.
+    const ownerOfSale: Record<string, string> = {}
+    for (const r of returnsInPeriod) {
+      const cur = ownerOfSale[r.sale_id]
+      const curAt = cur ? returnsInPeriod.find((x: any) => x.id === cur)?.created_at : ''
+      if (!cur || String(r.created_at || '') > String(curAt || '')) ownerOfSale[r.sale_id] = r.id
+    }
+    for (const r of returnsInPeriod) {
+      const owns = ownerOfSale[r.sale_id] === r.id
+      const lines = owns ? (linesBySale[r.sale_id] || []) : []
+      r.returnedItems = lines.map((l: any) => ({
+        name: l.product_name, sku: l.product_sku,
+        quantity: Number(l.returned_quantity) || 0,
+      }))
+      r.pieces = r.returnedItems.reduce((s: number, i: any) => s + i.quantity, 0)
+      totalPiecesReturned += r.pieces
+    }
+  }
+
   return NextResponse.json({
     sales: allSales,
-    stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections, totalReturns: totalReturnsAll },
+    stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections, totalReturns: totalReturnsAll, totalPiecesReturned },
     collectionsToday: positiveCollections,
     returnsInPeriod,
     topProducts,

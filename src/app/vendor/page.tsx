@@ -3419,6 +3419,7 @@ ${customerRows.map(c => `<tr>
                     <div className="bg-red-50/50 border border-red-200 rounded-xl p-3 sm:p-4 mb-5">
                       <p className="text-[11px] font-bold text-red-800 mb-2">
                         Returned in this period
+                        {salesData.stats.totalPiecesReturned > 0 && <> · {salesData.stats.totalPiecesReturned} piece(s) back on the shelf</>}
                         <span className="font-normal text-red-600"> — listed by the day the return was raised, so a return against an older invoice still appears here</span>
                       </p>
                       <div className="space-y-1.5">
@@ -3440,9 +3441,17 @@ ${customerRows.map(c => `<tr>
                             return (
                               <div key={r.id} className="bg-white rounded-lg border border-red-100 px-3 py-2 flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                  <p className="text-xs font-bold text-slate-800 truncate">
-                                    {item || 'Returned item'}
-                                  </p>
+                                  {/* The stock record names the goods exactly; the
+                                      note is only the fallback for a sale whose
+                                      lines belong to a later return of the same
+                                      invoice. */}
+                                  {(r.returnedItems || []).length > 0
+                                    ? (r.returnedItems || []).map((g: any, gi: number) => (
+                                        <p key={gi} className="text-xs font-bold text-slate-800 truncate">
+                                          {g.name} <span className="text-red-600">×{g.quantity}</span>
+                                        </p>
+                                      ))
+                                    : <p className="text-xs font-bold text-slate-800 truncate">{item || 'Returned item'}</p>}
                                   <p className="text-[10px] text-slate-500 mt-0.5 truncate">
                                     {r.invoice_no || '(no invoice)'} · {r.customer_name || 'Unknown'} · {fmtColomboDateTime(r.created_at)}
                                   </p>
