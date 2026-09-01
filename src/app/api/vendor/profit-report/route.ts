@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
 
   // Product costs for lines with no sale-time snapshot
   const { data: products } = await admin.from('products')
-    .select('sku, cost, cost_is_estimate').eq('vendor_id', caller.vendor.id)
+    .select('sku, cost, cost_is_estimate, product_type, category').eq('vendor_id', caller.vendor.id)
   const prodBySku = new Map((products || []).filter((p: any) => p.sku).map((p: any) => [p.sku, p]))
 
   type Row = {
@@ -87,6 +87,28 @@ export async function GET(req: NextRequest) {
 
   let realRev = 0, realCogs = 0, roughRev = 0, roughCogs = 0, serviceRev = 0, noCostRev = 0
   let noCostQty = 0
+
+  // ── Revenue and profit by what was actually sold ──────────────────────────
+  //
+  // The owner wanted spare parts separated from the rest. Nothing new has to be
+  // entered for it: every line already carries its product, and every product
+  // its type and category. A separate invoice series would have meant a third
+  // gapless gazette sequence to maintain forever, and two invoices for the
+  // customer who buys a tyre and pays for fitting on the same visit.
+  //
+  // product_type alone is not enough — 'part' holds both the tubes and flaps
+  // (Wheels & Tires) and the body panels and lamps, which are different trades.
+  // Category separates them.
+  const groupOf = (sku: string | null, prod: any): string => {
+    if (!sku) return 'Services & labour'
+    if (!prod) return 'Unknown product'
+    if (prod.product_type === 'tyre') return 'Tyres'
+    if (prod.product_type === 'consumable') return 'Consumables'
+    if (prod.category === 'Wheels & Tires') return 'Tubes & flaps'
+    return 'Spare parts'
+  }
+  type Group = { group: string; lines: number; qty: number; revenue: number; cost: number; profit: number; noCostLines: number; noCostRevenue: number }
+  const groupAgg = new Map<string, Group>()
 
   for (const s of (sales || [])) {
     const docType = s.document_type || 'receipt'
@@ -123,6 +145,15 @@ export async function GET(req: NextRequest) {
         e.qty += qty; e.revenue += revenue
         noCostAgg.set(k, e)
       }
+
+      // Same buckets the totals use: a line with no cost contributes revenue but
+      // no profit, and says so, rather than inventing margin from a missing cost.
+      const gName = groupOf(i.product_sku || null, prod)
+      const g = groupAgg.get(gName) || { group: gName, lines: 0, qty: 0, revenue: 0, cost: 0, profit: 0, noCostLines: 0, noCostRevenue: 0 }
+      g.lines++; g.qty += qty; g.revenue += revenue
+      if (basis === 'none') { g.noCostLines++; g.noCostRevenue += revenue }
+      else { g.cost += r0(cost); g.profit += r0(revenue - cost) }
+      groupAgg.set(gName, g)
 
       detail.push({
         date, invoice, customer: s.customer_name || 'Walk-in',
@@ -238,8 +269,18 @@ export async function GET(req: NextRequest) {
   const grossProfit = realGp + roughGp + serviceRev
   const totalRev = knownRev + noCostRev
 
+  // Biggest earner first — the question is always which line of trade pays.
+  const groups = [...groupAgg.values()]
+    .map(g => ({ ...g, revenue: r0(g.revenue), cost: r0(g.cost), profit: r0(g.profit),
+                 noCostRevenue: r0(g.noCostRevenue),
+                 marginPct: (g.revenue - g.noCostRevenue) > 0
+                   ? Math.round((g.profit / (g.revenue - g.noCostRevenue)) * 100) : null,
+                 shareOfRevenuePct: totalRev > 0 ? Math.round((g.revenue / totalRev) * 100) : 0 }))
+    .sort((a, b) => b.revenue - a.revenue)
+
   return NextResponse.json({
     period: { from, to },
+    groups,
     entity: settings?.invoice_title || caller.vendor.name,
     tin: settings?.tax_id || null,
     vat: { isVatEntity, rate: vatRate },

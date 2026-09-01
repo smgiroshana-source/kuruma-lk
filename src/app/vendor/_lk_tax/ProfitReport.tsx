@@ -68,6 +68,30 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       </p>` : ''}`
 
     // The no-cost block is deliberately OUTSIDE the profit arithmetic
+    // ── Which line of trade earns what ──────────────────────────────────
+    // Tyres, tubes, spare parts, consumables and labour are different trades
+    // with different margins, and the shop's mix is the thing an owner acts on.
+    // No extra entry made this possible: every line already carries its product.
+    const groupBlock = (data.groups || []).length > 1 ? `
+      <h3>By line of trade</h3>
+      <table>
+        <thead><tr><th>Group</th><th class="num">Qty</th><th class="num">Revenue</th><th class="num">Share</th><th class="num">Cost</th><th class="num">Profit</th><th class="num">Margin</th></tr></thead>
+        <tbody>
+          ${(data.groups || []).map((g: any) => `
+            <tr>
+              <td>${escapeHtml(g.group)}${g.noCostLines > 0 ? ` <span style="font-size:9px;color:#b45309">(${g.noCostLines} line${g.noCostLines !== 1 ? 's' : ''} with no cost — ${money(g.noCostRevenue)} not in profit)</span>` : ''}</td>
+              <td class="num">${g.qty}</td>
+              <td class="num">${money(g.revenue)}</td>
+              <td class="num">${g.shareOfRevenuePct}%</td>
+              <td class="num">${g.cost > 0 ? money(g.cost) : '—'}</td>
+              <td class="num">${g.profit > 0 || g.cost > 0 ? money(g.profit) : '—'}</td>
+              <td class="num">${g.marginPct != null ? g.marginPct + '%' : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+      <p class="note">Grouped by what the product is. A typed labour line has no cost, so its whole net amount is margin.</p>
+    ` : ''
+
     const noCostBlock = s.noCostRevenue > 0 ? `
       <h3>Sold without a cost — revenue only</h3>
       <p class="note">
@@ -190,6 +214,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
         Returned quantities are excluded. Voided invoices are excluded.
       </p>
 
+      ${groupBlock}
       ${noCostBlock}
       ${expenseBlock}
       ${writeoffBlock}
@@ -255,6 +280,47 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
               </div>
             ))}
           </div>
+
+          {(data.groups || []).length > 1 && (
+            <div className="rounded-xl border border-slate-200 bg-white overflow-hidden mb-3">
+              <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50">
+                <p className="text-xs font-black text-slate-700">By line of trade</p>
+                <p className="text-[10px] text-slate-400">Tyres, spare parts and labour earn differently — this is the mix.</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] uppercase text-slate-400">
+                      <th className="text-left px-4 py-2 font-bold">Group</th>
+                      <th className="text-right px-3 py-2 font-bold">Revenue</th>
+                      <th className="text-right px-3 py-2 font-bold">Share</th>
+                      <th className="text-right px-3 py-2 font-bold">Profit</th>
+                      <th className="text-right px-4 py-2 font-bold">Margin</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.groups || []).map((g: any) => (
+                      <tr key={g.group} className="border-t border-slate-100">
+                        <td className="px-4 py-2">
+                          <span className="font-semibold text-slate-800">{g.group}</span>
+                          <span className="block text-[10px] text-slate-400">{g.qty} unit{g.qty !== 1 ? 's' : ''} · {g.lines} line{g.lines !== 1 ? 's' : ''}</span>
+                          {g.noCostLines > 0 && (
+                            <span className="block text-[10px] font-semibold text-amber-700">
+                              {g.noCostLines} line{g.noCostLines !== 1 ? 's' : ''} with no cost — {rs(g.noCostRevenue)} not in profit
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold text-slate-800">{rs(g.revenue)}</td>
+                        <td className="px-3 py-2 text-right text-slate-500">{g.shareOfRevenuePct}%</td>
+                        <td className="px-3 py-2 text-right font-bold text-emerald-700">{g.cost > 0 || g.profit > 0 ? rs(g.profit) : '—'}</td>
+                        <td className="px-4 py-2 text-right font-semibold text-slate-600">{g.marginPct != null ? g.marginPct + '%' : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {s.noCostRevenue > 0 && (
             <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 mb-3">
