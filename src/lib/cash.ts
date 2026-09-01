@@ -45,7 +45,10 @@ export async function computeExpected(admin: any, vendorId: string, session: any
     .eq('vendor_id', vendorId)
     .eq('movement_date', sessionDate)
   const movementsIn = (movementRows || [])
-    .filter((m: any) => m.type === 'owner_in' || m.type === 'bank_in')
+    // supplier_refund_in: cash handed back for goods we returned. Money moved,
+    // not money earned — the loss on the return is booked separately as an
+    // expense, so counting this as income would flatter the day twice.
+    .filter((m: any) => m.type === 'owner_in' || m.type === 'bank_in' || m.type === 'supplier_refund_in')
     .reduce((s: number, m: any) => s + parseInt(m.amount || 0), 0)
   const movementsOut = (movementRows || [])
     .filter((m: any) => m.type === 'to_bank' || m.type === 'owner_out')

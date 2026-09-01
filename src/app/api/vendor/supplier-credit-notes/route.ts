@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+// One rule for settling an invoice, shared with the supplier-returns route,
+// which raises a credit note when goods go back.
+import { recomputeSupplierInvoice as recomputeInvoice } from '@/lib/supplierInvoice'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Credit notes received FROM suppliers — settlement and quantity discounts,
@@ -30,25 +33,6 @@ async function getVendor() {
 
 const r0 = (n: any) => Math.round(Number(n) || 0)
 
-/** Re-derive credit_total and status from the notes actually on file. */
-async function recomputeInvoice(admin: ReturnType<typeof createAdminClient>, vendorId: string, invoiceId: string) {
-  const { data: inv } = await admin.from('supplier_invoices')
-    .select('amount, amount_paid, due_date').eq('id', invoiceId).eq('vendor_id', vendorId).single()
-  if (!inv) return
-  const { data: notes } = await admin.from('supplier_credit_notes')
-    .select('total_amount').eq('supplier_invoice_id', invoiceId).eq('vendor_id', vendorId)
-  const creditTotal = (notes || []).reduce((t: number, n: any) => t + Number(n.total_amount || 0), 0)
-  const settled = Number(inv.amount_paid || 0) + creditTotal
-  const owed = Number(inv.amount || 0) - settled
-  // An invoice fully covered by credits is settled, not "partly paid" — nothing
-  // is outstanding, so it must stop appearing in payables and ageing.
-  const status = owed <= 0 ? 'paid'
-    : settled > 0 ? 'partial'
-    : (inv.due_date && String(inv.due_date) < new Date().toISOString().slice(0, 10)) ? 'overdue'
-    : 'unpaid'
-  await admin.from('supplier_invoices')
-    .update({ credit_total: creditTotal, status }).eq('id', invoiceId).eq('vendor_id', vendorId)
-}
 
 // ─── GET ──────────────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {

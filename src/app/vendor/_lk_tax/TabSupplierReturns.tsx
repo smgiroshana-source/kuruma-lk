@@ -26,6 +26,14 @@ type ReturnRecord = {
   supplier_invoice_no?: string | null
   supplier_invoice_date?: string | null
   credit_vat?: number | null
+  // What the supplier actually ALLOWED for the goods — full cost, part of it,
+  // or nothing. cost_of_goods is what the stock was really carried at (FIFO);
+  // the difference between the two is a loss and is booked as an expense.
+  cost_of_goods?: number | null
+  credit_amount?: number | null
+  credit_method?: 'invoice' | 'cash' | 'bank' | 'none' | null
+  credit_reference?: string | null
+  credit_recorded_at?: string | null
 }
 
 type Supplier = {
@@ -94,6 +102,7 @@ export default function TabSupplierReturns({ vendor, showToast }: Props) {
   const [loadingReturns, setLoadingReturns] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [crnFor, setCrnFor] = useState<ReturnRecord | null>(null)
+  const [settleFor, setSettleFor] = useState<ReturnRecord | null>(null)
 
   // ── shared data ──────────────────────────────────────────────────────────────
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -376,6 +385,15 @@ export default function TabSupplierReturns({ vendor, showToast }: Props) {
       onConfirm={handleConfirm}
       onDelete={handleDelete}
       onCreditNote={setCrnFor}
+      onSettle={setSettleFor}
+      settlementModal={settleFor && (
+        <SettlementModal
+          ret={settleFor}
+          onClose={() => setSettleFor(null)}
+          onSaved={() => { setSettleFor(null); fetchReturns() }}
+          showToast={showToast}
+        />
+      )}
       creditNoteModal={crnFor && (
         <CreditNoteModal
           ret={crnFor}
@@ -400,6 +418,8 @@ function ReturnListView({
   onConfirm,
   onDelete,
   onCreditNote,
+  onSettle,
+  settlementModal,
   creditNoteModal,
 }: {
   returns: ReturnRecord[]
@@ -410,6 +430,8 @@ function ReturnListView({
   onConfirm: (r: ReturnRecord) => void
   onDelete: (r: ReturnRecord) => void
   onCreditNote: (r: ReturnRecord) => void
+  onSettle: (r: ReturnRecord) => void
+  settlementModal?: React.ReactNode
   creditNoteModal?: React.ReactNode
 }) {
   const filters: { label: string; value: StatusFilter }[] = [
@@ -469,6 +491,7 @@ function ReturnListView({
                   <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wide">Reason</th>
                   <th className="px-4 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wide">Total Amount</th>
                   <th className="px-4 py-3 text-center text-xs font-bold text-slate-400 uppercase tracking-wide">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wide">Supplier Allowed</th>
                   <th className="px-4 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wide">Supplier Credit Note</th>
                   <th className="px-4 py-3 text-right text-xs font-bold text-slate-400 uppercase tracking-wide">Actions</th>
                 </tr>
@@ -490,6 +513,33 @@ function ReturnListView({
                       <span className="text-sm font-bold text-slate-800">{formatRs(ret.total_amount)}</span>
                     </td>
                     <td className="px-4 py-3 text-center">{statusBadge(ret.status)}</td>
+                    <td className="px-4 py-3">
+                      {ret.status !== 'confirmed' ? (
+                        <span className="text-xs text-slate-300">—</span>
+                      ) : ret.credit_recorded_at ? (() => {
+                        const cost = Number(ret.cost_of_goods ?? ret.total_amount) || 0
+                        const got = Number(ret.credit_amount) || 0
+                        const lost = cost - got
+                        return (
+                          <button onClick={() => onSettle(ret)} className="text-left group">
+                            <span className={'text-xs font-bold group-hover:underline ' + (lost > 0 ? 'text-amber-700' : 'text-emerald-700')}>
+                              {formatRs(got)} of {formatRs(cost)}
+                            </span>
+                            <span className="block text-[10px] text-slate-400">
+                              {SETTLE_LABEL[ret.credit_method || 'none']}
+                              {lost > 0 ? ' · lost ' + formatRs(lost) : ' · nothing lost'}
+                            </span>
+                          </button>
+                        )
+                      })() : (
+                        <button
+                          onClick={() => onSettle(ret)}
+                          className="px-2.5 py-1 rounded-lg border border-blue-300 bg-blue-50 text-[11px] font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                        >
+                          + What did they allow?
+                        </button>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {ret.status !== 'confirmed' ? (
                         <span className="text-xs text-slate-300">—</span>
@@ -539,6 +589,7 @@ function ReturnListView({
       )}
 
       {creditNoteModal}
+      {settlementModal}
     </div>
   )
 }
@@ -831,6 +882,213 @@ function NewReturnView({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What the supplier allowed for the returned goods.
+//
+// They may credit the full cost, part of it, or nothing. Whatever they allow
+// either comes off an unpaid invoice or comes back as money; whatever they do
+// not allow is a loss, and it becomes an expense on the day it is agreed — so
+// the month shows it instead of quietly looking better than it was.
+// ─────────────────────────────────────────────────────────────────────────────
+const SETTLE_LABEL: Record<string, string> = {
+  invoice: 'off their invoice',
+  cash: 'cash received',
+  bank: 'bank transfer',
+  none: 'allowed nothing',
+}
+
+function SettlementModal({
+  ret, onClose, onSaved, showToast,
+}: {
+  ret: ReturnRecord
+  onClose: () => void
+  onSaved: () => void
+  showToast: (m: string) => void
+}) {
+  const cost = Math.round(Number(ret.cost_of_goods ?? ret.total_amount) || 0)
+  const already = !!ret.credit_recorded_at
+  const [method, setMethod] = useState<'invoice' | 'cash' | 'bank' | 'none'>(ret.credit_method || 'invoice')
+  // Default to the full cost: the common case is the supplier allowing it all,
+  // and typing over one number is easier than typing it in from scratch.
+  const [amount, setAmount] = useState(String(ret.credit_amount ?? cost))
+  const [reference, setReference] = useState(ret.credit_reference || '')
+  const [invoiceId, setInvoiceId] = useState('')
+  const [invoices, setInvoices] = useState<any[]>([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (already) return
+    fetch(`/api/vendor/supplier-invoices?supplier_id=${ret.supplier_id}`)
+      .then(r => r.json())
+      .then(j => {
+        const open = (j.invoices || []).filter((i: any) =>
+          (Number(i.amount_paid || 0) + Number(i.credit_total || 0)) < Number(i.amount || 0))
+        setInvoices(open)
+        if (open.length > 0) setInvoiceId(open[0].id)
+        else if (method === 'invoice') setMethod('cash')
+      })
+      .catch(() => setInvoices([]))
+  }, [ret.supplier_id, already])
+
+  const credited = method === 'none' ? 0 : Math.max(0, Math.round(Number(amount) || 0))
+  const shortfall = Math.max(0, cost - credited)
+  const overCost = credited > cost
+
+  async function save() {
+    if (overCost) { showToast('They cannot credit more than the goods cost you'); return }
+    if (method !== 'none' && credited <= 0) { showToast('Enter what they allowed, or choose "allowed nothing"'); return }
+    if (method === 'invoice' && !invoiceId) { showToast('Choose which invoice the credit comes off'); return }
+    setSaving(true)
+    try {
+      const r = await fetch('/api/vendor/supplier-returns', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'record_credit', returnId: ret.id, credit_amount: credited, method,
+          supplierInvoiceId: method === 'invoice' ? invoiceId : undefined,
+          reference: reference.trim() || undefined,
+        }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) showToast('⚠️ ' + (j.error || 'Could not record it'))
+      else { showToast('✅ ' + j.message); onSaved() }
+    } catch { showToast('Network error') }
+    setSaving(false)
+  }
+
+  async function clear() {
+    setSaving(true)
+    try {
+      const r = await fetch('/api/vendor/supplier-returns', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear_credit', returnId: ret.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) showToast('⚠️ ' + (j.error || 'Could not clear it'))
+      else { showToast('Cleared — record it again'); onSaved() }
+    } catch { showToast('Network error') }
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="p-4 sm:p-5 border-b border-slate-100">
+          <h3 className="text-lg font-bold text-slate-900">What did {ret.supplier_name} allow?</h3>
+          <p className="text-xs text-slate-500 mt-1">
+            {ret.return_no} · goods cost you <span className="font-bold text-slate-700">{formatRs(cost)}</span>
+          </p>
+        </div>
+
+        {already ? (
+          <div className="p-4 sm:p-5 space-y-3">
+            <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-3">
+              <p className="text-sm font-bold text-slate-800">
+                Allowed {formatRs(Number(ret.credit_amount) || 0)} of {formatRs(cost)}
+              </p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {SETTLE_LABEL[ret.credit_method || 'none']}
+                {ret.credit_reference ? ' · ' + ret.credit_reference : ''}
+              </p>
+              {cost - (Number(ret.credit_amount) || 0) > 0 && (
+                <p className="text-xs font-bold text-amber-700 mt-1.5">
+                  {formatRs(cost - (Number(ret.credit_amount) || 0))} written off as a loss
+                </p>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Clearing this removes the credit note, the cash entry and the loss it created, so you can enter it again.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-600">Close</button>
+              <button onClick={clear} disabled={saving} className="flex-1 px-4 py-2.5 rounded-lg border-2 border-red-200 text-sm font-bold text-red-600 disabled:opacity-40">
+                {saving ? 'Clearing…' : 'Clear and redo'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="p-4 sm:p-5 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1.5">How is it settled?</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['invoice', 'cash', 'bank', 'none'] as const).map(m => (
+                    <button key={m} type="button" onClick={() => setMethod(m)}
+                      disabled={m === 'invoice' && invoices.length === 0}
+                      className={'px-3 py-2 rounded-lg border-2 text-xs font-bold transition-colors disabled:opacity-30 '
+                        + (method === m ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600')}>
+                      {m === 'invoice' ? 'Off their invoice' : m === 'cash' ? 'Cash back' : m === 'bank' ? 'Bank transfer' : 'Allowed nothing'}
+                    </button>
+                  ))}
+                </div>
+                {invoices.length === 0 && (
+                  <p className="text-[10px] text-slate-400 mt-1">No unpaid invoice for this supplier, so the credit cannot come off a bill.</p>
+                )}
+              </div>
+
+              {method === 'invoice' && invoices.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Which invoice</label>
+                  <select value={invoiceId} onChange={e => setInvoiceId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-blue-400">
+                    {invoices.map((i: any) => {
+                      const left = Number(i.amount || 0) - Number(i.amount_paid || 0) - Number(i.credit_total || 0)
+                      return <option key={i.id} value={i.id}>{i.invoice_no} — {formatRs(left)} still owing</option>
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {method !== 'none' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">How much did they allow?</label>
+                  <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+                    className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none ' + (overCost ? 'border-red-300' : 'border-slate-200 focus:border-blue-400')} />
+                  <div className="flex gap-1.5 mt-1.5">
+                    <button type="button" onClick={() => setAmount(String(cost))}
+                      className="px-2 py-1 rounded border border-slate-200 text-[10px] font-bold text-slate-600">Full {formatRs(cost)}</button>
+                    <button type="button" onClick={() => setAmount(String(Math.round(cost / 2)))}
+                      className="px-2 py-1 rounded border border-slate-200 text-[10px] font-bold text-slate-600">Half</button>
+                  </div>
+                  {overCost && <p className="text-[11px] font-bold text-red-600 mt-1">That is more than the goods cost you ({formatRs(cost)}).</p>}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 mb-1">
+                  Reference <span className="font-normal text-slate-400">(their credit note or slip number, optional)</span>
+                </label>
+                <input value={reference} onChange={e => setReference(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-blue-400" />
+              </div>
+
+              <div className={'rounded-lg px-3 py-2.5 border ' + (shortfall > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200')}>
+                {shortfall > 0 ? (
+                  <>
+                    <p className="text-xs font-bold text-amber-800">{formatRs(shortfall)} will be recorded as a loss</p>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      Goods cost {formatRs(cost)}, they allow {formatRs(credited)}. The difference becomes an expense today, so the profit report shows it.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs font-bold text-emerald-800">Full cost recovered — nothing lost.</p>
+                )}
+              </div>
+            </div>
+            <div className="p-4 sm:p-5 border-t border-slate-100 flex gap-2">
+              <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
+              <button onClick={save} disabled={saving || overCost}
+                className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-bold disabled:opacity-40">
+                {saving ? 'Recording…' : 'Record it'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
