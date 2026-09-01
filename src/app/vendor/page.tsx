@@ -14,6 +14,19 @@ function colomboBusinessDay(isoTimestamp: string): string {
   return new Date(isoTimestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
 }
 
+// Same reasoning, with the clock time: when a return was raised is the whole
+// point of listing it, and it must read in Colombo time like every other
+// timestamp the shop sees.
+function fmtColomboDateTime(isoTimestamp: string | null | undefined): string {
+  if (!isoTimestamp) return '—'
+  const d = new Date(isoTimestamp)
+  if (isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-LK', {
+    timeZone: 'Asia/Colombo', day: '2-digit', month: 'short',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  })
+}
+
 import { useState, useEffect, useRef, startTransition, useMemo, Fragment } from 'react'
 import TabStockLkTax from './_lk_tax/TabStock'
 import TabStockStandard from './_standard/TabStock'
@@ -606,6 +619,11 @@ export default function VendorDashboard() {
   const [salesFilterVehicle, setSalesFilterVehicle] = useState('')
   const [showSalesFilter, setShowSalesFilter] = useState(false)
   const [salesView, setSalesView] = useState('overview')
+  // The returns tile counts by the day the RETURN was raised; the transactions
+  // list below counts by the day the SALE was made. A return against an older
+  // invoice therefore shows in the tile and nowhere else, and "2 return(s)"
+  // gave no way to find out which two. Opening the tile answers it in place.
+  const [returnsOpen, setReturnsOpen] = useState(false)
   // Branch view for sales & reports: '' = whole business, or one side of it
   const [salesBranch, setSalesBranch] = useState<'' | 'shop' | 'workshop'>('')
   // Sidebar 'Customers' opens the Credit & Customers tab as the full registry
@@ -3385,13 +3403,62 @@ ${customerRows.map(c => `<tr>
                     </div>
                     )}
                     {salesData.stats.totalReturns > 0 && (
-                    <div className="bg-white rounded-xl border border-red-200 p-3.5 sm:p-4">
+                    <button type="button" onClick={() => setReturnsOpen(o => !o)}
+                      className={'text-left bg-white rounded-xl border p-3.5 sm:p-4 transition-colors hover:bg-red-50/60 ' + (returnsOpen ? 'border-red-400 ring-1 ring-red-200' : 'border-red-200')}>
                       <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalReturns.toLocaleString()}</p>
                       <p className="text-[11px] text-slate-400 font-semibold">Returns / Refunds</p>
-                      <p className="text-[10px] text-red-500 mt-0.5">{(salesData.returnsInPeriod || []).length} return(s)</p>
-                    </div>
+                      <p className="text-[10px] text-red-500 mt-0.5 font-semibold">
+                        {(salesData.returnsInPeriod || []).length} return(s) · {returnsOpen ? 'hide' : 'see which'} {returnsOpen ? '▴' : '▾'}
+                      </p>
+                    </button>
                     )}
                   </div>
+
+                  {/* ─── Which returns, and when they were raised ───────────── */}
+                  {returnsOpen && salesData.stats.totalReturns > 0 && (
+                    <div className="bg-red-50/50 border border-red-200 rounded-xl p-3 sm:p-4 mb-5">
+                      <p className="text-[11px] font-bold text-red-800 mb-2">
+                        Returned in this period
+                        <span className="font-normal text-red-600"> — listed by the day the return was raised, so a return against an older invoice still appears here</span>
+                      </p>
+                      <div className="space-y-1.5">
+                        {[...(salesData.returnsInPeriod || [])]
+                          .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+                          .map((r: any) => {
+                            // "RETURN (credit cancelled): Toyota FC ABS Actuator x1" —
+                            // everything after the colon is what actually came back.
+                            const item = String(r.notes || '').includes(':')
+                              ? String(r.notes).slice(String(r.notes).indexOf(':') + 1).trim()
+                              : ''
+                            // Neither of these hands money back: a credit return
+                            // reduces what the customer owes, an advance return
+                            // parks the value on their advance balance. Only a
+                            // cash/bank method is money actually leaving.
+                            const m = String(r.payment_method || '').toLowerCase()
+                            const nonCash = m.includes('credit') ? 'off their balance — no cash'
+                              : m === 'advance' ? 'to their advance — no cash' : ''
+                            return (
+                              <div key={r.id} className="bg-white rounded-lg border border-red-100 px-3 py-2 flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-slate-800 truncate">
+                                    {item || 'Returned item'}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+                                    {r.invoice_no || '(no invoice)'} · {r.customer_name || 'Unknown'} · {fmtColomboDateTime(r.created_at)}
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className="text-xs font-black text-red-600">-Rs.{Number(r.amount || 0).toLocaleString()}</p>
+                                  <p className="text-[9px] font-bold mt-0.5 text-slate-400">
+                                    {nonCash || 'REFUNDED ' + String(r.payment_method || '').toUpperCase().replace(/_/g, ' ')}
+                                  </p>
+                                </div>
+                              </div>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  )}
 
                   {/* ─── On Approval — always shows ALL drafts, oldest first ─── */}
                   {allDrafts.length > 0 && (

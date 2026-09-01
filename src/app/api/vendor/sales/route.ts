@@ -394,7 +394,9 @@ export async function GET(req: NextRequest) {
     // Get ALL payments made in this period (on any invoice, including older ones)
     let pQuery = admin
       .from('payments')
-      .select('id, amount, payment_method, cheque_number, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
+      // notes carries what came back ("RETURN: <item> x1") — the only record of
+      // WHICH item a return was for, so the tile can name it.
+      .select('id, amount, payment_method, cheque_number, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
       .eq('sales.vendor_id', vendor.id)
       .gte('created_at', periodStart)
     // Collections belong to the branch of the invoice they settle
@@ -427,6 +429,7 @@ export async function GET(req: NextRequest) {
       amount: parseFloat(p.amount || 0),
       payment_method: p.payment_method,
       cheque_number: p.cheque_number,
+      notes: p.notes || '',
       created_at: p.created_at,
       sale_id: p.sale_id,
       invoice_no: p.sales?.invoice_no,
