@@ -278,7 +278,7 @@ export async function GET(req: NextRequest) {
   if (customerId) {
     const { data: custSales } = await admin
       .from('sales')
-      .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, cheque_number, created_at)')
+      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, cheque_number, created_at)')
       .eq('vendor_id', vendor.id)
       .eq('customer_id', customerId)
       .neq('payment_status', 'voided')
@@ -312,7 +312,7 @@ export async function GET(req: NextRequest) {
   const allSales = await fetchAllRows((from, to) => {
     let query = admin
       .from('sales')
-      .select('*, items:sale_items(id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
+      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
       .eq('vendor_id', vendor.id)
     // Branch view: shop (PART/PROP) vs workshop (REPR/WPRO). A scoped login is
     // pinned to its own side; owners choose with ?branch=
@@ -588,6 +588,33 @@ export async function GET(req: NextRequest) {
       retroactive.push({
         kind: 'returned', invoice_no: r.invoice_no, customer_name: r.customer_name,
         amount: r.amount, actedAt: r.created_at, belongsTo: r.sale_created_at, by: r.created_by,
+      })
+    }
+
+    // A SKU corrected on a sale from an earlier day changes that day's goods,
+    // so it belongs here too — the honest operation is still a retroactive one,
+    // and the owner should see it for the same reason.
+    // Isolated: returns and backdated sales are gathered independently, and a
+    // problem reading corrections must not empty the whole section.
+    let corrections: any[] = []
+    try {
+    corrections = await fetchAllRows((from, to) => {
+      let q = admin.from('sale_item_corrections')
+        .select('sale_id, from_name, from_sku, to_name, to_sku, quantity, unit_price, reason, corrected_by, created_at, sale:sales!inner(invoice_no, customer_name, created_at)')
+        .eq('vendor_id', vendor.id).gte('created_at', periodStart)
+      if (periodEnd) q = q.lt('created_at', periodEnd)
+      return q.order('created_at').order('sale_id').range(from, to)
+    })
+    } catch (e) { console.error('[sales] item corrections unavailable:', e) }
+    for (const c of corrections as any[]) {
+      const saleDay = c.sale?.created_at
+      if (!saleDay || colomboDayOf(saleDay) === colomboDayOf(c.created_at)) continue
+      retroactive.push({
+        kind: 'corrected', invoice_no: c.sale?.invoice_no, customer_name: c.sale?.customer_name,
+        amount: (Number(c.unit_price) || 0) * (Number(c.quantity) || 0),
+        actedAt: c.created_at, belongsTo: saleDay, by: c.corrected_by,
+        detail: `${c.from_name || c.from_sku || '?'} → ${c.to_name || c.to_sku || '?'}`,
+        reason: c.reason || null,
       })
     }
 
@@ -1304,6 +1331,116 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── RETURN ITEMS (partial or full) ───
+  // ── Correct a wrong SKU on a finalised sale ────────────────────────────────
+  //
+  // The operation the shop was missing. Without it, fixing a mis-picked SKU
+  // meant returning the item and re-billing the right one, which leaves a
+  // return and a sale that have to be explained — and tempts whoever did it to
+  // backdate the re-bill so the day's figures look untouched.
+  //
+  // This swaps the product on the line and moves the stock. The date, quantity
+  // and price do not change, because nothing about the transaction changed —
+  // only which part left the shelf. A correction that also re-priced would be a
+  // different sale, and that genuinely does need a return.
+  if (action === 'correct_item') {
+    const { saleId, saleItemId, newProductId, reason } = body
+    if (!saleId || !saleItemId || !newProductId) return NextResponse.json({ error: 'saleId, saleItemId and newProductId are required' }, { status: 400 })
+
+    const { data: sale } = await admin.from('sales')
+      .select('id, invoice_no, tax_serial, document_type, payment_status, voided_at, created_at')
+      .eq('id', saleId).eq('vendor_id', vendor.id).single()
+    if (!sale) return NextResponse.json({ error: 'Sale not found' }, { status: 404 })
+
+    // A gazette tax invoice is immutable once issued: an item change means
+    // voiding it and issuing a corrected one on the next serial. Silently
+    // editing the goods on a document the customer holds — and may have
+    // claimed input VAT against — is exactly what the rule forbids.
+    if (sale.tax_serial) {
+      return NextResponse.json({
+        error: `${sale.invoice_no} is a tax invoice (${sale.tax_serial}). A tax invoice cannot be edited — void it and issue a corrected invoice on the next serial.`,
+      }, { status: 409 })
+    }
+    if (sale.voided_at || sale.payment_status === 'voided') return NextResponse.json({ error: 'This sale is voided' }, { status: 409 })
+
+    const { data: line } = await admin.from('sale_items')
+      .select('id, sale_id, product_id, product_name, product_sku, quantity, unit_price, unit_cost, returned_quantity')
+      .eq('id', saleItemId).eq('sale_id', saleId).single()
+    if (!line) return NextResponse.json({ error: 'Line not found on this sale' }, { status: 404 })
+    if (Number(line.returned_quantity) > 0) {
+      return NextResponse.json({ error: 'Part of this line has already been returned — correct it with a return instead' }, { status: 409 })
+    }
+    if (line.product_id === newProductId) return NextResponse.json({ error: 'That is already the item on this line' }, { status: 400 })
+
+    const { data: newProduct } = await admin.from('products')
+      .select('id, name, sku, quantity, product_type').eq('id', newProductId).eq('vendor_id', vendor.id).single()
+    if (!newProduct) return NextResponse.json({ error: 'Replacement product not found' }, { status: 404 })
+
+    const qty = Number(line.quantity) || 0
+
+    // Preflight the audit table BEFORE anything moves. An in-place edit that
+    // failed to record itself would be worse than the return-and-rebill this
+    // replaces — silent, and invisible on the daily report. If the log is not
+    // reachable, nothing happens at all.
+    const { error: auditProbe } = await admin.from('sale_item_corrections').select('id').limit(1)
+    if (auditProbe) {
+      return NextResponse.json({
+        error: 'The correction log is unavailable, so nothing was changed — run supabase-item-corrections.sql.',
+      }, { status: 503 })
+    }
+
+    // Put the wrong part back before taking the right one, so a shortage on the
+    // replacement cannot leave the shop having given up both.
+    if (line.product_id) {
+      await adjustProductQuantity(admin, line.product_id, vendor.id, qty)
+      if (parseInt(String(line.unit_cost || 0)) > 0) {
+        await admin.rpc('restore_fifo_cost', {
+          p_vendor_id: vendor.id, p_product_id: line.product_id,
+          p_quantity: qty, p_unit_cost: parseInt(String(line.unit_cost)),
+          p_received_at: new Date().toISOString().slice(0, 10),
+        })
+      }
+    }
+
+    await adjustProductQuantity(admin, newProduct.id, vendor.id, -qty)
+    const { data: consumed } = await admin.rpc('consume_fifo_cost', {
+      p_vendor_id: vendor.id, p_product_id: newProduct.id, p_quantity: qty,
+    })
+    const newUnitCost = consumed && consumed > 0 ? Math.round(consumed / qty) : null
+
+    // unit_price, quantity and total are deliberately untouched: the customer
+    // pays what they always paid, and the sale's date does not move.
+    const { error: lineErr } = await admin.from('sale_items').update({
+      product_id: newProduct.id, product_name: newProduct.name, product_sku: newProduct.sku,
+      unit_cost: newUnitCost, // Goods off the shelf are PART, the same rule the POS applies to any
+      // line that carries a product. No service-flagged products exist yet.
+      sscl_stream: newProduct.product_type === 'service' ? 'SVC' : 'PART',
+    }).eq('id', line.id)
+    if (lineErr) return NextResponse.json({ error: 'Could not update the line: ' + lineErr.message }, { status: 500 })
+
+    const { error: auditErr } = await admin.from('sale_item_corrections').insert({
+      vendor_id: vendor.id, sale_id: saleId, sale_item_id: line.id,
+      from_product_id: line.product_id, from_sku: line.product_sku, from_name: line.product_name,
+      to_product_id: newProduct.id, to_sku: newProduct.sku, to_name: newProduct.name,
+      quantity: qty, unit_price: Math.round(Number(line.unit_price) || 0),
+      reason: (reason || '').trim() || null,
+      corrected_by: (vendor as any).callerUserId || null,
+    })
+    if (auditErr) {
+      // Stock has moved and the line already reads the new part. Say plainly
+      // that the record is missing rather than reporting success — an
+      // unlogged in-place edit is worse than the workaround this replaces.
+      console.error('[sales] correction applied but NOT logged:', auditErr)
+      return NextResponse.json({
+        error: 'The item was corrected but the change could not be logged (' + auditErr.message + '). Tell the owner — it will not appear on the daily report.',
+      }, { status: 500 })
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `${sale.invoice_no}: ${line.product_name} → ${newProduct.name}. ${qty} back on the shelf, ${qty} off ${newProduct.sku}. Date and amount unchanged.`,
+    })
+  }
+
   if (action === 'return_items') {
     const { saleId, returnItems, refundMethod, return_reason: returnReason } = body
     // returnItems: [{ saleItemId, quantity }]

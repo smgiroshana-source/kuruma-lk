@@ -624,6 +624,14 @@ export default function VendorDashboard() {
   // invoice therefore shows in the tile and nowhere else, and "2 return(s)"
   // gave no way to find out which two. Opening the tile answers it in place.
   const [returnsOpen, setReturnsOpen] = useState(false)
+  // Correcting a mis-picked SKU in place. Without this the only way to fix one
+  // was a return plus a re-bill, which is what tempted a staff member to
+  // backdate the re-bill so the original day still balanced.
+  const [fixItem, setFixItem] = useState<{ sale: any; item: any } | null>(null)
+  const [fixSearch, setFixSearch] = useState('')
+  const [fixPick, setFixPick] = useState<any>(null)
+  const [fixReason, setFixReason] = useState('')
+  const [fixSaving, setFixSaving] = useState(false)
   // Branch view for sales & reports: '' = whole business, or one side of it
   const [salesBranch, setSalesBranch] = useState<'' | 'shop' | 'workshop'>('')
   // Sidebar 'Customers' opens the Credit & Customers tab as the full registry
@@ -1821,11 +1829,12 @@ ${(() => {
       const LABEL: Record<string, string> = {
         backdated: 'Sale entered today, dated', future_dated: 'Sale entered today, dated ahead',
         returned: 'Return raised today against', voided: 'Sale voided today, dated',
+        corrected: 'Item corrected today on',
       }
       const rows = actedToday.map((r: any) =>
         '<tr><td style="font-size:11px">' + escapeHtml(LABEL[r.kind] || r.kind) + '</td>' +
         '<td><strong>' + escapeHtml(r.invoice_no || '-') + '</strong></td>' +
-        '<td>' + escapeHtml(r.customer_name || '') + '</td>' +
+        '<td>' + escapeHtml(r.customer_name || '') + (r.detail ? '<div style="font-size:10px;color:#666">' + escapeHtml(r.detail) + (r.reason ? ' — ' + escapeHtml(r.reason) : '') + '</div>' : '') + '</td>' +
         '<td style="font-size:11px;color:#b45309;font-weight:700">' + escapeHtml(colomboBusinessDay(r.belongsTo)) + '</td>' +
         '<td style="font-size:11px">' + escapeHtml(r.byName || 'not recorded') + '</td>' +
         '<td class="text-right" style="font-weight:700">Rs.' + Number(r.amount || 0).toLocaleString() + '</td></tr>'
@@ -3842,7 +3851,7 @@ ${customerRows.map(c => `<tr>
                                 </tr>
                                 {isExpanded && (
                                   <tr key={sale.id + '-detail'}><td colSpan={8} className="px-3 pb-3 bg-slate-50/50 border-t border-slate-100">
-                                    <table className="w-full text-xs mt-2"><tbody>{(sale.items || []).map((i: any) => { const returned = (i.returned_quantity || 0) >= i.quantity; const partialReturn = i.returned_quantity > 0 && i.returned_quantity < i.quantity; return (<tr key={i.id} className={'border-b border-slate-100 ' + (returned ? 'opacity-40' : '')}><td className="py-1.5"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span><span className={returned ? 'line-through' : ''}>{i.product_name}</span>{returned && <span className="ml-1.5 text-[9px] font-bold text-red-400 bg-red-50 px-1.5 py-0.5 rounded">RETURNED</span>}{partialReturn && <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded">{i.returned_quantity} returned</span>}</td><td className="py-1.5 text-right text-slate-500">x{i.quantity}</td><td className="py-1.5 text-right font-semibold">Rs.{parseFloat(i.unit_price).toLocaleString()}</td><td className={'py-1.5 text-right font-semibold ' + (returned ? 'line-through text-slate-300' : '')}>Rs.{parseFloat(i.total).toLocaleString()}</td>
+                                    <table className="w-full text-xs mt-2"><tbody>{(sale.items || []).map((i: any) => { const returned = (i.returned_quantity || 0) >= i.quantity; const partialReturn = i.returned_quantity > 0 && i.returned_quantity < i.quantity; return (<tr key={i.id} className={'border-b border-slate-100 ' + (returned ? 'opacity-40' : '')}><td className="py-1.5"><span className="font-mono text-slate-400 mr-1">{i.product_sku}</span><span className={returned ? 'line-through' : ''}>{i.product_name}</span>{returned && <span className="ml-1.5 text-[9px] font-bold text-red-400 bg-red-50 px-1.5 py-0.5 rounded">RETURNED</span>}{partialReturn && <span className="ml-1.5 text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded">{i.returned_quantity} returned</span>}{!returned && !partialReturn && !sale.tax_serial && sale.payment_status !== 'voided' && i.product_id && <button onClick={e => { e.stopPropagation(); setFixItem({ sale, item: i }); setFixSearch(''); setFixPick(null); setFixReason('') }} title="Wrong item picked? Swap it without changing the date or the amount" className="ml-2 text-[9px] font-bold text-blue-600 border border-blue-200 rounded px-1.5 py-0.5 hover:bg-blue-50">fix SKU</button>}</td><td className="py-1.5 text-right text-slate-500">x{i.quantity}</td><td className="py-1.5 text-right font-semibold">Rs.{parseFloat(i.unit_price).toLocaleString()}</td><td className={'py-1.5 text-right font-semibold ' + (returned ? 'line-through text-slate-300' : '')}>Rs.{parseFloat(i.total).toLocaleString()}</td>
 <td className="py-1.5 text-right">{parseFloat(i.unit_price || 0) === 0 && !returned && sale.payment_status !== 'voided' && (<button onClick={async e => { e.stopPropagation(); const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'move_to_approval', saleId: sale.id, saleItemId: i.id }) }); const j = await r.json(); if (j.success) { showToast(j.message); fetchSales() } else showToast(j.error || 'Error') }} className="text-[9px] font-bold text-amber-600 border border-amber-300 rounded px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 whitespace-nowrap">↩ On Approval</button>)}</td></tr>)})}</tbody></table>
                                     {parseFloat(sale.balance_due) > 0 && <p className="text-xs font-bold text-red-600 mt-2">Balance Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p>}
                                     {saleCogs > 0 && sale.payment_status !== 'voided' && (
@@ -4198,6 +4207,102 @@ ${customerRows.map(c => `<tr>
         })()}
 
         {/* RETURN ITEMS MODAL */}
+        {/* ─── Fix a mis-picked SKU ───────────────────────────────────────
+            Swaps the product on the line. The date, quantity and price stay
+            put, because nothing about the transaction changed — only which
+            part left the shelf. Anything that also changes the price is a
+            different sale and still needs a return. */}
+        {fixItem && (
+          <div className="fixed inset-0 bg-black/50 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setFixItem(null)}>
+            <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="p-4 sm:p-5 border-b border-slate-100">
+                <h3 className="text-lg font-bold text-slate-900">Fix the item on this line</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {fixItem.sale.invoice_no} · {colomboBusinessDay(fixItem.sale.created_at)} — the date and the amount do not change.
+                </p>
+              </div>
+              <div className="p-4 sm:p-5 space-y-3">
+                <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  <p className="text-[10px] font-bold text-red-700 uppercase tracking-wide">Billed by mistake</p>
+                  <p className="text-sm font-bold text-slate-800 mt-0.5">
+                    <span className="font-mono text-slate-400 mr-1.5">{fixItem.item.product_sku}</span>{fixItem.item.product_name}
+                  </p>
+                  <p className="text-[11px] text-slate-500">×{fixItem.item.quantity} at Rs.{Number(fixItem.item.unit_price || 0).toLocaleString()} — goes back on the shelf</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Should have been</label>
+                  <input autoFocus value={fixSearch} onChange={e => { setFixSearch(e.target.value); setFixPick(null) }}
+                    placeholder="Search by part ID or name…"
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-blue-400" />
+                  {fixPick ? (
+                    <div className="mt-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-slate-800 truncate">
+                          <span className="font-mono text-slate-400 mr-1.5">{fixPick.sku}</span>{fixPick.name}
+                        </p>
+                        <p className="text-[11px] text-emerald-700 font-semibold">{fixPick.quantity} on hand — {fixItem.item.quantity} will come off</p>
+                      </div>
+                      <button onClick={() => { setFixPick(null); setFixSearch('') }} className="text-[11px] font-bold text-slate-400 shrink-0">change</button>
+                    </div>
+                  ) : fixSearch.trim().length >= 2 && (
+                    <div className="mt-2 border border-slate-200 rounded-lg max-h-52 overflow-y-auto divide-y divide-slate-100">
+                      {(products || []).filter((p: any) => {
+                        if (p.id === fixItem.item.product_id) return false
+                        const q = fixSearch.toLowerCase().trim()
+                        return String(p.sku || '').toLowerCase().includes(q) || String(p.name || '').toLowerCase().includes(q)
+                      }).slice(0, 30).map((p: any) => (
+                        <button key={p.id} onClick={() => setFixPick(p)} className="w-full text-left px-3 py-2 hover:bg-slate-50">
+                          <p className="text-xs font-semibold text-slate-800 truncate">
+                            <span className="font-mono text-slate-400 mr-1.5">{p.sku}</span>{p.name}
+                          </p>
+                          <p className={'text-[10px] font-semibold ' + (p.quantity > 0 ? 'text-slate-400' : 'text-red-500')}>{p.quantity} on hand</p>
+                        </button>
+                      ))}
+                      {(products || []).filter((p: any) => {
+                        const q = fixSearch.toLowerCase().trim()
+                        return p.id !== fixItem.item.product_id && (String(p.sku || '').toLowerCase().includes(q) || String(p.name || '').toLowerCase().includes(q))
+                      }).length === 0 && <p className="px-3 py-3 text-xs text-slate-400">Nothing matches that.</p>}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Why <span className="font-normal text-slate-400">(recorded against your name)</span></label>
+                  <input value={fixReason} onChange={e => setFixReason(e.target.value)}
+                    placeholder="e.g. wrong SKU picked at the counter"
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-blue-400" />
+                </div>
+
+                <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  The sale keeps its date, quantity and price. Only the stock moves — and the correction is listed on the daily report.
+                </p>
+              </div>
+              <div className="p-4 sm:p-5 border-t border-slate-100 flex gap-2">
+                <button onClick={() => setFixItem(null)} className="flex-1 px-4 py-2.5 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-600">Cancel</button>
+                <button disabled={!fixPick || fixSaving}
+                  onClick={async () => {
+                    if (!fixPick) return
+                    setFixSaving(true)
+                    try {
+                      const r = await fetch('/api/vendor/sales', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'correct_item', saleId: fixItem.sale.id, saleItemId: fixItem.item.id, newProductId: fixPick.id, reason: fixReason }),
+                      })
+                      const j = await r.json()
+                      if (!r.ok || j.error) { showToast('⚠️ ' + (j.error || 'Could not correct the line')) }
+                      else { showToast('✅ ' + j.message); setFixItem(null); fetchSales(); fetchData(false, true) }
+                    } catch { showToast('Network error') }
+                    setFixSaving(false)
+                  }}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-bold disabled:opacity-40">
+                  {fixSaving ? 'Correcting…' : 'Correct the item'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {returnModal && (
           <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={() => { setReturnModal(null); setReturnReason('') }}>
             <div className="bg-white rounded-2xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
