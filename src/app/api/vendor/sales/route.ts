@@ -390,19 +390,31 @@ export async function GET(req: NextRequest) {
   let collectionsToday: any[] = []
   const periodStart = fromDate ? new Date(fromDate).toISOString() : dateFilter
   const periodEnd = toDate ? (() => { const e = new Date(toDate); e.setDate(e.getDate() + 1); return e.toISOString() })() : null
-  if (periodStart) {
-    // Get ALL payments made in this period (on any invoice, including older ones)
-    let pQuery = admin
-      .from('payments')
-      // notes carries what came back ("RETURN: <item> x1") — the only record of
-      // WHICH item a return was for, so the tile can name it.
-      .select('id, amount, payment_method, cheque_number, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
-      .eq('sales.vendor_id', vendor.id)
-      .gte('created_at', periodStart)
-    // Collections belong to the branch of the invoice they settle
-    pQuery = applyBranchFilterOnSales(pQuery, branch, branchIds)
-    if (periodEnd) pQuery = pQuery.lt('created_at', periodEnd)
-    const { data: periodPayments } = await pQuery.limit(500)
+  {
+    // "All" has no periodStart, and the whole block used to be skipped for it —
+    // so the All filter reported Rs.0 collections and Rs.0 returns while Month
+    // showed Rs.17.7m and Rs.430k. Zero read as "none happened", when it only
+    // meant "not looked for". No lower bound is the correct query for All, not
+    // a reason to skip.
+    // A FRESH builder per page: supabase query builders are mutable, so reusing
+    // one across pages stacks .order() params and re-awaits a spent builder.
+    const buildPayments = () => {
+      let q = admin
+        .from('payments')
+        // notes carries what came back ("RETURN: <item> x1") — the only record
+        // of WHICH item a return was for, so the tile can name it.
+        .select('id, amount, payment_method, cheque_number, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
+        .eq('sales.vendor_id', vendor.id)
+      if (periodStart) q = q.gte('created_at', periodStart)
+      // Collections belong to the branch of the invoice they settle
+      q = applyBranchFilterOnSales(q, branch, branchIds)
+      if (periodEnd) q = q.lt('created_at', periodEnd)
+      return q
+    }
+    // Was .limit(500). Over an unbounded All that truncates outright, and even a
+    // busy month can exceed it — and a truncated total is a wrong total shown
+    // without an error. id is the unique tiebreaker the paging needs.
+    const periodPayments = await fetchAllRows((from, to) => buildPayments().order('created_at').order('id').range(from, to))
     // Filter to: payments on older invoices (credit collections) OR payments on Opening Balance invoices
     collectionsToday = (periodPayments || []).filter((p: any) => {
       const saleDate = p.sales?.created_at
@@ -447,16 +459,20 @@ export async function GET(req: NextRequest) {
 
   // Also check for returns made in this period on same-period invoices (not just older ones)
   // These show up as negative payments on same-day sales
-  if (periodStart) {
-    let rQuery = admin
-      .from('payments')
-      .select('id, amount, payment_method, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, vendor_id, payment_status, customer:customers(name))')
-      .eq('sales.vendor_id', vendor.id)
-      .lt('amount', 0)
-      .gte('created_at', periodStart)
-    rQuery = applyBranchFilterOnSales(rQuery, branch, branchIds)
-    if (periodEnd) rQuery = rQuery.lt('created_at', periodEnd)
-    const { data: returnPayments } = await rQuery.limit(200)
+  {
+    const buildReturns = () => {
+      let q = admin
+        .from('payments')
+        .select('id, amount, payment_method, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, vendor_id, payment_status, customer:customers(name))')
+        .eq('sales.vendor_id', vendor.id)
+        .lt('amount', 0)
+      if (periodStart) q = q.gte('created_at', periodStart)
+      q = applyBranchFilterOnSales(q, branch, branchIds)
+      if (periodEnd) q = q.lt('created_at', periodEnd)
+      return q
+    }
+    // Was .limit(200) — same truncation risk as above, worse over All.
+    const returnPayments = await fetchAllRows((from, to) => buildReturns().order('created_at').order('id').range(from, to))
     const existingIds = new Set(returnsInPeriod.map((r: any) => r.id))
     ;(returnPayments || [])
       .filter((p: any) => !existingIds.has(p.id) && p.sales?.payment_status !== 'voided')
