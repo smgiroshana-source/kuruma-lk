@@ -1466,7 +1466,7 @@ export async function POST(req: NextRequest) {
     const discountFactor = saleSubtotalForFactor > 0 ? parseFloat(sale.total || 0) / saleSubtotalForFactor : 1
 
     let totalRefund = 0      // money to refund (discount-prorated)
-    let totalRefundRaw = 0   // raw line value (for the subtotal reduction)
+    let totalRefundRaw = 0   // raw line value, before any invoice discount
     const returnedDetails: string[] = []
 
     // 1. Process each return item
@@ -1519,30 +1519,42 @@ export async function POST(req: NextRequest) {
     const currentBalance = parseFloat(sale.balance_due || 0)
     // Never refund more than the customer actually paid + owed (rounding guard)
     totalRefund = Math.min(totalRefund, currentPaid + currentBalance)
-    const newTotal = Math.max(0, currentTotal - totalRefund)
-    const newSubtotal = Math.max(0, parseFloat(sale.subtotal) - totalRefundRaw)
     // Refund reduces balance first (credit), then paid_amount (cash already received)
     const balanceReduction = Math.min(totalRefund, currentBalance)
     const paidReduction = Math.min(totalRefund - balanceReduction, currentPaid)
     const newBalanceDue = Math.max(0, currentBalance - balanceReduction)
     const newPaidAmount = Math.max(0, currentPaid - paidReduction)
 
-    // Check if all items fully returned
-    const { data: updatedItems } = await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)
-    const allReturned = (updatedItems || []).every((i: any) => (i.returned_quantity || 0) >= i.quantity)
-
     const returnedAt = new Date().toISOString()
 
-    // Receipts only here (tax invoices are rejected above) — totals may mutate freely.
+    // The sale keeps the value it was sold for, and the return is counted in the
+    // period it happened (owner, 2026-09-01).
+    //
+    // Reducing sale.total rewrote a closed month. Commission is paid on a
+    // 25th–24th cycle: a sale of Rs.1,100,000 in the May cycle was paid on, then
+    // a return five days into June silently rewrote May down to zero — and June,
+    // where the return actually happened, showed nothing to offset it. Eleven
+    // Sakura returns worth Rs.3,364,000 crossed a cycle that way, with no
+    // mechanism that ever clawed any of it back.
+    //
+    // returned_amount is the column for this; it already existed for the
+    // tax-invoice side, where gazette amounts must never move. And this is what
+    // CLAUDE.md already requires of credit notes: reduce turnover in the period
+    // ISSUED, not the original invoice period. Receipts now match that rule.
+    //
+    // What the customer owes still drops immediately — that is balance_due,
+    // computed below from total minus what has been returned and paid.
     const salesUpdate: Record<string, any> = {
       paid_amount: newPaidAmount,
       balance_due: newBalanceDue,
-      payment_status: allReturned ? 'voided' : newBalanceDue > 0 ? 'partial' : 'paid',
+      returned_amount: Math.round(parseFloat(sale.returned_amount || 0) + totalRefund),
+      // A fully returned sale is not a void: it happened, and it is reversed in
+      // the period the goods came back. Voiding it removed it from its own
+      // month, which is the same retroactive rewrite by another name.
+      payment_status: newBalanceDue > 0 ? 'partial' : 'paid',
       notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund') + (returnReason ? ' | Reason: ' + String(returnReason).slice(0, 200) : ''),
-      total: newTotal,
-      subtotal: newSubtotal,
     }
-    if (allReturned) salesUpdate.voided_at = returnedAt
+    // total and subtotal are deliberately absent from this update.
 
     await admin.from('sales').update(salesUpdate).eq('id', saleId)
 
@@ -1584,7 +1596,9 @@ export async function POST(req: NextRequest) {
       success: true,
       refundAmount: totalRefund,
       cashRefund: paidReduction,
-      allReturned,
+      // The caller used this to know the sale had been voided. It no longer is:
+      // a full return leaves the sale standing and reversed in its own period.
+      fullyReturned: (await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)).data?.every((i: any) => (i.returned_quantity || 0) >= i.quantity) ?? false,
       message: 'Returned: ' + returnedDetails.join(', ') + '. Total value: Rs.' + totalRefund.toLocaleString() + (paidReduction > 0 ? (refundMethod === 'advance' ? ` | Rs.${paidReduction.toLocaleString()} added to advance` : ` | Rs.${paidReduction.toLocaleString()} cash back`) : '')
     })
   }

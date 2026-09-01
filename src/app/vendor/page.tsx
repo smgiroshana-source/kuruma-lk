@@ -1572,10 +1572,16 @@ export default function VendorDashboard() {
     // phantom "Cash Refund" after a same-day full return of a credit sale.
     const allReturns = (returns || []).filter((r: any) => colomboBusinessDay(r.created_at) === reportDate)
     const cashReturns = allReturns.filter((r: any) => r.payment_method !== 'credit_return')
-    const totalCashReturnAmount = cashReturns.reduce((s: number, r: any) => s + r.amount, 0)
+    // EVERY return raised today reduces today, whichever day the goods were
+    // sold on. A sale no longer shrinks when its goods come back, so this is
+    // the only place the reversal is counted — and it lands in the period that
+    // pays for it, which is what commission on a 25th–24th cycle needs.
+    // Deducting only cash refunds used to count a refund twice: once here, and
+    // again when the original sale was quietly rewritten downwards.
+    const totalReturnAmount = allReturns.reduce((s: number, r: any) => s + r.amount, 0)
 
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
-    const netSales = totalSales - totalCashReturnAmount
+    const netSales = totalSales - totalReturnAmount
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
 
     // Payment method breakdown from actual payments.
@@ -1617,11 +1623,11 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + escapeHtml(vendorInfo.location) + (vendorInfo?.phone ? ' | Tel: ' + escapeHtml(vendorInfo.phone) : '') + '</div>' : ''}<div class="report-title">Daily Sales Report</div><div class="date">${dateStr}</div><div style="font-size:10px;color:#999;margin-top:4px">All sales for the calendar day (Asia/Colombo)</div></div>
 
 <div class="summary">
-<div class="summary-box">${totalCashReturnAmount > 0
-  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;margin-top:6px">&minus; Rs.' + totalCashReturnAmount.toLocaleString() + ' Returns/Credits</div>'
+<div class="summary-box">${totalReturnAmount > 0
+  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;margin-top:6px">&minus; Rs.' + totalReturnAmount.toLocaleString() + ' Returned today</div>'
   : '<div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div>'
 }</div>
-${totalCashReturnAmount > 0 ? '<div class="summary-box" style="border:2px solid #ff6b35"><div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div></div>' : ''}
+${totalReturnAmount > 0 ? '<div class="summary-box" style="border:2px solid #ff6b35"><div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div></div>' : ''}
 <div class="summary-box"><div class="val green">Rs.${totalCashCollected.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">On Credit</div></div>
 </div>
@@ -3846,7 +3852,7 @@ ${customerRows.map(c => `<tr>
                                   </td>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs font-semibold whitespace-nowrap">{sale.customer?.name || sale.customer_name}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-right font-bold text-orange-600 whitespace-nowrap">Rs.{parseFloat(sale.total).toLocaleString()}</td>
-                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status).cls}>{saleStatusChip(sale.payment_status).label}</span>{hasReturns && <span className="block text-[9px] font-bold text-red-500 mt-0.5">-Rs.{totalReturned.toLocaleString()}</span>}</td>
+                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status, sale).cls}>{saleStatusChip(sale.payment_status, sale).label}</span>{hasReturns && <span className="block text-[9px] font-bold text-red-500 mt-0.5">-Rs.{totalReturned.toLocaleString()}</span>}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</td>
                                 </tr>
                                 {isExpanded && (
@@ -4044,7 +4050,7 @@ ${customerRows.map(c => `<tr>
                                 )}
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status).cls}>{saleStatusChip(sale.payment_status).label}</span>
+                                <span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status, sale).cls}>{saleStatusChip(sale.payment_status, sale).label}</span>
                                 <span className="font-black text-sm text-orange-600">Rs.{parseFloat(sale.total).toLocaleString()}</span>
                               </div>
                             </div>
