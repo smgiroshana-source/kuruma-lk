@@ -1542,7 +1542,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[], dayCreditNotes?: any[], daySupplierCredits?: any[], stockAdjustments?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[], dayCreditNotes?: any[], daySupplierCredits?: any[], stockAdjustments?: any[], retroactive?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1805,6 +1805,43 @@ ${dayCollections.length > 0 ? (() => {
         dayCollections.map((c: any) => '<tr><td><strong>' + (escapeHtml(c.invoice_no) || '-') + '</strong></td><td>' + escapeHtml(c.customer_name) + '</td><td>' + escapeHtml((c.payment_method || 'cash').toUpperCase()) + (c.cheque_number ? ' #' + escapeHtml(c.cheque_number) : '') + '</td><td class="text-right" style="color:#059669;font-weight:700">Rs.' + c.amount.toLocaleString() + '</td></tr>').join('') +
         '</tbody></table>'
     })() : ''}
+
+${(() => {
+      // ── Retroactive activity ────────────────────────────────────────────
+      // Everything done TODAY that changed a different day, and everything
+      // done on another day that changed THIS one. Backdating is legitimate
+      // here — the counter's sales are entered next morning — but it used to
+      // leave no mark, so a closed day could be rewritten unnoticed. None of
+      // this touches the cash figures above; it is here to be seen.
+      const actedToday = (retroactive || []).filter((r: any) => colomboBusinessDay(r.actedAt) === reportDate)
+      // The other direction: this day's own sheet says what was added to it
+      // later, so a re-print that disagrees with the filed copy explains itself.
+      const addedLater = filtered.filter((s: any) => s.entered_at && colomboBusinessDay(s.entered_at) !== reportDate)
+      if (actedToday.length === 0 && addedLater.length === 0) return ''
+      const LABEL: Record<string, string> = {
+        backdated: 'Sale entered today, dated', future_dated: 'Sale entered today, dated ahead',
+        returned: 'Return raised today against', voided: 'Sale voided today, dated',
+      }
+      const rows = actedToday.map((r: any) =>
+        '<tr><td style="font-size:11px">' + escapeHtml(LABEL[r.kind] || r.kind) + '</td>' +
+        '<td><strong>' + escapeHtml(r.invoice_no || '-') + '</strong></td>' +
+        '<td>' + escapeHtml(r.customer_name || '') + '</td>' +
+        '<td style="font-size:11px;color:#b45309;font-weight:700">' + escapeHtml(colomboBusinessDay(r.belongsTo)) + '</td>' +
+        '<td style="font-size:11px">' + escapeHtml(r.byName || 'not recorded') + '</td>' +
+        '<td class="text-right" style="font-weight:700">Rs.' + Number(r.amount || 0).toLocaleString() + '</td></tr>'
+      ).concat(addedLater.map((s: any) =>
+        '<tr><td style="font-size:11px">Added to this day later</td>' +
+        '<td><strong>' + escapeHtml(s.invoice_no || '-') + '</strong></td>' +
+        '<td>' + escapeHtml(s.customer_name || '') + '</td>' +
+        '<td style="font-size:11px;color:#b45309;font-weight:700">entered ' + escapeHtml(colomboBusinessDay(s.entered_at)) + '</td>' +
+        '<td style="font-size:11px">—</td>' +
+        '<td class="text-right" style="font-weight:700">Rs.' + Number(s.total || 0).toLocaleString() + '</td></tr>'
+      )).join('')
+      return '<h3 style="font-size:13px;font-weight:800;color:#b45309;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">⚠ Retroactive Activity (' + (actedToday.length + addedLater.length) + ')</h3>' +
+        '<div style="margin-bottom:6px;font-size:11px;color:#666">Changes that affect a day other than the one they were made on. Not counted in any figure above.</div>' +
+        '<table><thead><tr><th>What</th><th>Invoice</th><th>Customer</th><th>Day affected</th><th>By</th><th class="text-right">Value</th></tr></thead><tbody>' +
+        rows + '</tbody></table>'
+    })()}
 
 ${(() => {
       // Only show actual cash/advance refunds — credit_return entries are balance adjustments
@@ -2088,7 +2125,7 @@ ${customerRows.map(c => `<tr>
         } catch {}
         let stockAdjustments: any[] = []
         try { if (sm.ok) { const sj = await sm.json(); stockAdjustments = sj.movements || [] } } catch {}
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs, dayCreditNotes, daySupplierCredits, stockAdjustments)
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs, dayCreditNotes, daySupplierCredits, stockAdjustments, j.retroactive || [])
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)
@@ -3901,7 +3938,7 @@ ${customerRows.map(c => `<tr>
                             const r = await fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${reportDate}`)
                             if (!r.ok) { showToast(`Failed (${r.status})`) } else {
                               const j = await r.json()
-                              generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [])
+                              generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, j.retroactive || [])
                             }
                           } catch { showToast('Failed') }
                           setDailyReportLoading(false)

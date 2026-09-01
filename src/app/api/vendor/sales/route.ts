@@ -403,7 +403,7 @@ export async function GET(req: NextRequest) {
         .from('payments')
         // notes carries what came back ("RETURN: <item> x1") — the only record
         // of WHICH item a return was for, so the tile can name it.
-        .select('id, amount, payment_method, cheque_number, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
+        .select('id, amount, payment_method, cheque_number, notes, created_by, created_at, sale_id, sales!inner(id, invoice_no, customer_name, customer_id, vendor_id, created_at, payment_status, customer:customers(name, phone), items:sale_items(product_sku))')
         .eq('sales.vendor_id', vendor.id)
       if (periodStart) q = q.gte('created_at', periodStart)
       // Collections belong to the branch of the invoice they settle
@@ -443,6 +443,9 @@ export async function GET(req: NextRequest) {
       cheque_number: p.cheque_number,
       notes: p.notes || '',
       created_at: p.created_at,
+      // the sale's own day, so a return raised against an older invoice is recognisable
+      sale_created_at: p.sales?.created_at || null,
+      created_by: p.created_by || null,
       sale_id: p.sale_id,
       invoice_no: p.sales?.invoice_no,
       customer_name: p.sales?.customer?.name || p.sales?.customer_name || 'Unknown',
@@ -463,7 +466,7 @@ export async function GET(req: NextRequest) {
     const buildReturns = () => {
       let q = admin
         .from('payments')
-        .select('id, amount, payment_method, notes, created_at, sale_id, sales!inner(id, invoice_no, customer_name, vendor_id, payment_status, customer:customers(name))')
+        .select('id, amount, payment_method, notes, created_by, created_at, sale_id, sales!inner(id, invoice_no, customer_name, vendor_id, created_at, payment_status, customer:customers(name))')
         .eq('sales.vendor_id', vendor.id)
         .lt('amount', 0)
       if (periodStart) q = q.gte('created_at', periodStart)
@@ -482,6 +485,7 @@ export async function GET(req: NextRequest) {
         payment_method: p.payment_method, created_at: p.created_at, sale_id: p.sale_id,
         invoice_no: p.sales?.invoice_no, customer_name: p.sales?.customer?.name || p.sales?.customer_name || 'Unknown',
         notes: p.notes || '',
+        sale_created_at: p.sales?.created_at || null, created_by: p.created_by || null,
       })
     })
   }
@@ -529,7 +533,86 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── Retroactive activity: anything done in this window that changes a day
+  //    OTHER than the day it was done ────────────────────────────────────────
+  //
+  // Backdating is legitimate here — the counter's sales get entered the next
+  // morning. What was missing is that it left no mark, so a closed day could
+  // be rewritten and nobody would see it. The owner reads the daily report, so
+  // the act is reported there rather than blocked.
+  //
+  // Reported on the day it was DONE, not only the day it was dated: a sale
+  // backdated into 29 Aug appears on the 31 Aug sheet, which is the one the
+  // owner is actually reading that evening.
+  const retroactive: any[] = []
+  // Defence in depth: this section is informational, so a failure here must
+  // never cost the owner the sales tab. Before the migration runs the columns
+  // do not exist and these selects 400 — degrade to an empty section instead.
+  try {
+  if (periodStart) {
+    const inWindow = (q: any, col: string) => {
+      let out = q.gte(col, periodStart)
+      if (periodEnd) out = out.lt(col, periodEnd)
+      // These queries start AT sales, so the plain column filter applies. The
+      // ...OnSales variant is for queries rooted at payments, and using it here
+      // asked PostgREST for an embedded 'sales' that isn't in the select.
+      return applyBranchFilter(out, branch, branchIds)
+    }
+    const [enteredRows, voidedRows] = await Promise.all([
+      fetchAllRows((from, to) => inWindow(admin.from('sales')
+        .select('id, invoice_no, customer_name, total, created_at, entered_at, created_by, payment_status')
+        .eq('vendor_id', vendor.id), 'entered_at').order('entered_at').order('id').range(from, to)),
+      fetchAllRows((from, to) => inWindow(admin.from('sales')
+        .select('id, invoice_no, customer_name, total, created_at, voided_at, voided_by')
+        .eq('vendor_id', vendor.id).not('voided_at', 'is', null), 'voided_at').order('voided_at').order('id').range(from, to)),
+    ])
+    for (const s of enteredRows) {
+      if (!s.entered_at || colomboDayOf(s.created_at) === colomboDayOf(s.entered_at)) continue
+      retroactive.push({
+        kind: colomboDayOf(s.created_at) < colomboDayOf(s.entered_at) ? 'backdated' : 'future_dated',
+        invoice_no: s.invoice_no, customer_name: s.customer_name, amount: parseFloat(s.total || 0),
+        actedAt: s.entered_at, belongsTo: s.created_at, by: s.created_by,
+      })
+    }
+    for (const s of voidedRows) {
+      if (colomboDayOf(s.created_at) === colomboDayOf(s.voided_at)) continue
+      retroactive.push({
+        kind: 'voided', invoice_no: s.invoice_no, customer_name: s.customer_name,
+        amount: parseFloat(s.total || 0), actedAt: s.voided_at, belongsTo: s.created_at, by: s.voided_by,
+      })
+    }
+    // Returns are already gathered above; one raised against an older invoice
+    // is the same kind of event — the day it belongs to is not the day it moved.
+    for (const r of returnsInPeriod) {
+      if (!r.sale_created_at || colomboDayOf(r.sale_created_at) === colomboDayOf(r.created_at)) continue
+      retroactive.push({
+        kind: 'returned', invoice_no: r.invoice_no, customer_name: r.customer_name,
+        amount: r.amount, actedAt: r.created_at, belongsTo: r.sale_created_at, by: r.created_by,
+      })
+    }
+
+    // Resolve the ids to names once. A staff row can be deleted; say so rather
+    // than showing a bare uuid or an empty column.
+    const actorIds = [...new Set(retroactive.map(r => r.by).filter(Boolean))]
+    if (actorIds.length > 0) {
+      const { data: staff } = await admin.from('vendor_staff')
+        .select('user_id, name').eq('vendor_id', vendor.id).in('user_id', actorIds)
+      const names: Record<string, string> = {}
+      for (const st of staff || []) if (st.user_id) names[st.user_id] = st.name || 'Staff'
+      if (vendor.user_id && actorIds.includes(vendor.user_id)) names[vendor.user_id] = 'Owner'
+      for (const r of retroactive) r.byName = r.by ? (names[r.by] || 'removed staff') : 'not recorded'
+    } else {
+      for (const r of retroactive) r.byName = 'not recorded'
+    }
+    retroactive.sort((a, b) => String(b.actedAt).localeCompare(String(a.actedAt)))
+  }
+  } catch (e) {
+    console.error('[sales] retroactive activity unavailable:', e)
+    retroactive.length = 0
+  }
+
   return NextResponse.json({
+    retroactive,
     sales: allSales,
     stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections, totalReturns: totalReturnsAll, totalPiecesReturned },
     collectionsToday: positiveCollections,
@@ -690,7 +773,7 @@ export async function POST(req: NextRequest) {
       : (advanceUsedForBill > 0 ? 'advance' : billBalance > 0 ? 'credit' : 'cash')
 
     // Create sale
-    const saleRecord: any = {
+    const saleRecord: any = { created_by: vendor.callerUserId || null,
       vendor_id: vendor.id, customer_id: resolvedCustomerId,
       invoice_no: invoiceNo, customer_name: customerName || 'Walk-in Customer',
       customer_phone: customerPhone || null, subtotal, discount: roundedDiscount,
@@ -739,7 +822,8 @@ export async function POST(req: NextRequest) {
       // (a retry mints the NEXT serial). Best-effort — don't mask the real error.
       if (isLkTax && taxSerial) {
         await admin.from('sales').insert({
-          vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: customerName || 'VOID',
+          created_by: vendor.callerUserId || null,
+      vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: customerName || 'VOID',
           subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
           paid_amount: 0, balance_due: 0, total_amount_due: 0,
           payment_method: 'cash', payment_status: 'voided', voided_at: new Date().toISOString(),
@@ -825,7 +909,7 @@ export async function POST(req: NextRequest) {
         const applyAmount = Math.min(remaining, oldBalance)
 
         await admin.from('payments').insert({
-          sale_id: oldSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+          created_by: vendor.callerUserId || null, sale_id: oldSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
           amount: applyAmount, payment_method: 'settlement',
           notes: `Auto-applied from invoice ${invoiceNo}`,
         })
@@ -1075,6 +1159,7 @@ export async function POST(req: NextRequest) {
     // it is voided into the ledger instead, which keeps the run gapless
     // without any chance of a duplicate.
     const { error: voidErr } = await admin.from('sales').insert({
+      created_by: vendor.callerUserId || null,
       vendor_id: vendor.id, invoice_no: deadSerial, customer_name: 'VOID — promotion reversed',
       subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
       paid_amount: 0, balance_due: 0, total_amount_due: 0,
@@ -1204,7 +1289,7 @@ export async function POST(req: NextRequest) {
     const voidedAt = new Date().toISOString()
     await admin.from('sales').update({
       payment_status: 'voided',
-      voided_at: voidedAt,
+      voided_at: voidedAt, voided_by: vendor.callerUserId || null,
       balance_due: 0,
       notes: (sale.notes || '') + '\nVOIDED: ' + voidedAt + (refundMethod === 'advance' ? ' | Refund to advance' : ' | Cash refund')
     }).eq('id', saleId)
@@ -1341,7 +1426,7 @@ export async function POST(req: NextRequest) {
       // Cash/advance portion (money that needs to move back)
       if (paidReduction > 0) {
         await admin.from('payments').insert({
-          sale_id: saleId, vendor_id: vendor.id, customer_id: sale.customer_id || null,
+          created_by: vendor.callerUserId || null, sale_id: saleId, vendor_id: vendor.id, customer_id: sale.customer_id || null,
           amount: -paidReduction,
           payment_method: refundMethod === 'advance' ? 'advance' : 'cash',
           notes: 'RETURN: ' + returnedDetails.join(', ')
@@ -1350,7 +1435,7 @@ export async function POST(req: NextRequest) {
       // Credit portion (balance that was owed but now cancelled — no money moves)
       if (balanceReduction > 0) {
         await admin.from('payments').insert({
-          sale_id: saleId, vendor_id: vendor.id, customer_id: sale.customer_id || null,
+          created_by: vendor.callerUserId || null, sale_id: saleId, vendor_id: vendor.id, customer_id: sale.customer_id || null,
           amount: -balanceReduction,
           payment_method: 'credit_return',
           notes: 'RETURN (credit cancelled): ' + returnedDetails.join(', ')
@@ -1404,6 +1489,7 @@ export async function POST(req: NextRequest) {
     const draftNo = await generateDraftNo(vendor.id, vendor.name)
 
     const { data: draft, error } = await admin.from('sales').insert({
+      created_by: vendor.callerUserId || null,
       vendor_id: vendor.id, customer_id: resolvedCustomerId,
       invoice_no: draftNo, customer_name: customerName || 'Walk-in Customer',
       customer_phone: customerPhone || null, subtotal, discount: 0,
@@ -1456,7 +1542,8 @@ export async function POST(req: NextRequest) {
     if (!targetDraftId) {
       const newDraftNo = await generateDraftNo(vendor.id, vendor.name)
       const { data: newDraft } = await admin.from('sales').insert({
-        vendor_id: vendor.id, customer_id: sale.customer_id,
+        created_by: vendor.callerUserId || null,
+      vendor_id: vendor.id, customer_id: sale.customer_id,
         invoice_no: newDraftNo, customer_name: sale.customer_name, customer_phone: sale.customer_phone,
         subtotal: 0, discount: 0, total: 0, paid_amount: 0, balance_due: 0,
         payment_status: 'draft', notes: 'ON APPROVAL',
@@ -1724,7 +1811,8 @@ export async function POST(req: NextRequest) {
 
       // Create the new real invoice
       const { data: newSale, error: newSaleErr } = await admin.from('sales').insert({
-        vendor_id: vendor.id, customer_id: resolvedCustomerId,
+        created_by: vendor.callerUserId || null,
+      vendor_id: vendor.id, customer_id: resolvedCustomerId,
         invoice_no: invoiceNo,
         customer_name: finalCustomerName,
         customer_phone: finalCustomerPhone,
@@ -1741,7 +1829,8 @@ export async function POST(req: NextRequest) {
         // Serial already minted — preserve it as a VOID row (gapless sequence).
         if (finalizeIsLkTax && lkTaxFields.tax_serial) {
           await admin.from('sales').insert({
-            vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: finalCustomerName || 'VOID',
+            created_by: vendor.callerUserId || null,
+      vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: finalCustomerName || 'VOID',
             subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
             paid_amount: 0, balance_due: 0, total_amount_due: 0,
             payment_method: 'cash', payment_status: 'voided', voided_at: new Date().toISOString(),
@@ -1780,7 +1869,7 @@ export async function POST(req: NextRequest) {
       for (const pl of (paymentLines || [])) {
         if (parseFloat(pl.amount) > 0) {
           await admin.from('payments').insert({
-            sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+            created_by: vendor.callerUserId || null, sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
             amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
             bank_ref: pl.bankRef || null, cheque_number: pl.chequeNumber || null, cheque_date: pl.chequeDate || null,
           })
@@ -1788,7 +1877,7 @@ export async function POST(req: NextRequest) {
       }
       if (advanceUsed > 0) {
         await admin.from('payments').insert({
-          sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+          created_by: vendor.callerUserId || null, sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
           amount: advanceUsed, payment_method: 'advance', notes: 'Used from advance balance',
         })
         await admin.from('customers').update({ advance_balance: Math.max(0, customerAdvance - advanceUsed) }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
@@ -1892,7 +1981,8 @@ export async function POST(req: NextRequest) {
       // VOID placeholder so the gazette sequence stays gapless. Draft can be retried.
       if (finalizeIsLkTax && fullLkTaxFields.tax_serial) {
         await admin.from('sales').insert({
-          vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: finalCustomerName || 'VOID',
+          created_by: vendor.callerUserId || null,
+      vendor_id: vendor.id, invoice_no: invoiceNo, customer_name: finalCustomerName || 'VOID',
           subtotal: 0, discount: 0, total: 0, net_amount: 0, vat_amount: 0,
           paid_amount: 0, balance_due: 0, total_amount_due: 0,
           payment_method: 'cash', payment_status: 'voided', voided_at: new Date().toISOString(),
@@ -1932,7 +2022,7 @@ export async function POST(req: NextRequest) {
     for (const pl of (paymentLines || [])) {
       if (parseFloat(pl.amount) > 0) {
         await admin.from('payments').insert({
-          sale_id: saleId, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+          created_by: vendor.callerUserId || null, sale_id: saleId, vendor_id: vendor.id, customer_id: resolvedCustomerId,
           amount: parseFloat(pl.amount), payment_method: pl.method || 'cash',
           bank_ref: pl.bankRef || null, cheque_number: pl.chequeNumber || null,
           cheque_date: pl.chequeDate || null,
@@ -1943,7 +2033,7 @@ export async function POST(req: NextRequest) {
     // Record advance usage
     if (advanceUsedForBill > 0) {
       await admin.from('payments').insert({
-        sale_id: saleId, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+        created_by: vendor.callerUserId || null, sale_id: saleId, vendor_id: vendor.id, customer_id: resolvedCustomerId,
         amount: advanceUsedForBill, payment_method: 'advance',
         notes: 'Used from advance balance',
       })
@@ -1970,7 +2060,7 @@ export async function POST(req: NextRequest) {
           const oldBalance = parseFloat(oldSale.balance_due)
           const applyAmount = Math.min(remaining, oldBalance)
           await admin.from('payments').insert({
-            sale_id: oldSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
+            created_by: vendor.callerUserId || null, sale_id: oldSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
             amount: applyAmount, payment_method: 'settlement',
             notes: `Auto-applied from invoice ${draft.invoice_no}`,
           })
