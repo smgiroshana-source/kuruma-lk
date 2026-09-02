@@ -655,7 +655,7 @@ export async function POST(req: NextRequest) {
     const { productId } = body
     if (!productId) return NextResponse.json({ success: false, error: 'productId required' }, { status: 400 })
     const { data: rows } = await admin.from('product_part_outs')
-      .select('id, description, quantity, cost_assigned, created_at, child_product_id, child:products!product_part_outs_child_product_id_fkey(id, sku, name, quantity, price, is_active)')
+      .select('id, description, quantity, cost_assigned, created_at, child_product_id, child:products!product_part_outs_child_product_id_fkey(id, sku, name, quantity, price, is_active, images:product_images(url, sort_order))')
       .eq('parent_product_id', productId).eq('vendor_id', vendor.id)
       .order('created_at', { ascending: false })
 
@@ -676,7 +676,13 @@ export async function POST(req: NextRequest) {
       partOuts: (rows || []).map((r: any) => ({
         id: r.id, description: r.description, quantity: r.quantity,
         costAssigned: Number(r.cost_assigned) || 0, removedAt: r.created_at,
-        child: r.child ? { id: r.child.id, sku: r.child.sku, name: r.child.name, quantity: r.child.quantity, price: r.child.price, active: r.child.is_active } : null,
+        child: r.child ? {
+          id: r.child.id, sku: r.child.sku, name: r.child.name,
+          quantity: r.child.quantity, price: r.child.price, active: r.child.is_active,
+          // The assembly's own photo shows the piece still attached, which is
+          // exactly the wrong picture. Show the piece's own.
+          image: ((r.child.images || []).slice().sort((x: any, y: any) => (x.sort_order || 0) - (y.sort_order || 0))[0] || {}).url || null,
+        } : null,
         sold: r.child_product_id ? soldBy[r.child_product_id] || null : null,
       })),
     })
