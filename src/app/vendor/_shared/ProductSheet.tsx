@@ -33,7 +33,7 @@ async function api(body: any) {
 // remove another. Self-contained: fetches its own list, owns its own form.
 // ═════════════════════════════════════════════════════════════════════════════
 export function PartOutPanel({
-  product, showToast, uploadImages, onCostMoved, onChanged, openSignal = 0,
+  product, showToast, uploadImages, onCostMoved, onChanged, openSignal = 0, hideAddButton = false,
 }: {
   product: any
   showToast: (m: string) => void
@@ -43,6 +43,9 @@ export function PartOutPanel({
   onChanged?: () => void
   /** Increment to open the form and scroll to it — the sheet's action button. */
   openSignal?: number
+  /** The sheet has its own large "Remove a piece" action; showing the panel's
+      too put the same button on screen twice. The desktop modal keeps it. */
+  hideAddButton?: boolean
 }) {
   const [partOuts, setPartOuts] = useState<any[] | null>(null)
   const [form, setForm] = useState<{ name: string; description: string; price: string; cost: string } | null>(null)
@@ -105,7 +108,7 @@ export function PartOutPanel({
           <p className="text-sm font-black text-indigo-900">🔧 Pieces taken off this</p>
           <p className="text-[11px] text-indigo-700 leading-snug">A mirror off a door, a condenser off a radiator. Each becomes its own item — sell it, hold it, or transfer it.</p>
         </div>
-        {canRemove && !form && (
+        {canRemove && !form && !hideAddButton && (
           <button type="button"
             onClick={() => { setForm({ name: '', description: '', price: '', cost: '' }); setPhotos([]) }}
             className="shrink-0 min-h-[44px] px-3 rounded-lg bg-indigo-600 text-white text-xs font-bold active:bg-indigo-700">
@@ -349,7 +352,7 @@ export function ProductSheet({
           </div>
 
           <PartOutPanel
-            product={p} showToast={showToast} uploadImages={uploadImages} openSignal={openSignal}
+            product={p} showToast={showToast} uploadImages={uploadImages} openSignal={openSignal} hideAddButton
             onCostMoved={moved => setP((cur: any) => ({ ...cur, cost: Math.max(0, (Number(cur.cost) || 0) - moved) }))}
             onChanged={onChanged}
           />
