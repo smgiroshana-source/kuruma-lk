@@ -37,7 +37,7 @@ export function PartOutPanel({
 }: {
   product: any
   showToast: (m: string) => void
-  uploadImages: (productId: string, files: File[]) => Promise<void>
+  uploadImages: (productId: string, files: File[]) => Promise<any[]>
   /** Cost that left the assembly — so the caller can keep its own copy honest. */
   onCostMoved?: (moved: number) => void
   onChanged?: () => void
@@ -233,7 +233,7 @@ export function ProductSheet({
   onEdit: (p: any) => void
   onSell: (p: any) => void
   showToast: (m: string) => void
-  uploadImages: (productId: string, files: File[]) => Promise<void>
+  uploadImages: (productId: string, files: File[]) => Promise<any[]>
   onChanged: () => void
   /** Vendor-specific cost rendering (WHEEL MART shows VAT wording); optional. */
   costLabel?: (p: any) => string
@@ -243,7 +243,40 @@ export function ProductSheet({
   const [slide, setSlide] = useState(0)
   const [uploading, setUploading] = useState(false)
   const stripRef = useRef<HTMLDivElement>(null)
-  useEffect(() => setP(product), [product])
+  // Set when photos are added; consumed by the effect below once the strip
+  // has actually re-rendered with them. Scrolling on a timer after the upload
+  // was undone a moment later, when the merged list came in and the
+  // snap-mandatory strip re-snapped to the first slide.
+  const scrollToEndRef = useRef(false)
+  const imageCount = (p?.images || []).length
+  useEffect(() => {
+    if (!scrollToEndRef.current) return
+    // Instant, not smooth: a smooth scroll on a snap-mandatory strip is
+    // cancelled the moment the list re-renders, and the strip re-snaps to the
+    // first slide — while the counter, set by hand, said "5 / 5" over slide
+    // one. The counter now comes only from the real scroll position (see
+    // onStripScroll), and the jump is repeated once after the refetch has
+    // had time to re-render, then the intent is cleared.
+    const jump = () => stripRef.current?.lastElementChild?.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'end' })
+    requestAnimationFrame(() => requestAnimationFrame(jump))
+    const again = setTimeout(() => { jump(); scrollToEndRef.current = false }, 900)
+    return () => clearTimeout(again)
+  }, [imageCount])
+  // When the parent hands down a fresh copy, MERGE its images with ours rather
+  // than replacing them. The refresh that follows an upload is answered by the
+  // server a moment after the insert, and if it arrives carrying the list from
+  // just before, a straight replace throws away the photo that was added
+  // seconds ago — it came back later, but the sheet had already said "1 / 7"
+  // and then "4 / 4". Keyed by id, so a later refresh that does include it
+  // simply dedupes.
+  useEffect(() => {
+    setP((cur: any) => {
+      if (!cur || cur.id !== product?.id) return product
+      const seen = new Set((product?.images || []).map((i: any) => i.id))
+      const extra = (cur.images || []).filter((i: any) => i?.id && !seen.has(i.id))
+      return { ...product, images: [...(product?.images || []), ...extra] }
+    })
+  }, [product])
 
   const images: any[] = (p?.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
   const inStock = Number(p?.quantity) > 0
@@ -269,8 +302,14 @@ export function ProductSheet({
     if (!files.length) return
     setUploading(true)
     try {
-      await uploadImages(p.id, files)
-      showToast(`✅ ${files.length} photo${files.length !== 1 ? 's' : ''} added`)
+      const added = await uploadImages(p.id, files)
+      // Show them now, from the records the server returned. The refetch that
+      // follows may still be answered from cache; this cannot be.
+      if (added.length > 0) {
+        scrollToEndRef.current = true
+        setP((cur: any) => ({ ...cur, images: [...(cur.images || []), ...added] }))
+        showToast(`✅ ${added.length} photo${added.length !== 1 ? 's' : ''} added`)
+      }
       onChanged()
     } catch { showToast('Upload failed') }
     setUploading(false)
@@ -296,8 +335,21 @@ export function ProductSheet({
           {images.length > 0 ? (
             <div ref={stripRef} onScroll={onStripScroll} className="flex overflow-x-auto snap-x snap-mandatory scrollbar-none">
               {images.map((img: any, i: number) => (
-                <img key={img.id || i} src={img.url} alt="" loading={i === 0 ? 'eager' : 'lazy'}
-                  className="w-full aspect-[4/3] object-cover shrink-0 snap-center" />
+                <img key={img.id || i} src={img.url} alt="" loading="eager"
+                  className="w-full aspect-[4/3] object-cover shrink-0 snap-center"
+                  // A photo added a moment ago can be asked for before storage
+                  // is ready to serve it. The browser then remembers the
+                  // failure and shows a grey box for a file that is perfectly
+                  // good — which reads as "the upload did not work". Retry a
+                  // few times with a fresh URL; a load that succeeds first
+                  // time never comes through here.
+                  onError={e => {
+                    const el = e.currentTarget
+                    const n = Number(el.dataset.retry || 0)
+                    if (n >= 3) return
+                    el.dataset.retry = String(n + 1)
+                    setTimeout(() => { el.src = img.url + (img.url.includes('?') ? '&' : '?') + 'r=' + Date.now() }, 700 * (n + 1))
+                  }} />
               ))}
             </div>
           ) : (

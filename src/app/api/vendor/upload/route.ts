@@ -9,7 +9,19 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const admin = createAdminClient()
-  const { data: vendor } = await admin.from('vendors').select('id').eq('user_id', user.id).eq('status', 'approved').single()
+  // Owner, or an active staff member of the shop. This used to check only the
+  // vendors table, so every staff login got 403 here — and because the client
+  // discarded the response, a photo that never uploaded looked exactly like
+  // one that had. The phone at the bench is a staff login.
+  let vendor: any = null
+  {
+    const { data: owner } = await admin.from('vendors').select('id').eq('user_id', user.id).eq('status', 'approved').single()
+    if (owner) vendor = owner
+    else {
+      const { data: staff } = await admin.from('vendor_staff').select('vendor:vendors(id)').eq('user_id', user.id).eq('active', true).single()
+      if (staff?.vendor) vendor = staff.vendor
+    }
+  }
   if (!vendor) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
 
   const formData = await req.formData()
@@ -34,8 +46,11 @@ export async function POST(req: NextRequest) {
       .jpeg({ quality: 85, progressive: true })
       .toBuffer()
   } catch {
-    // Fallback: upload original if sharp fails (e.g. unsupported format)
-    buffer = Buffer.from(arrayBuffer)
+    // Used to fall back to storing the original bytes as a ".jpg". For a file
+    // sharp cannot read that stored something no browser can render — a blank
+    // grey tile that reported "Image uploaded". An upload that cannot become
+    // a picture is a failed upload, and the client now says so.
+    return NextResponse.json({ error: 'That file is not a readable image. Take the photo again, or choose a JPEG or PNG.' }, { status: 415 })
   }
 
   const fileName = vendor.id + '/' + productId + '/' + Date.now() + '.jpg'

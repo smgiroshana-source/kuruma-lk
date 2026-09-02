@@ -922,8 +922,11 @@ export default function VendorDashboard() {
     setProductsLoading(true)
     try {
       // Fire both requests simultaneously — quick shows stats fast, full loads in parallel
-      const quickPromise = fetch('/api/vendor/data?quick=1')
-      const fullPromise = fetch('/api/vendor/data')
+      // The route sends max-age=30 for cold loads. This function is also the
+      // refresh after every action, and a refresh answered from the browser
+      // cache showed a product without the photo that had just been uploaded.
+      const quickPromise = fetch('/api/vendor/data?quick=1', { cache: 'no-store' })
+      const fullPromise = fetch('/api/vendor/data', { cache: 'no-store' })
 
       // Phase 1: Quick load — vendor info + stats only (fast)
       const quickR = await quickPromise
@@ -981,19 +984,32 @@ export default function VendorDashboard() {
   async function productAction(action: string, productId: string, updateData?: any) {
     setActionLoading(productId); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, productId, data: updateData }) }); const j = await r.json(); if (j.success) { showToast(j.message); await fetchData(); setEditingProduct(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setActionLoading(null)
   }
-  async function uploadImagesForProduct(productId: string, images: File[]) {
+  // Returns the image records the server created, so a caller can show them at
+  // once instead of waiting on a refetch the browser may answer from cache.
+  async function uploadImagesForProduct(productId: string, images: File[]): Promise<any[]> {
     const BATCH = 10 // Upload 10 images in parallel
+    const created: any[] = []
+    let failed = 0
     for (let i = 0; i < images.length; i += BATCH) {
       const batch = images.slice(i, i + BATCH)
       await Promise.all(batch.map(async (img, j) => {
-        const c = await compressImage(img)
-        const fd = new FormData()
-        fd.append('image', c)
-        fd.append('productId', productId)
-        fd.append('isPrimary', (i + j) === 0 ? 'true' : 'false')
-        await fetch('/api/vendor/upload', { method: 'POST', body: fd })
+        try {
+          const c = await compressImage(img)
+          const fd = new FormData()
+          fd.append('image', c)
+          fd.append('productId', productId)
+          fd.append('isPrimary', (i + j) === 0 ? 'true' : 'false')
+          const r = await fetch('/api/vendor/upload', { method: 'POST', body: fd })
+          const j2 = await r.json().catch(() => ({}))
+          if (r.ok && j2.image) created.push(j2.image)
+          else failed++
+        } catch { failed++ }
       }))
     }
+    // Silence here was the bug the owner hit: an upload that failed looked
+    // exactly like one that worked.
+    if (failed > 0) showToast(`⚠️ ${failed} photo${failed !== 1 ? 's' : ''} did not upload`)
+    return created
   }
 
   // Feature 3: Multi-select delete

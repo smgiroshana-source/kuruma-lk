@@ -11,6 +11,12 @@ export async function compressImage(file: File, maxSizeKB = 125): Promise<File> 
       let lo = 0.1, hi = 0.92, bestBlob: Blob | null = null
       function tryQ() { const mid = (lo + hi) / 2; canvas.toBlob((blob) => { if (!blob) { resolve(file); return }; if (blob.size / 1024 <= maxSizeKB) { bestBlob = blob; lo = mid } else { hi = mid; if (!bestBlob) bestBlob = blob }; if (hi - lo > 0.02) tryQ(); else resolve(new File([bestBlob || blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' })) }, 'image/jpeg', mid) }
       tryQ()
-    }; img.src = url
+    }
+    // A format the browser cannot decode — an iPhone HEIC from the gallery is
+    // the common one — never fires onload, and this promise used to hang
+    // forever: the sheet sat on "Uploading…" and nothing arrived. The server
+    // converts with sharp and falls back to the original, so send it as is.
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+    img.src = url
   })
 }
