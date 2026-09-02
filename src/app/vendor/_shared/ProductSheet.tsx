@@ -52,6 +52,20 @@ export function PartOutPanel({
   const [photos, setPhotos] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const formRef = useRef<HTMLDivElement>(null)
+  // One preview URL per file, made once and released when the file leaves.
+  // Creating a fresh object URL on every render leaked them and made the
+  // thumbnails flicker as the form re-rendered while typing.
+  const previewsRef = useRef(new Map<File, string>())
+  const previewOf = (f: File) => {
+    let u = previewsRef.current.get(f)
+    if (!u) { u = URL.createObjectURL(f); previewsRef.current.set(f, u) }
+    return u
+  }
+  useEffect(() => {
+    const live = new Set(photos)
+    for (const [f, u] of previewsRef.current) if (!live.has(f)) { URL.revokeObjectURL(u); previewsRef.current.delete(f) }
+  }, [photos])
+  useEffect(() => () => { for (const u of previewsRef.current.values()) URL.revokeObjectURL(u) }, [])
 
   async function load() {
     if (!product?.id) { setPartOuts(null); return }
@@ -96,9 +110,15 @@ export function PartOutPanel({
     setSaving(false)
   }
 
+  // Read the files NOW. The state updater runs after this handler returns, and
+  // by then the line that resets the input has already emptied its file list —
+  // so the picked photos vanished and the strip stayed blank. That is what the
+  // owner saw on the phone: take the picture, nothing appears.
   const addPhotos = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setPhotos(prev => [...prev, ...Array.from(e.target.files || [])])
+    const picked = Array.from(e.target.files || [])
     e.currentTarget.value = ''
+    if (picked.length === 0) return
+    setPhotos(prev => [...prev, ...picked])
   }
 
   return (
@@ -175,7 +195,7 @@ export function PartOutPanel({
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {photos.map((f, n) => (
                     <div key={n} className="relative shrink-0">
-                      <img src={URL.createObjectURL(f)} alt="" className="w-20 h-20 rounded-lg object-cover border-2 border-indigo-200" />
+                      <img src={previewOf(f)} alt="" className="w-20 h-20 rounded-lg object-cover border-2 border-indigo-200" />
                       {n === 0 && <span className="absolute bottom-0 inset-x-0 bg-indigo-600/85 text-white text-[9px] font-bold text-center rounded-b-md">MAIN</span>}
                       <button type="button" onClick={() => setPhotos(prev => prev.filter((_, k) => k !== n))}
                         className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-red-500 text-white text-sm font-bold leading-none">×</button>
