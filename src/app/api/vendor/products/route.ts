@@ -96,6 +96,23 @@ function explainBlockedDelete(name: string, err: any): string {
   return `"${name}" can't be deleted because ${why} — removing it would break that record. Use Hide instead: it disappears from the shop and the POS, and the history stays intact.`
 }
 
+
+// A piece off assembly 143610 is 143610A; the next is 143610B. The label reads
+// its own lineage. The catalogue already uses letter suffixes for other things
+// — 105410 has an A and a B on the shelf today — so this takes the first
+// letter NOT already in use for this vendor, never the first letter. A–Z, then
+// AA–ZZ; a random SKU only if all 702 are somehow taken.
+async function nextPieceSku(admin: any, vendorId: string, parentSku: string | null): Promise<string> {
+  const base = String(parentSku || '').trim()
+  if (!base) return generateSKU()
+  const { data } = await admin.from('products').select('sku').eq('vendor_id', vendorId).like('sku', base + '%')
+  const taken = new Set<string>((data || []).map((r: any) => String(r.sku)))
+  const L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  for (const a of L) { const c = base + a; if (!taken.has(c)) return c }
+  for (const a of L) for (const b of L) { const c = base + a + b; if (!taken.has(c)) return c }
+  return generateSKU()
+}
+
 export async function POST(req: NextRequest) {
   const vendor = await getVendor()
   if (!vendor) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
@@ -583,7 +600,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 })
     }
 
-    const sku = generateSKU()
+    const sku = await nextPieceSku(admin, vendor.id, parent.sku)
     const baseSlug = generateProductSlug(String(name).trim(), parent.make, parent.model, parent.condition || 'Reconditioned')
     let slug = baseSlug
     const { data: slugTaken } = await admin.from('products').select('id').eq('slug', slug).maybeSingle()
