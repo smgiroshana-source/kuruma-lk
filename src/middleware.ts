@@ -23,7 +23,8 @@ export async function middleware(request: NextRequest) {
       },
     }
   )
-  await supabase.auth.getUser()
+  // Refreshes the session cookie, and tells the page guard below who this is.
+  const { data: { user } } = await supabase.auth.getUser()
 
   // Shop data is never cacheable. Without an explicit header the browser is
   // free to heuristically cache a GET — Safari does it eagerly — so a screen
@@ -31,7 +32,35 @@ export async function middleware(request: NextRequest) {
   // until someone hit reload (owner-reported, 2026-08-25). Every /api response
   // says no-store; the storefront is not matched by this middleware and keeps
   // its CDN caching.
-  if (request.nextUrl.pathname.startsWith('/api/')) {
+  const path = request.nextUrl.pathname
+  const method = request.method.toUpperCase()
+
+  // ── CSRF: a state-changing API call must come from this site ──────────
+  // Auth is a cookie, so a page on another origin could POST here with the
+  // user's session attached. SameSite=Lax already stops most of it; this
+  // makes it explicit. The workshop app calls /api/workshop/* cross-origin
+  // by design and carries a bearer token, not a cookie — it is exempt.
+  if (path.startsWith('/api/') && !path.startsWith('/api/workshop/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const origin = request.headers.get('origin')
+    const referer = request.headers.get('referer')
+    const self = request.nextUrl.origin
+    const from = origin || (referer ? new URL(referer).origin : null)
+    if (from && from !== self) {
+      return NextResponse.json({ error: 'Cross-site request refused' }, { status: 403 })
+    }
+  }
+
+  // ── Signed-out visitors do not get the app shell ───────────────────────
+  // Every API route checks the session itself, so no data leaked; but the
+  // vendor and admin pages rendered for anyone and then failed quietly.
+  if ((path.startsWith('/vendor') || path.startsWith('/admin')) && !user) {
+    const login = request.nextUrl.clone()
+    login.pathname = '/login'
+    login.searchParams.set('next', path)
+    return NextResponse.redirect(login)
+  }
+
+  if (path.startsWith('/api/')) {
     response.headers.set('Cache-Control', 'no-store, must-revalidate')
     response.headers.set('Pragma', 'no-cache')
   }

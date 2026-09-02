@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { safeJsonLd } from '@/lib/security'
 import Script from 'next/script'
 import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
@@ -127,11 +128,11 @@ export default function RootLayout({
       <head>
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(websiteJsonLd) }}
         />
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(orgJsonLd) }}
         />
       </head>
       <body className="bg-slate-50 text-slate-900 min-h-screen">

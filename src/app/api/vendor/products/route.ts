@@ -5,6 +5,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { revalidatePath } from 'next/cache'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
@@ -78,11 +79,11 @@ async function deleteProductRow(admin: ReturnType<typeof createAdminClient>, pro
   if (error && blockedTable(error) === 'stock_transfers') {
     const { data: live } = await admin.from('stock_transfers')
       .select('id').neq('status', 'reversed')
-      .or(`from_product_id.eq.${productId},to_product_id.eq.${productId}`)
+      .or(`from_product_id.eq.${isUUID(productId) ? productId : '00000000-0000-0000-0000-000000000000'},to_product_id.eq.${isUUID(productId) ? productId : '00000000-0000-0000-0000-000000000000'}`)
       .limit(1)
     if (!live || live.length === 0) {
       await admin.from('stock_transfers').delete().eq('status', 'reversed')
-        .or(`from_product_id.eq.${productId},to_product_id.eq.${productId}`)
+        .or(`from_product_id.eq.${isUUID(productId) ? productId : '00000000-0000-0000-0000-000000000000'},to_product_id.eq.${isUUID(productId) ? productId : '00000000-0000-0000-0000-000000000000'}`)
       ;({ error } = await admin.from('products').delete().eq('id', productId))
     }
   }

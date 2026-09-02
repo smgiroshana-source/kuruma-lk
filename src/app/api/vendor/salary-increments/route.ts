@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -19,10 +20,10 @@ async function getCaller() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { vendor, userId: user.id, isOwner: true }
+  if (vendor) return { vendor, userId: user.id, isOwner: true, callerRole: 'owner' as string }
   const { data: staff } = await admin.from('vendor_staff')
     .select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staff?.vendor) return { vendor: staff.vendor, userId: user.id, isOwner: false }
+  if (staff?.vendor) return { vendor: staff.vendor, userId: user.id, isOwner: false, callerRole: (staff.role || 'cashier') as string }
   return null
 }
 
@@ -68,6 +69,10 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
   const body = await req.json()
   const { action } = body
+  // Destructive actions are owner/manager only. Any active login — a cashier
+  // included — could do these before the 2026-09-02 review.
+  const DESTRUCTIVE = new Set(['cancel'])
+  if (DESTRUCTIVE.has(action) && !roleAllows((caller as any).callerRole, ['owner', 'manager'])) return forbidden(action, ['owner', 'manager'])
 
   if (action === 'schedule') {
     const { employeeId, payItemId, effectiveMonth, newAmount, note } = body

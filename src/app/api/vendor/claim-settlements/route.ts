@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
@@ -374,7 +375,7 @@ export async function POST(req: NextRequest) {
       .select('id, classification, amount, claim_id').eq('id', shortfallId).eq('vendor_id', caller.vendor.id).single()
     if (!sf) return NextResponse.json({ error: 'Shortfall not found' }, { status: 404 })
     if (sf.classification !== 'CR') return NextResponse.json({ error: 'Only a customer-recoverable shortfall takes a re-invoice' }, { status: 400 })
-    const needle = String(invoiceNo || '').trim()
+    const needle = pgSafe(invoiceNo, 60)
     const { data: sale } = await admin.from('sales')
       .select('id, invoice_no, tax_serial, total, payment_status')
       .eq('vendor_id', caller.vendor.id)

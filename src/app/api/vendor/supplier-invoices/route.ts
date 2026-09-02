@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
@@ -9,9 +10,9 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { vendor, userId: user.id }
+  if (vendor) return { vendor, userId: user.id, callerRole: 'owner' as string }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id }
+  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id, callerRole: (staffLink.role || 'cashier') as string }
   return null
 }
 
@@ -122,6 +123,10 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
   const body = await req.json()
   const { action } = body
+  // Destructive actions are owner/manager only. Any active login — a cashier
+  // included — could do these before the 2026-09-02 review.
+  const DESTRUCTIVE = new Set(['delete_invoice'])
+  if (DESTRUCTIVE.has(action) && !roleAllows((auth as any).callerRole, ['owner', 'manager'])) return forbidden(action, ['owner', 'manager'])
 
   // ── CREATE INVOICE ───────────────────────────────────────────────────────────
   if (action === 'create_invoice') {

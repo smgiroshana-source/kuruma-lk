@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
   let query = admin.from('insurance_claims').select('*').eq('vendor_id', caller.vendor.id)
     .order('created_at', { ascending: false }).limit(200)
   if (status) query = query.eq('status', status)
-  if (q?.trim()) query = query.or(`claim_no.ilike.%${q.trim()}%,vehicle_no.ilike.%${q.trim()}%`)
+  if (pgSafe(q).length >= 2) query = query.or(`claim_no.ilike.%${pgSafe(q)}%,vehicle_no.ilike.%${pgSafe(q)}%`)
   const { data: claims, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -200,7 +201,7 @@ export async function POST(req: NextRequest) {
     const { data: claim } = await admin.from('insurance_claims').select('id, insurer_customer_id, vehicle_no')
       .eq('id', claimId).eq('vendor_id', caller.vendor.id).single()
     if (!claim) return NextResponse.json({ error: 'Claim not found' }, { status: 404 })
-    const needle = String(invoiceNo || '').trim()
+    const needle = pgSafe(invoiceNo, 60)
     if (!needle) return NextResponse.json({ error: 'Enter the invoice number or serial' }, { status: 400 })
     const { data: sale } = await admin.from('sales')
       .select('id, invoice_no, tax_serial, customer_id, claim_id, payment_status')

@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { safeJsonLd } from '@/lib/security'
 import Link from 'next/link'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -65,7 +66,7 @@ export default async function TyresPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }} />
       <div className="max-w-5xl mx-auto px-4 py-8">
         <nav className="text-xs text-slate-400 mb-3">
           <Link href="/" className="hover:text-orange-500">Home</Link> <span className="mx-1">›</span>

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
@@ -28,9 +29,9 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { ...vendor, branchScope: 'both', canFileTax: true }
+  if (vendor) return { ...vendor, branchScope: 'both', canFileTax: true, callerRole: 'owner' }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop', canFileTax: staffLink.can_file_tax === true }
+  if (staffLink?.vendor) return { ...staffLink.vendor, branchScope: staffLink.branch_scope || 'shop', canFileTax: staffLink.can_file_tax === true , callerRole: staffLink.role || 'cashier' }
   return null
 }
 
@@ -696,6 +697,9 @@ export async function POST(req: NextRequest) {
   const admin0 = createAdminClient()
 
   // ── Import VAT (Schedule 03) entries ──────────────────────────────────────
+  // Deleting a claimed import-VAT entry rewrites the VAT return. Owner/manager
+  // only — any active login could do it before the 2026-09-02 review.
+  if (body.action === 'delete_import_vat' && !roleAllows((vendor as any).callerRole, ['owner', 'manager'])) return forbidden('delete_import_vat', ['owner', 'manager'])
   if (body.action === 'add_import_vat') {
     // Accepts one entry or many (the IRD Schedule 03 CSV parsed client-side)
     const entries = Array.isArray(body.entries) ? body.entries : [body.entry]

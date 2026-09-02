@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import sharp from 'sharp'
 
 export async function POST(req: NextRequest) {
+  // Refuse on the declared length BEFORE the body is parsed. The check on
+  // file.size below runs only after req.formData() has already pulled the
+  // whole upload into memory — which for a 16 MB body surfaced as a 500 from
+  // the framework, not a 413 from us. Content-Length is set by every browser
+  // and by the phone; a client that omits it still meets the file.size check.
+  const declared = Number(req.headers.get('content-length') || 0)
+  if (declared > MAX_UPLOAD_BYTES + 64 * 1024) {
+    return NextResponse.json({ error: `That photo is about ${Math.round(declared / 1048576)} MB — the limit is ${MAX_UPLOAD_BYTES / 1048576} MB.` }, { status: 413 })
+  }
+
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
@@ -29,6 +40,15 @@ export async function POST(req: NextRequest) {
   const productId = formData.get('productId') as string
 
   if (!file || !productId) return NextResponse.json({ error: 'Missing image or productId' }, { status: 400 })
+  // Refuse before the body is read into memory: a 300 MB "photo" was buffered
+  // whole before sharp ever saw it. Type is a hint only — sharp is the judge —
+  // but a text file has no business here.
+  if (typeof file.size === 'number' && file.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: `That photo is ${Math.round(file.size / 1048576)} MB — the limit is ${MAX_UPLOAD_BYTES / 1048576} MB.` }, { status: 413 })
+  }
+  if (file.type && !file.type.startsWith('image/')) {
+    return NextResponse.json({ error: 'Only image files can be uploaded.' }, { status: 415 })
+  }
 
   const { data: product } = await admin.from('products').select('vendor_id').eq('id', productId).single()
   if (!product || product.vendor_id !== vendor.id) return NextResponse.json({ error: 'Product not found' }, { status: 404 })

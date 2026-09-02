@@ -370,7 +370,7 @@ tbody tr:last-child td{border-bottom:1px solid #000}
     <div class="ic ic-meta">
       <div class="im"><span class="im-l">Date of Invoice</span><span class="im-v">${invoiceDate}</span></div>
       <div class="im"><span class="im-l">Date of Supply</span><span class="im-v">${supplyDate}</span></div>
-      ${vehicleNo ? `<div class="im"><span class="im-l">Vehicle No</span><span class="im-v">${vehicleNo}</span></div>` : ''}
+      ${vehicleNo ? `<div class="im"><span class="im-l">Vehicle No</span><span class="im-v">${escapeHtml(vehicleNo)}</span></div>` : ''}
       ${sale.mileage_km != null ? `<div class="im"><span class="im-l">Mileage</span><span class="im-v">${Number(sale.mileage_km).toLocaleString()} km</span></div>` : ''}
     </div>
   </div>
@@ -1415,7 +1415,7 @@ export default function VendorDashboard() {
     const vatRate = 18
     const itemRows = (cn.items || []).map((i: any) =>
       `<tr>
-        <td style="padding:6px 8px">${i.product_name}</td>
+        <td style="padding:6px 8px">${escapeHtml(i.product_name)}</td>
         <td style="padding:6px 8px;text-align:center">${i.quantity}</td>
         <td style="padding:6px 8px;text-align:right">Rs.${parseInt(i.unit_price).toLocaleString()}</td>
         <td style="padding:6px 8px;text-align:right">Rs.${parseInt(i.total).toLocaleString()}</td>
@@ -1458,14 +1458,14 @@ export default function VendorDashboard() {
       <div class="parties">
         <div class="party-box">
           <div class="party-label">Supplier</div>
-          <div style="font-weight:700">${entityInfo?.name || 'MacForce Auto Engineering (Pvt) Ltd'}</div>
-          <div>${entityInfo?.address || ''}</div>
+          <div style="font-weight:700">${escapeHtml(entityInfo?.name || 'MacForce Auto Engineering (Pvt) Ltd')}</div>
+          <div>${escapeHtml(entityInfo?.address || '')}</div>
           <div>TIN: ${entityInfo?.tin || ''}</div>
         </div>
         <div class="party-box">
           <div class="party-label">Purchaser</div>
-          <div style="font-weight:700">${cn.customer_name || ''}</div>
-          <div>${cn.customer_address || ''}</div>
+          <div style="font-weight:700">${escapeHtml(cn.customer_name || '')}</div>
+          <div>${escapeHtml(cn.customer_address || '')}</div>
           ${cn.customer_tin ? `<div>TIN: ${cn.customer_tin}</div>` : ''}
         </div>
       </div>
@@ -2126,7 +2126,7 @@ ${customerRows.map(c => `<tr>
         dayExpenses = [
           ...dayExpenses,
           ...supplierCashPays.map((p: any) => ({
-            description: `Supplier payment — ${p.supplier?.name || 'supplier'}`,
+            description: `Supplier payment — ${escapeHtml(p.supplier?.name || 'supplier')}`,
             category: 'supplier', amount: p.amount, payment_method: 'cash',
           })),
         ]
@@ -4077,7 +4077,7 @@ ${customerRows.map(c => `<tr>
                                 <span className="font-black text-sm text-orange-600">Rs.{parseFloat(sale.total).toLocaleString()}</span>
                               </div>
                             </div>
-                            <div className="text-xs text-slate-600">{(sale.items || []).map((i: any) => `${i.product_name} x${i.quantity}`).join(', ')}</div>
+                            <div className="text-xs text-slate-600">{(sale.items || []).map((i: any) => `${escapeHtml(i.product_name)} x${i.quantity}`).join(', ')}</div>
                             {parseFloat(sale.balance_due) > 0 && <p className="text-[10px] font-bold text-red-600 mt-1">Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p>}
                             {sale.payments && sale.payments.length > 0 && (
                               <p className="text-[10px] text-slate-400 mt-1">Payments: {sale.payments.map((p: any) => `${PAY_LABELS[p.payment_method] || p.payment_method} Rs.${parseFloat(p.amount).toLocaleString()}`).join(', ')}</p>

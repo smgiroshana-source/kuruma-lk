@@ -17,7 +17,9 @@ export async function GET() {
       .limit(10000),
     admin
       .from('vendors')
-      .select('*')
+      // Was '*': that shipped user_id (the auth account id) and every other
+      // column to the public. The storefront needs the shop card, nothing else.
+      .select('id, name, slug, phone, whatsapp, location, address, description, logo_url, rating, review_count')
       .eq('status', 'approved')
       .order('name'),
     admin

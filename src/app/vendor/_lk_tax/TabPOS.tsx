@@ -221,7 +221,7 @@ tbody tr:last-child td{border-bottom:1px solid #000}
     <div class="ic ic-meta">
       <div class="im"><span class="im-l">Date of Invoice</span><span class="im-v">${invoiceDate}</span></div>
       <div class="im"><span class="im-l">Date of Supply</span><span class="im-v">${supplyDate}</span></div>
-      ${vehicleNo ? `<div class="im"><span class="im-l">Vehicle No</span><span class="im-v">${vehicleNo}</span></div>` : ''}
+      ${vehicleNo ? `<div class="im"><span class="im-l">Vehicle No</span><span class="im-v">${escapeHtml(vehicleNo)}</span></div>` : ''}
       ${sale.mileage_km != null ? `<div class="im"><span class="im-l">Mileage</span><span class="im-v">${Number(sale.mileage_km).toLocaleString()} km</span></div>` : ''}
     </div>
   </div>

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,8 +48,8 @@ export async function GET(req: NextRequest) {
   if (!staffRow) return json({ error: 'Not workshop staff' }, 403)
 
   const url = new URL(req.url)
-  const jobRef = url.searchParams.get('jobRef')?.trim()
-  const vehicle = url.searchParams.get('vehicle')?.trim()
+  const jobRef = pgSafe(url.searchParams.get('jobRef'), 40) || undefined
+  const vehicle = pgSafe(url.searchParams.get('vehicle'), 20) || undefined
   if (!jobRef && !vehicle) return json({ error: 'jobRef or vehicle required' }, 400)
 
   // The workshop entities' vendor scopes the lookup
