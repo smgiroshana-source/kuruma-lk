@@ -19,3 +19,7 @@
     margin: 0;
   }
 }
+
+/* Swipeable photo strips: the scroll is the gesture, the bar is noise. */
+.scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
