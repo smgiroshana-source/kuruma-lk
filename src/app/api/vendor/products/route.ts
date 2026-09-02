@@ -545,6 +545,143 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, quantity: target, delta })
   }
 
+
+  // ─── BREAK A PIECE OFF A COMPLETE ASSEMBLY ─────────────────────────────────
+  //
+  // A door complete where the customer wants only the mirror. The piece becomes
+  // a product of its own, linked back to the assembly, so it can sit in stock,
+  // be transferred, or be sold through the ordinary POS — no special case
+  // anywhere downstream.
+  //
+  // The assembly's own quantity does NOT change: it is still one door, now
+  // incomplete. What changes is its cost, because part of it walked away.
+  if (action === 'part_out') {
+    const { parentId, name, description, price, costAssigned, quantity, category } = body
+    if (!parentId || !String(name || '').trim()) {
+      return NextResponse.json({ success: false, error: 'Say which assembly, and what the piece is' }, { status: 400 })
+    }
+    const qty = Math.max(1, parseInt(quantity) || 1)
+    const moveCost = Math.max(0, Math.round(Number(costAssigned) || 0))
+
+    const { data: parent } = await admin.from('products')
+      .select('id, sku, name, vendor_id, cost, quantity, category, make, model, model_code, year, condition, product_type, parent_product_id')
+      .eq('id', parentId).eq('vendor_id', vendor.id).single()
+    if (!parent) return NextResponse.json({ success: false, error: 'Assembly not found' }, { status: 404 })
+    if (Number(parent.quantity) <= 0) {
+      return NextResponse.json({ success: false, error: `${parent.name} has none in stock — nothing to take a piece off.` }, { status: 400 })
+    }
+    // A piece off a piece is a chain nobody can read back, and the cost split
+    // compounds. One level only.
+    if (parent.parent_product_id) {
+      return NextResponse.json({ success: false, error: 'That is already a piece removed from something else — take it off the original assembly instead.' }, { status: 400 })
+    }
+    const parentCost = Math.round(Number(parent.cost) || 0)
+    if (moveCost > parentCost) {
+      return NextResponse.json({
+        success: false,
+        error: `You can move at most Rs.${parentCost.toLocaleString()} of cost — that is all ${parent.sku} carries.`,
+      }, { status: 400 })
+    }
+
+    const sku = generateSKU()
+    const baseSlug = generateProductSlug(String(name).trim(), parent.make, parent.model, parent.condition || 'Reconditioned')
+    let slug = baseSlug
+    const { data: slugTaken } = await admin.from('products').select('id').eq('slug', slug).maybeSingle()
+    if (slugTaken) slug = `${baseSlug}-${sku.toLowerCase().replace(/[^a-z0-9]/g, '-')}`
+
+    const { data: child, error: childErr } = await admin.from('products').insert({
+      vendor_id: vendor.id, sku, slug,
+      name: String(name).trim(),
+      // Where it came from, written down rather than left to memory.
+      description: (String(description || '').trim() + `\n\nRemoved from ${parent.sku} — ${parent.name}`).trim(),
+      category: category || parent.category || 'Other',
+      make: parent.make, model: parent.model, model_code: parent.model_code,
+      year: parent.year, condition: parent.condition || 'Reconditioned',
+      product_type: parent.product_type || 'part',
+      price: price ? parseInt(price) : null,
+      cost: moveCost > 0 ? moveCost : null,
+      quantity: qty, is_active: true, show_price: true,
+      parent_product_id: parent.id,
+    }).select().single()
+    if (childErr) return NextResponse.json({ success: false, error: childErr.message }, { status: 400 })
+
+    // Move the cost. The assembly is worth less now, by exactly what left it.
+    if (moveCost > 0) {
+      await admin.from('products').update({ cost: parentCost - moveCost }).eq('id', parent.id).eq('vendor_id', vendor.id)
+      // Same split in the FIFO layers, or COGS would still charge the assembly
+      // for a piece it no longer has. Take it off the newest layer that can
+      // carry it, so the oldest cost stays where FIFO expects it.
+      const { data: layers } = await admin.from('cost_layers')
+        .select('id, unit_cost, quantity_remaining').eq('product_id', parent.id).eq('vendor_id', vendor.id)
+        .gt('quantity_remaining', 0).order('received_at', { ascending: false })
+      const layer = (layers || []).find((l: any) => Number(l.unit_cost) >= moveCost)
+      if (layer) {
+        await admin.from('cost_layers').update({ unit_cost: Number(layer.unit_cost) - moveCost }).eq('id', layer.id)
+      }
+      await admin.from('cost_layers').insert({
+        vendor_id: vendor.id, product_id: child.id,
+        quantity_received: qty, quantity_remaining: qty,
+        unit_cost: moveCost, received_at: new Date().toISOString().slice(0, 10),
+      })
+    }
+
+    const { error: logErr } = await admin.from('product_part_outs').insert({
+      vendor_id: vendor.id, parent_product_id: parent.id, child_product_id: child.id,
+      description: String(name).trim(), quantity: qty, cost_assigned: moveCost,
+      parent_cost_before: parentCost, parent_cost_after: parentCost - moveCost,
+      removed_by: (vendor as any).callerUserId || null,
+    })
+    if (logErr) {
+      // The record of what came off the assembly IS the feature — an unlogged
+      // removal leaves the next customer looking at a door that says complete.
+      return NextResponse.json({
+        success: false,
+        error: `The piece was created but could not be logged against ${parent.sku} (${logErr.message}). Tell the owner.`,
+      }, { status: 500 })
+    }
+
+    revalidatePath('/')
+    return NextResponse.json({
+      success: true, product: child,
+      message: `${child.name} (${sku}) taken off ${parent.sku}`
+        + (moveCost > 0 ? ` · Rs.${moveCost.toLocaleString()} of cost moved with it` : ' · no cost moved'),
+    })
+  }
+
+  // ─── WHAT HAS BEEN TAKEN OFF AN ASSEMBLY ───────────────────────────────────
+  // Answers "what is no longer on this" for the product screen, and says where
+  // each piece went — still here, sold, or moved to the other branch.
+  if (action === 'part_outs') {
+    const { productId } = body
+    if (!productId) return NextResponse.json({ success: false, error: 'productId required' }, { status: 400 })
+    const { data: rows } = await admin.from('product_part_outs')
+      .select('id, description, quantity, cost_assigned, created_at, child_product_id, child:products!product_part_outs_child_product_id_fkey(id, sku, name, quantity, price, is_active)')
+      .eq('parent_product_id', productId).eq('vendor_id', vendor.id)
+      .order('created_at', { ascending: false })
+
+    const childIds = (rows || []).map((r: any) => r.child_product_id).filter(Boolean)
+    const soldBy: Record<string, any> = {}
+    if (childIds.length > 0) {
+      const { data: sold } = await admin.from('sale_items')
+        .select('product_id, quantity, sale:sales!inner(invoice_no, receipt_no, tax_serial, created_at, vendor_id, payment_status)')
+        .eq('sale.vendor_id', vendor.id).in('product_id', childIds)
+      for (const si of sold || []) {
+        if ((si as any).sale?.payment_status === 'voided') continue
+        const s: any = (si as any).sale
+        soldBy[(si as any).product_id] = { doc: s.tax_serial || s.invoice_no || s.receipt_no, when: s.created_at }
+      }
+    }
+    return NextResponse.json({
+      success: true,
+      partOuts: (rows || []).map((r: any) => ({
+        id: r.id, description: r.description, quantity: r.quantity,
+        costAssigned: Number(r.cost_assigned) || 0, removedAt: r.created_at,
+        child: r.child ? { id: r.child.id, sku: r.child.sku, name: r.child.name, quantity: r.child.quantity, price: r.child.price, active: r.child.is_active } : null,
+        sold: r.child_product_id ? soldBy[r.child_product_id] || null : null,
+      })),
+    })
+  }
+
   if (action === 'seed_cost_layer') {
     const { productId, unitCost, quantity, receivedAt } = body
     if (!productId || !unitCost || !quantity) return NextResponse.json({ success: false, error: 'productId, unitCost, quantity required' }, { status: 400 })
