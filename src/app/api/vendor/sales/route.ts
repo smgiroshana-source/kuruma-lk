@@ -338,10 +338,17 @@ export async function GET(req: NextRequest) {
   realSales.forEach((s: any) => {
     (s.items || []).forEach((i: any) => {
       if (i.product_sku === 'OPENING-BAL') return
+      // Net of returns. A full return no longer voids the sale — it stays, with
+      // returned_quantity on the line and returned_amount on the sale, so the
+      // month it was sold in keeps its figure. Which means every sum over lines
+      // must subtract what came back, or a spoiler sold and returned the same
+      // day sits in Top Products as "1 sold, Rs.10,000".
+      const netQty = Number(i.quantity) - Number(i.returned_quantity || 0)
+      if (netQty <= 0) return
       const key = i.product_sku || i.product_name
       if (!productMap[key]) productMap[key] = { name: i.product_name, sku: i.product_sku || '', qty: 0, revenue: 0 }
-      productMap[key].qty += i.quantity
-      productMap[key].revenue += parseFloat(i.total || 0)
+      productMap[key].qty += netQty
+      productMap[key].revenue += netQty * parseFloat(i.unit_price || 0)
     })
   })
   const topProducts = Object.values(productMap).sort((a, b) => b.revenue - a.revenue).slice(0, 10)
@@ -381,7 +388,9 @@ export async function GET(req: NextRequest) {
     const name = s.customer?.name || s.customer_name || 'Walk-in'
     const id = s.customer_id || 'walkin'
     if (!customerMap[id]) customerMap[id] = { name, phone: s.customer?.phone || s.customer_phone || '', id, spent: 0, count: 0 }
-    customerMap[id].spent += parseFloat(s.total || 0)
+    // Net of what they sent back — a ranking of who spends should not credit a
+    // customer with Rs.15,000 they returned in full the same afternoon.
+    customerMap[id].spent += parseFloat(s.total || 0) - parseFloat(s.returned_amount || 0)
     customerMap[id].count += 1
   })
   const topCustomers = Object.values(customerMap).sort((a, b) => b.spent - a.spent)
