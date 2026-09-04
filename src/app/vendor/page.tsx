@@ -3365,7 +3365,12 @@ ${customerRows.map(c => `<tr>
                     //   → profit shown separately as estimate-based; NO cost at all
                     //   → excluded from profit, revenue listed on its own line.
                     // Manual service lines have no cost concept — full revenue is profit.
-                    const validSales = (salesData.sales || []).filter((s: any) => s.payment_status !== 'voided')
+                    // Not voided, and not a draft: goods sent out on approval have not been sold.
+                    // Every other aggregate excludes drafts; this block forgot, so a spoiler
+                    // and two door switches out on approval to Macforce showed as "sold
+                    // without cost" — while the receipt they had actually been sold on, and
+                    // returned from, was already correctly netted to zero below.
+                    const validSales = (salesData.sales || []).filter((s: any) => s.payment_status !== 'voided' && s.payment_status !== 'draft')
                     const prodBySku = new Map((data?.products || []).filter((p: any) => p.sku).map((p: any) => [p.sku, p]))
                     let realRev = 0, realCogs = 0, roughRev = 0, roughCogs = 0, noCostRev = 0
                     const noCost = new Map<string, { name: string; sku: string; qty: number; rev: number; productId: string | null }>()
