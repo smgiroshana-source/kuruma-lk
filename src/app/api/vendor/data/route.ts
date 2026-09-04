@@ -164,9 +164,20 @@ export async function GET(req: NextRequest) {
       attMarked = count || 0
     }
 
-    const { data: creditRows } = await admin.from('sales')
+    const { data: creditRowsAll } = await admin.from('sales')
       .select('balance_due, customer_id, created_at, customer_name').eq('vendor_id', vendor.id)
       .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0)
+    // TEMPORARY (owner, 2026-09-04): parts sold on credit to the shop's own
+    // workshop are not a debt to chase — the two entities will settle through
+    // the workshop billing system once it exists. Until then the workshop's
+    // balance is kept out of Needs Attention, but still reported separately so
+    // the money is not simply invisible. This block is WHEEL MART-only (it sits
+    // inside the lk_tax branch), so Sakura's genuine credit to Macforce is
+    // unaffected. Remove when workshop billing lands.
+    const INTERNAL_CUSTOMERS = ['macforce auto engineering']
+    const isInternal = (r: any) => INTERNAL_CUSTOMERS.includes(String(r.customer_name || '').trim().toLowerCase())
+    const creditRows = (creditRowsAll || []).filter((r: any) => !isInternal(r))
+    const creditInternalOwed = (creditRowsAll || []).filter(isInternal).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
     const creditOwed = (creditRows || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
     const creditCustomers = new Set((creditRows || []).map((r: any) => r.customer_id).filter(Boolean)).size
     // Oldest unpaid credit invoice → aging signal for the attention queue
@@ -211,7 +222,7 @@ export async function GET(req: NextRequest) {
       cashSession: cashSess ? { status: cashSess.status, expected: parseInt(cashSess.expected_cash ?? cashSess.opening_balance ?? 0), openedAt: cashSess.opened_at || null } : null,
       staleOpenSessionDate: staleOpen?.[0]?.session_date || null,
       attendance: { marked: attMarked, total: empIds.length },
-      creditOwed, creditCustomers, creditOldestDays, creditOldestName,
+      creditOwed, creditCustomers, creditOldestDays, creditOldestName, creditInternalOwed,
       payables: { due: payablesDue, overdueCount: payOverdueCount, oldestDays: payOldestDays },
       salaryRaisesDue, salaryRaiseName,
       grnDrafts: grnDrafts || 0,

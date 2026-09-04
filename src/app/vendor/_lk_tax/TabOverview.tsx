@@ -27,6 +27,7 @@ type Dashboard = {
   attendance?: { marked: number; total: number }
   creditOwed: number
   creditCustomers: number
+  creditInternalOwed?: number
   creditOldestDays?: number
   creditOldestName?: string
   payables: { due: number; overdueCount: number; oldestDays: number }
@@ -585,6 +586,9 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
                 {num(formatRs(d.creditOwed))}
               </p>
               <p className="text-xs text-slate-400 mt-0.5">{dashLoading ? 'Loading' : `${d.creditCustomers} customer${d.creditCustomers !== 1 ? 's' : ''}`}</p>
+              {!dashLoading && Number(d.creditInternalOwed) > 0 && (
+                <p className="text-[10px] text-slate-400 mt-0.5">+ {formatRs(d.creditInternalOwed || 0)} with the workshop — not chased</p>
+              )}
             </button>
             <button
               onClick={() => onNavigate('suppliers')}
