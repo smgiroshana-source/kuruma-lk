@@ -17,10 +17,25 @@ interface Product {
   [key: string]: unknown
 }
 
+// The picture is the fastest way to be sure it is the right door. Names and
+// SKUs are near-identical across a catalogue of body parts; a thumbnail is not.
+function primaryImage(p: any): string | null {
+  const imgs = Array.isArray(p?.images) ? p.images : []
+  if (imgs.length === 0) return null
+  return imgs.slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]?.url || null
+}
+
+function Thumb({ src, size = 40, className = '' }: { src: string | null; size?: number; className?: string }) {
+  return src
+    ? <img src={src} alt="" loading="lazy" style={{ width: size, height: size }} className={`rounded-lg object-cover border border-slate-200 shrink-0 ${className}`} />
+    : <div style={{ width: size, height: size }} className={`rounded-lg bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-300 ${className}`}>📦</div>
+}
+
 interface TransferItem {
   fromProductId: string
   fromProductName: string
   fromProductSku: string
+  fromProductImage: string | null
   fromProductQty: number
   quantity: number
   transferCost: number | ''
@@ -149,7 +164,7 @@ function Spinner({ sm }: { sm?: boolean }) {
 
 // ── Preview table (shared) ───────────────────────────────────────────────────
 
-function PreviewTable({ rows }: { rows: PreviewRow[] }) {
+function PreviewTable({ rows, images = {} }: { rows: PreviewRow[]; images?: Record<string, string | null> }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200">
       <table className="w-full text-sm">
@@ -167,7 +182,12 @@ function PreviewTable({ rows }: { rows: PreviewRow[] }) {
         <tbody>
           {rows.map((row, i) => (
             <tr key={row.fromProductId + i} className={`border-t border-slate-100 ${row.error ? 'bg-red-50' : i % 2 === 0 ? 'bg-white' : 'bg-slate-50/40'}`}>
-              <td className="px-3 py-2 font-medium text-slate-800">{row.fromProductName}</td>
+              <td className="px-3 py-2 font-medium text-slate-800">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <Thumb src={images[row.fromProductId] ?? null} size={36} />
+                  <span className="truncate">{row.fromProductName}</span>
+                </div>
+              </td>
               <td className="px-3 py-2 text-slate-500 font-mono text-xs">{row.fromProductSku || '—'}</td>
               <td className="px-2 py-2 text-right text-slate-700">{row.quantity}</td>
               <td className="px-2 py-2 text-right text-slate-700">
@@ -332,6 +352,7 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
       fromProductId: product.id,
       fromProductName: product.name,
       fromProductSku: product.sku ?? '',
+      fromProductImage: primaryImage(product),
       fromProductQty: product.quantity,
       quantity: 1,
       transferCost: '',
@@ -606,9 +627,12 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
                           className={`w-full text-left flex items-center justify-between px-3 py-2.5 text-sm border-b border-slate-100 last:border-0 transition-colors
                             ${alreadyAdded ? 'bg-slate-50 text-slate-400 cursor-default' : p.quantity === 0 ? 'bg-slate-50 text-slate-400 cursor-default' : 'hover:bg-indigo-50 text-slate-700 cursor-pointer'}`}
                         >
-                          <div>
-                            <span className="font-medium">{p.name}</span>
-                            {p.sku && <span className="ml-2 text-xs text-slate-400 font-mono">{p.sku}</span>}
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <Thumb src={primaryImage(p)} size={36} />
+                            <div className="min-w-0">
+                              <span className="font-medium">{p.name}</span>
+                              {p.sku && <span className="ml-2 text-xs text-slate-400 font-mono">{p.sku}</span>}
+                            </div>
                           </div>
                           <div className="flex items-center gap-2 ml-3 shrink-0">
                             <span className={`text-xs px-1.5 py-0.5 rounded font-semibold ${p.quantity === 0 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'}`}>
@@ -637,9 +661,12 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
                     className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
                   >
                     {/* Product info */}
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-800 text-sm truncate">{item.fromProductName}</p>
-                      <p className="text-xs text-slate-400 font-mono">{item.fromProductSku || '—'}</p>
+                    <div className="flex-1 min-w-0 flex items-center gap-3">
+                      <Thumb src={item.fromProductImage} size={48} />
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-800 text-sm truncate">{item.fromProductName}</p>
+                        <p className="text-xs text-slate-400 font-mono">{item.fromProductSku || '—'}</p>
+                      </div>
                     </div>
 
                     {/* Fields */}
@@ -917,7 +944,7 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
             )}
           </div>
 
-          <PreviewTable rows={previewRows} />
+          <PreviewTable rows={previewRows} images={Object.fromEntries(transferItems.map(i => [i.fromProductId, i.fromProductImage]))} />
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
