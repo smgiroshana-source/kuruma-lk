@@ -1837,7 +1837,7 @@ ${(() => {
       const through = filtered.filter((s: any) => s.sell_through_of_sale_id)
       if (through.length === 0) return ''
       const tot = through.reduce((t: number, s: any) => t + parseFloat(s.total || 0), 0)
-      const who = escapeHtml(through[0].customer_name || 'the receiving shop')
+      const who = escapeHtml(String(through[0].customer_name || 'the receiving shop').replace(/\s*\(sold on\)\s*$/i, ''))
       const rows = through.map((s: any) => {
         const theirInv = (String(s.notes || '').match(/their invoice ([A-Z0-9_-]+)/i) || [])[1] || ''
         return (s.items || []).map((i: any) => '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong></td><td>' + escapeHtml(i.product_name) + (i.product_sku ? ' <span style="color:#999;font-size:10px">' + escapeHtml(i.product_sku) + '</span>' : '') + '</td><td class="text-right">' + i.quantity + '</td><td style="font-size:11px;color:#666">' + escapeHtml(theirInv) + '</td><td class="text-right" style="color:#7c3aed;font-weight:700">Rs.' + parseFloat(i.total || 0).toLocaleString() + '</td></tr>').join('')

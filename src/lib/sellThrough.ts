@@ -45,10 +45,14 @@ async function nextInvoiceNo(admin: Admin, vendorId: string, vendorName: string)
 }
 
 /**
- * The customer row in the source shop's books that IS the receiving shop.
- * Sakura already bills "Macforce Auto Engineering" on credit; the migration
- * tied that row to the WHEEL MART vendor. If nothing is linked yet, create one
- * from the vendor's name and link it, so the ledger has a single home.
+ * The customer row in the source shop's books that stands for the receiving
+ * shop AS A VENDOR — a dedicated one, never one of the shop's real accounts.
+ * Sakura bills "Macforce Auto Engineering" (the workshop) on credit, and has
+ * a "Wheel Mart. Thalawathugoda" account with a genuine purchase on it; the
+ * owner wants neither touched (2026-09-05). Sold-on records carry no money,
+ * so mixing them into a real ledger would only muddy it. The migration creates
+ * "WHEEL MART (sold on)"; if a source shop has no linked row yet, one is made
+ * from the vendor's name with the same suffix.
  */
 async function customerForVendor(admin: Admin, sourceVendorId: string, destVendorId: string, destVendorName: string) {
   const { data: linked } = await admin.from('customers')
@@ -57,7 +61,7 @@ async function customerForVendor(admin: Admin, sourceVendorId: string, destVendo
     .order('created_at', { ascending: true }).limit(1).maybeSingle()
   if (linked) return linked
   const { data: created, error } = await admin.from('customers')
-    .insert({ vendor_id: sourceVendorId, name: destVendorName, linked_vendor_id: destVendorId })
+    .insert({ vendor_id: sourceVendorId, name: `${destVendorName} (sold on)`, linked_vendor_id: destVendorId })
     .select('id, name, phone').single()
   if (error || !created) throw new Error(`could not create customer for ${destVendorName}: ${error?.message}`)
   return created

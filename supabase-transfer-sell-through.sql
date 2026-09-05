@@ -48,10 +48,12 @@ create index if not exists idx_sale_items_sell_through_of
   on public.sale_items (sell_through_of_item_id)
   where sell_through_of_item_id is not null;
 
--- Which customer row IS the receiving shop, in the source shop's books.
--- Sakura already bills "Macforce Auto Engineering" on credit; this ties that
--- customer to the WHEEL MART vendor so the auto-raised sale lands on the same
--- ledger instead of a look-alike created from the vendor's registered name.
+-- Which customer row stands for the receiving shop AS A VENDOR, in the source
+-- shop's books. A dedicated row, never one of the shop's real accounts: Sakura
+-- bills "Macforce Auto Engineering" (the workshop) on credit and has a
+-- "Wheel Mart. Thalawathugoda" account with a genuine purchase — the owner
+-- wants neither touched (2026-09-05). Sold-on records carry no money, so they
+-- get their own home.
 alter table public.customers
   add column if not exists linked_vendor_id uuid references public.vendors(id);
 
@@ -59,23 +61,28 @@ create index if not exists idx_customers_linked_vendor
   on public.customers (vendor_id, linked_vendor_id)
   where linked_vendor_id is not null;
 
--- Link Sakura's existing Macforce customer to the WHEEL MART vendor.
 -- Sakura Auto Parts = 0ae910a5-da00-4e1a-9bf2-7245b825cf90
 -- WHEEL MART        = 46f52c93-ee4b-4b28-bcd6-eb79ff11c503
-update public.customers
-   set linked_vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
- where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
-   and linked_vendor_id is null
-   and lower(name) like 'macforce auto engineering%'
-   and id = (
-     select id from public.customers
-      where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
-        and lower(name) like 'macforce auto engineering%'
-      order by created_at asc limit 1
-   );
 
--- ── Verify ──
+-- An earlier version of this file linked the workshop's credit account. Undo
+-- that if it happened; the real ledger must stay as it was.
+update public.customers
+   set linked_vendor_id = null
+ where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
+   and linked_vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+   and name <> 'WHEEL MART (sold on)';
+
+-- The dedicated customer, created once.
+insert into public.customers (vendor_id, name, linked_vendor_id)
+select '0ae910a5-da00-4e1a-9bf2-7245b825cf90', 'WHEEL MART (sold on)', '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+ where not exists (
+   select 1 from public.customers
+    where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
+      and linked_vendor_id = '46f52c93-ee4b-4b28-bcd6-eb79ff11c503'
+ );
+
+-- ── Verify: exactly one row, named WHEEL MART (sold on); Macforce unlinked ──
 select id, name, phone, linked_vendor_id
   from public.customers
  where vendor_id = '0ae910a5-da00-4e1a-9bf2-7245b825cf90'
-   and lower(name) like 'macforce%';
+   and (linked_vendor_id is not null or lower(name) like 'macforce auto%');
