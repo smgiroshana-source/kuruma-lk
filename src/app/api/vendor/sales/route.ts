@@ -9,6 +9,7 @@ import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnS
 import { linkSaleToClaim } from '@/lib/claims'
 import { recordSellThrough, voidSellThrough, returnSellThrough } from '@/lib/sellThrough'
 import { creditOnAccountProblem } from '@/lib/creditOnAccount'
+import { resolveAdvanceSource } from '@/lib/advanceSource'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -280,7 +281,7 @@ export async function GET(req: NextRequest) {
   if (customerId) {
     const { data: custSales } = await admin
       .from('sales')
-      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, cheque_number, created_at)')
+      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, total, returned_quantity), payments:payments(id, amount, payment_method, source_method, cheque_number, created_at)')
       .eq('vendor_id', vendor.id)
       .eq('customer_id', customerId)
       .neq('payment_status', 'voided')
@@ -314,7 +315,7 @@ export async function GET(req: NextRequest) {
   const allSales = await fetchAllRows((from, to) => {
     let query = admin
       .from('sales')
-      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method)')
+      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method, source_method)')
       .eq('vendor_id', vendor.id)
     // Branch view: shop (PART/PROP) vs workshop (REPR/WPRO). A scoped login is
     // pinned to its own side; owners choose with ?branch=
@@ -938,6 +939,8 @@ export async function POST(req: NextRequest) {
       paymentRecords.push({
         sale_id: sale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
         amount: advanceUsedForBill, payment_method: 'advance',
+        // the label a tax invoice prints instead of ADVANCE (src/lib/advanceSource.ts)
+        source_method: resolvedCustomerId ? await resolveAdvanceSource(admin, vendor.id, resolvedCustomerId) : 'cash',
         notes: 'Used from advance balance',
       })
     }
@@ -2095,6 +2098,7 @@ export async function POST(req: NextRequest) {
         await admin.from('payments').insert({
           created_by: vendor.callerUserId || null, sale_id: newSale.id, vendor_id: vendor.id, customer_id: resolvedCustomerId,
           amount: advanceUsed, payment_method: 'advance', notes: 'Used from advance balance',
+          source_method: resolvedCustomerId ? await resolveAdvanceSource(admin, vendor.id, resolvedCustomerId) : 'cash',
         })
         await admin.from('customers').update({ advance_balance: Math.max(0, customerAdvance - advanceUsed) }).eq('id', resolvedCustomerId).eq('vendor_id', vendor.id)
       }
@@ -2260,6 +2264,7 @@ export async function POST(req: NextRequest) {
       await admin.from('payments').insert({
         created_by: vendor.callerUserId || null, sale_id: saleId, vendor_id: vendor.id, customer_id: resolvedCustomerId,
         amount: advanceUsedForBill, payment_method: 'advance',
+        source_method: resolvedCustomerId ? await resolveAdvanceSource(admin, vendor.id, resolvedCustomerId) : 'cash',
         notes: 'Used from advance balance',
       })
     }

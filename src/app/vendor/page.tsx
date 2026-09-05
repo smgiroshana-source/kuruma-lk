@@ -185,6 +185,15 @@ function fmtDate(dateStr: string | null | undefined): string {
   return `${mm}/${dd}/${yyyy}`
 }
 
+// A tax invoice never says ADVANCE (owner, 2026-09-05): the credit was cash
+// or bank when it arrived, and the invoice names that. source_method is set
+// when the credit is spent; older rows fall back to CASH.
+function taxInvoiceMethodLabel(p: any): string {
+  const m = String(p.payment_method || 'cash').toLowerCase()
+  if (m === 'advance') return String(p.source_method || 'cash').toUpperCase()
+  return m.toUpperCase()
+}
+
 function printTaxInvoice(sale: any, vendor: any, settings?: any) {
   const items = (sale.items || [])
     .filter((i: any) => (i.returned_quantity || 0) < i.quantity)
@@ -235,7 +244,7 @@ function printTaxInvoice(sale: any, vendor: any, settings?: any) {
     const pmts = (sale.payments || []).filter((p: any) => p.payment_method !== 'credit_return')
     if (!pmts.length) return ''
     const lines = pmts.map((p: any) =>
-      `<span style="margin-right:16px"><strong>${escapeHtml((p.payment_method || 'cash').toUpperCase())}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</strong>: Rs.&nbsp;${parseFloat(p.amount).toLocaleString()}</span>`
+      `<span style="margin-right:16px"><strong>${escapeHtml(taxInvoiceMethodLabel(p))}${p.cheque_number ? ' #' + escapeHtml(p.cheque_number) : ''}</strong>: Rs.&nbsp;${parseFloat(p.amount).toLocaleString()}</span>`
     ).join('')
     return `<div class="pmt"><div class="pmt-lbl">Payment Method</div><div class="pmt-val">${lines}</div></div>`
   })()
