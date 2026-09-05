@@ -195,7 +195,7 @@ export async function GET(req: NextRequest) {
       .select(`
         id, batch_id, status, from_product_name, from_product_sku, to_product_name,
         quantity, transfer_cost, transfer_price, notes, transferred_at,
-        accepted_at, rejected_at, reject_reason, reversed_at,
+        accepted_at, rejected_at, reject_reason, reversed_at, sold_through_quantity,
         to_vendor:vendors!stock_transfers_to_vendor_id_fkey(name)
       `)
       .eq('from_vendor_id', vendor.id)
@@ -581,6 +581,15 @@ export async function POST(req: NextRequest) {
     // shipment is worse than none.
     for (const row of rows) {
       if (row.status !== 'accepted' || !row.to_product_id) continue
+      // Units the receiving shop has already sold on were billed to them by
+      // this shop at the transfer cost (sell-through). Those sales stand;
+      // pulling the goods back would leave an invoice for parts never held.
+      if ((row.sold_through_quantity || 0) > 0) {
+        return NextResponse.json({
+          success: false,
+          error: `${row.from_product_name}: ${row.sold_through_quantity} of ${row.quantity} already sold at the receiving shop and billed to them — this transfer can't be reversed. Transfer the remainder back instead.`,
+        }, { status: 409 })
+      }
       const { data: destProd } = await admin.from('products')
         .select('quantity, name').eq('id', row.to_product_id).eq('vendor_id', row.to_vendor_id).maybeSingle()
       if (!destProd) {

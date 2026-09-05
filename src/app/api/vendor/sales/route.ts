@@ -7,6 +7,7 @@ import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnSales } from '@/lib/branchScope'
 import { linkSaleToClaim } from '@/lib/claims'
+import { recordSellThrough, voidSellThrough, returnSellThrough } from '@/lib/sellThrough'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -1018,6 +1019,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Step 8: transferred parts sold here are sold by the shop that sent them
+    // too — raise that shop's sale at the transfer cost (src/lib/sellThrough.ts).
+    // Best effort: their bookkeeping must never fail this till.
+    let sellThroughNote = ''
+    try {
+      const { data: soldLines } = await admin.from('sale_items').select('id, product_id, quantity').eq('sale_id', sale.id)
+      const st = await recordSellThrough(admin, vendor.id, { id: sale.id, invoice_no: invoiceNo, created_at: saleRecord.created_at || null }, soldLines || [], vendor.callerUserId || null)
+      for (const r of st.raised) sellThroughNote += ` | ${r.vendorName} billed ${r.invoiceNo} Rs.${r.total.toLocaleString()}`
+      if (st.warning) sellThroughNote += ` | ⚠️ ${st.warning}`
+    } catch (e: any) { sellThroughNote = ` | ⚠️ Sell-through not recorded: ${e?.message || e}` }
+
     // Fetch complete sale
     const { data: completeSale } = await admin
       .from('sales')
@@ -1035,6 +1047,7 @@ export async function POST(req: NextRequest) {
     const finalAdvance = excessPayment > excessAppliedToOutstanding ? excessPayment - excessAppliedToOutstanding : 0
     if (finalAdvance > 0) msg += ` | Rs.${finalAdvance.toLocaleString()} to advance`
     if (claimWarning) msg += ` | ⚠️ ${claimWarning}`
+    msg += sellThroughNote
 
     // Calculate total amount due across ALL invoices for this customer and save to DB.
     // Use resolvedCustomerId (covers phone-matched and auto-created customers, not
@@ -1346,6 +1359,11 @@ export async function POST(req: NextRequest) {
     }).eq('id', saleId)
 
     const messages = ['Sale voided, stock restored']
+    // 6. The sending shop's mirrored sale (transferred parts) goes with it
+    try {
+      const mirrored = await voidSellThrough(admin, saleId, vendor.callerUserId || null)
+      if (mirrored.length > 0) messages.push(`Also voided at the sending shop: ${mirrored.join(', ')}`)
+    } catch (e: any) { messages.push(`⚠️ Sending shop's invoice not voided: ${e?.message || e}`) }
     if (advanceUsed > 0) messages.push(`Rs.${advanceUsed.toLocaleString()} advance restored`)
     if (cashPaid > 0 && refundMethod === 'advance') messages.push(`Rs.${cashPaid.toLocaleString()} added to advance`)
     if (cashPaid > 0 && refundMethod !== 'advance') messages.push(`Rs.${cashPaid.toLocaleString()} cash to refund`)
@@ -1492,6 +1510,7 @@ export async function POST(req: NextRequest) {
     let totalRefund = 0      // money to refund (discount-prorated)
     let totalRefundRaw = 0   // raw line value, before any invoice discount
     const returnedDetails: string[] = []
+    const claimedReturns: { saleItemId: string; quantity: number }[] = []
 
     // 1. Process each return item
     for (const ri of returnItems) {
@@ -1532,10 +1551,18 @@ export async function POST(req: NextRequest) {
       }
 
       returnedDetails.push(saleItem.product_name + ' x' + returnQty)
+      claimedReturns.push({ saleItemId: saleItem.id, quantity: returnQty })
     }
 
     if (totalRefund <= 0)
       return NextResponse.json({ error: 'Nothing to return' }, { status: 400 })
+
+    // Transferred parts: the sending shop's mirrored sale takes the same return
+    let sellThroughReturnNote = ''
+    try {
+      const mirrored = await returnSellThrough(admin, saleId, claimedReturns, vendor.callerUserId || null)
+      if (mirrored.length > 0) sellThroughReturnNote = ` | Also returned on the sending shop's ${mirrored.join(', ')}`
+    } catch (e: any) { sellThroughReturnNote = ` | ⚠️ Sending shop's invoice not adjusted: ${e?.message || e}` }
 
     // 2. Update sale totals
     const currentPaid = parseFloat(sale.paid_amount || 0)
@@ -1623,7 +1650,7 @@ export async function POST(req: NextRequest) {
       // The caller used this to know the sale had been voided. It no longer is:
       // a full return leaves the sale standing and reversed in its own period.
       fullyReturned: (await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)).data?.every((i: any) => (i.returned_quantity || 0) >= i.quantity) ?? false,
-      message: 'Returned: ' + returnedDetails.join(', ') + '. Total value: Rs.' + totalRefund.toLocaleString() + (paidReduction > 0 ? (refundMethod === 'advance' ? ` | Rs.${paidReduction.toLocaleString()} added to advance` : ` | Rs.${paidReduction.toLocaleString()} cash back`) : '')
+      message: 'Returned: ' + returnedDetails.join(', ') + '. Total value: Rs.' + totalRefund.toLocaleString() + (paidReduction > 0 ? (refundMethod === 'advance' ? ` | Rs.${paidReduction.toLocaleString()} added to advance` : ` | Rs.${paidReduction.toLocaleString()} cash back`) : '') + sellThroughReturnNote
     })
   }
 
@@ -2039,6 +2066,10 @@ export async function POST(req: NextRequest) {
             .eq('id', si.id)
         }
       }
+      // Transferred parts sold here → the sending shop's sale (best effort)
+      try {
+        await recordSellThrough(admin, vendor.id, { id: newSale.id, invoice_no: invoiceNo, created_at: newSale.created_at || null }, confirmedSaleItems || [], vendor.callerUserId || null)
+      } catch (e) { console.error('sell-through (partial finalize) failed', newSale.id, e) }
 
       // Record payments on new invoice
       for (const pl of (paymentLines || [])) {
@@ -2191,6 +2222,11 @@ export async function POST(req: NextRequest) {
             .eq('id', si.id)
         }
       }
+      // Transferred parts sold here → the sending shop's sale (best effort)
+      try {
+        const { data: finalizedRow } = await admin.from('sales').select('created_at').eq('id', saleId).single()
+        await recordSellThrough(admin, vendor.id, { id: saleId, invoice_no: invoiceNo, created_at: finalizedRow?.created_at || null }, finalizedItems || [], vendor.callerUserId || null)
+      } catch (e) { console.error('sell-through (finalize) failed', saleId, e) }
     }
 
     // Record cash/cheque/bank payment lines

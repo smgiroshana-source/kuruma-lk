@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { lockedNowMessage } from '@/lib/taxRates'
+import { returnSellThrough } from '@/lib/sellThrough'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -141,12 +142,14 @@ export async function POST(req: NextRequest) {
   const returnedAt = new Date().toISOString()
 
   // 3. Restore stock + FIFO cost layers + update sale_items.returned_quantity
+  const mirroredReturns: { saleItemId: string; quantity: number }[] = []
   for (const ri of returnedItems) {
     const item = (sale.items || []).find((i: any) => i.id === ri.saleItemId)
     if (!item) continue
     const maxQty = item.quantity - (item.returned_quantity || 0)
     const qty = Math.min(Math.max(0, ri.quantity), maxQty)
     if (qty <= 0) continue
+    mirroredReturns.push({ saleItemId: item.id, quantity: qty })
 
     // Restore product stock
     if (item.product_id) {
@@ -168,6 +171,11 @@ export async function POST(req: NextRequest) {
       returned_quantity: (item.returned_quantity || 0) + qty,
     }).eq('id', item.id)
   }
+
+  // Transferred parts: the sending shop's mirrored sale takes the same return
+  // (its own receipt, no credit note — that shop is not VAT-registered).
+  try { await returnSellThrough(admin, sale.id, mirroredReturns, vendor.callerUserId || null) }
+  catch (e) { console.error('sell-through (credit note) mirror failed', sale.id, e) }
 
   // 4. Check if all items fully returned
   const { data: updatedItems } = await admin.from('sale_items')

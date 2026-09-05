@@ -66,6 +66,7 @@ interface HistoryRow {
   quantity: number
   transfer_cost: number | null
   transfer_price: number | null
+  sold_through_quantity?: number | null
   notes: string | null
   transferred_at: string
   batch_id?: string | null
@@ -1077,7 +1078,7 @@ export default function StockTransfer({ vendor, products, showToast, onDataChang
                           ) : row.status === 'pending' ? (
                             <span className="text-xs font-bold text-amber-600">⏳ Awaiting their acceptance</span>
                           ) : (
-                            <span className="text-xs font-bold text-emerald-600">✓ Accepted</span>
+                            <span className="text-xs font-bold text-emerald-600">✓ Accepted{(row.sold_through_quantity || 0) > 0 && <span className="block text-[10px] font-semibold text-violet-600" title="Sold at their counter and billed to them at the transfer cost">↗ {row.sold_through_quantity} of {row.quantity} sold on</span>}</span>
                           )}
                         </td>
                         <td className="py-2 pr-3 text-right whitespace-nowrap">

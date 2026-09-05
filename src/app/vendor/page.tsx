@@ -1824,9 +1824,29 @@ ${(stockAdjustments || []).length > 0 ? (() => {
 ${filtered.map((s: any) => {
       const activeItems = (s.items || []).filter((i: any) => (i.returned_quantity || 0) < i.quantity)
       const itemNames = escapeHtml(activeItems.map((i: any) => i.product_name).join(', '))
-      return '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong></td><td>' + (escapeHtml(s.customer_name) || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + itemNames + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + (parseFloat(s.returned_amount || 0) > 0 ? '<div style="font-size:10px;color:#dc2626;font-weight:700">\u21a9 Rs.' + parseFloat(s.returned_amount).toLocaleString() + ' returned</div>' : '') + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>'
+      return '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong>' + (s.sell_through_of_sale_id ? '<div style="font-size:9px;color:#7c3aed;font-weight:700;letter-spacing:.5px">SOLD AT THEIR SHOP</div>' : '') + '</td><td>' + (escapeHtml(s.customer_name) || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + itemNames + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + (parseFloat(s.returned_amount || 0) > 0 ? '<div style="font-size:10px;color:#dc2626;font-weight:700">\u21a9 Rs.' + parseFloat(s.returned_amount).toLocaleString() + ' returned</div>' : '') + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>'
     }).join('')}
 </tbody></table>
+
+${(() => {
+      // Parts this shop transferred out that the receiving shop sold today.
+      // Each is a real sale above (counted in Gross Sales, billed to the
+      // receiving shop at the transfer cost, on credit); this block gathers
+      // them so the reader can see what part of today's figure never crossed
+      // this counter. The receiving shop's own invoice number is in the notes.
+      const through = filtered.filter((s: any) => s.sell_through_of_sale_id)
+      if (through.length === 0) return ''
+      const tot = through.reduce((t: number, s: any) => t + parseFloat(s.total || 0), 0)
+      const who = escapeHtml(through[0].customer_name || 'the receiving shop')
+      const rows = through.map((s: any) => {
+        const theirInv = (String(s.notes || '').match(/their invoice ([A-Z0-9_-]+)/i) || [])[1] || ''
+        return (s.items || []).map((i: any) => '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong></td><td>' + escapeHtml(i.product_name) + (i.product_sku ? ' <span style="color:#999;font-size:10px">' + escapeHtml(i.product_sku) + '</span>' : '') + '</td><td class="text-right">' + i.quantity + '</td><td style="font-size:11px;color:#666">' + escapeHtml(theirInv) + '</td><td class="text-right" style="color:#7c3aed;font-weight:700">Rs.' + parseFloat(i.total || 0).toLocaleString() + '</td></tr>').join('')
+      }).join('')
+      return '<h3 style="font-size:13px;font-weight:800;color:#7c3aed;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Sold through ' + who + ' (' + through.length + ') \u2014 Rs.' + tot.toLocaleString() + '</h3>' +
+        '<div style="font-size:11px;color:#666;margin-bottom:6px">Parts you transferred to them, sold at their counter today. Billed to them at the transfer cost, on credit \u2014 included in Gross Sales and On Credit above.</div>' +
+        '<table><thead><tr><th>Invoice</th><th>Item</th><th class="text-right">Qty</th><th>Their invoice</th><th class="text-right">Amount</th></tr></thead><tbody>' +
+        rows + '</tbody></table>'
+    })()}
 
 ${dayCollections.length > 0 ? (() => {
       const colMethodMap: Record<string, number> = {}
@@ -3909,7 +3929,7 @@ ${customerRows.map(c => `<tr>
                                   </td>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs font-semibold whitespace-nowrap">{sale.customer?.name || sale.customer_name}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-right font-bold text-orange-600 whitespace-nowrap">Rs.{parseFloat(sale.total).toLocaleString()}</td>
-                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status, sale).cls}>{saleStatusChip(sale.payment_status, sale).label}</span>{hasReturns && <span className="block text-[9px] font-bold text-red-500 mt-0.5">-Rs.{totalReturned.toLocaleString()}</span>}</td>
+                                  <td className="px-2 sm:px-3 py-2.5"><span className={'text-[9px] font-bold px-1.5 py-0.5 rounded-full ' + saleStatusChip(sale.payment_status, sale).cls}>{saleStatusChip(sale.payment_status, sale).label}</span>{sale.sell_through_of_sale_id && <span className="block text-[9px] font-bold text-violet-600 mt-0.5" title="A part you transferred, sold at their counter — billed to them at the transfer cost">↗ sold at their shop</span>}{hasReturns && <span className="block text-[9px] font-bold text-red-500 mt-0.5">-Rs.{totalReturned.toLocaleString()}</span>}</td>
                                   <td className="px-2 sm:px-3 py-2.5 text-slate-400 text-xs">{isExpanded ? '▲' : '▼'}</td>
                                 </tr>
                                 {isExpanded && (
