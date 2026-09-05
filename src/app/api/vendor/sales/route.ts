@@ -397,6 +397,12 @@ export async function GET(req: NextRequest) {
 
   // Fetch credit collections received in this period (payments on older invoices)
   let collectionsToday: any[] = []
+  // Advance applied to an old invoice today. Not new money — the customer paid
+  // it earlier, or it was just credited back on a return — so it stays out of
+  // the cash figures. But dropping it entirely left a hole in the story: the
+  // 4 Sep report showed a Rs.80,000 "refund" on SAK-00819 and no trace of the
+  // Rs.80,000 that settled SAK-00039 a minute later. Same rupees, two rows.
+  let advanceOffsets: any[] = []
   const periodStart = fromDate ? new Date(fromDate).toISOString() : dateFilter
   const periodEnd = toDate ? (() => { const e = new Date(toDate); e.setDate(e.getDate() + 1); return e.toISOString() })() : null
   {
@@ -431,7 +437,7 @@ export async function GET(req: NextRequest) {
       // Exclude POSITIVE advance payment records — these are internal offset entries, not new money received.
       // The actual cash/bank was already captured when the advance was originally deposited.
       // NEGATIVE advance payments are return refunds (e.g. battery returned → credit to advance) — keep those.
-      if ((p.payment_method || '').toLowerCase() === 'advance' && parseFloat(p.amount || 0) > 0) return false
+      if ((p.payment_method || '').toLowerCase() === 'advance' && parseFloat(p.amount || 0) > 0) return false // kept in advanceOffsets below
       // Check if this is an Opening Balance invoice
       const isOpeningBalance = (p.sales?.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
       if (isOpeningBalance) return true // Opening balance payments always count as collections
@@ -460,7 +466,15 @@ export async function GET(req: NextRequest) {
       customer_name: p.sales?.customer?.name || p.sales?.customer_name || 'Unknown',
       sale_voided: p.sales?.payment_status === 'voided',
     }))
+    advanceOffsets = (periodPayments || [])
+      .filter((p: any) => (p.payment_method || '').toLowerCase() === 'advance' && parseFloat(p.amount || 0) > 0 && p.sales?.payment_status !== 'voided')
+      .map((p: any) => ({
+        id: p.id, amount: parseFloat(p.amount || 0), created_at: p.created_at, sale_id: p.sale_id,
+        invoice_no: p.sales?.invoice_no, customer_name: p.sales?.customer?.name || p.sales?.customer_name || 'Unknown',
+        sale_created_at: p.sales?.created_at || null, notes: p.notes || '',
+      }))
   }
+
   // Separate positive collections from negative (returns/refunds)
   const positiveCollections = collectionsToday.filter((c: any) => c.amount > 0)
   const returnsInPeriod = collectionsToday
@@ -652,6 +666,7 @@ export async function GET(req: NextRequest) {
     sales: allSales,
     stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections, totalReturns: totalReturnsAll, totalPiecesReturned },
     collectionsToday: positiveCollections,
+    advanceOffsets,
     returnsInPeriod,
     topProducts,
     paymentBreakdown,

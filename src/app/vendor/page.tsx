@@ -1569,7 +1569,7 @@ export default function VendorDashboard() {
   }
 
   // ─── REPORT GENERATORS ───
-  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[], dayCreditNotes?: any[], daySupplierCredits?: any[], stockAdjustments?: any[], retroactive?: any[]) {
+  function generateDailyReport(salesList: any[], vendorInfo: any, reportDate: string, settings?: any, collections?: any[], returns?: any[], cashSession?: any, corrections?: any[], dayExpenses?: any[], cashMovements?: any[], dayWriteoffs?: any[], dayCreditNotes?: any[], daySupplierCredits?: any[], stockAdjustments?: any[], retroactive?: any[], advanceOffsets?: any[]) {
     // Everything is pinned to the Colombo calendar day it happened on. The fetch
     // spans two UTC days (for the +5:30 offset), so sales, collections AND returns
     // must each be filtered to reportDate or yesterday's leak into today.
@@ -1598,6 +1598,14 @@ export default function VendorDashboard() {
     // Deducting only cash refunds used to count a refund twice: once here, and
     // again when the original sale was quietly rewritten downwards.
     const totalReturnAmount = allReturns.reduce((s: number, r: any) => s + r.amount, 0)
+    // Which day the returned goods were SOLD. A return against today's own
+    // sale is a correction to today; one against an older invoice is money
+    // leaving today for a sale some other day earned. Both reduce today's net
+    // (the period model), but the reader has to be able to see the split — on
+    // 4 Sep, Rs.116,000 "returned today" was Rs.36,000 of today's goods and
+    // Rs.80,000 from an invoice dated 21 August.
+    const returnsOnTodaysSales = allReturns.filter((r: any) => r.sale_created_at && colomboBusinessDay(r.sale_created_at) === reportDate).reduce((s: number, r: any) => s + r.amount, 0)
+    const returnsOnEarlierSales = totalReturnAmount - returnsOnTodaysSales
 
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const netSales = totalSales - totalReturnAmount
@@ -1643,7 +1651,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 
 <div class="summary">
 <div class="summary-box">${totalReturnAmount > 0
-  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;margin-top:6px">&minus; Rs.' + totalReturnAmount.toLocaleString() + ' Returned today</div>'
+  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;margin-top:6px">&minus; Rs.' + totalReturnAmount.toLocaleString() + ' returned today</div>' + (returnsOnEarlierSales > 0 ? '<div style="font-size:10px;color:#991b1b;margin-top:2px">Rs.' + returnsOnTodaysSales.toLocaleString() + ' from today\'s sales \u00b7 Rs.' + returnsOnEarlierSales.toLocaleString() + ' from earlier invoices</div>' : '')
   : '<div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div>'
 }</div>
 ${totalReturnAmount > 0 ? '<div class="summary-box" style="border:2px solid #ff6b35"><div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div></div>' : ''}
@@ -1816,7 +1824,7 @@ ${(stockAdjustments || []).length > 0 ? (() => {
 ${filtered.map((s: any) => {
       const activeItems = (s.items || []).filter((i: any) => (i.returned_quantity || 0) < i.quantity)
       const itemNames = escapeHtml(activeItems.map((i: any) => i.product_name).join(', '))
-      return '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong></td><td>' + (escapeHtml(s.customer_name) || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + itemNames + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>'
+      return '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong></td><td>' + (escapeHtml(s.customer_name) || 'Walk-in') + '</td><td style="font-size:11px;color:#666">' + itemNames + '</td><td class="text-right">Rs.' + parseFloat(s.total).toLocaleString() + (parseFloat(s.returned_amount || 0) > 0 ? '<div style="font-size:10px;color:#dc2626;font-weight:700">\u21a9 Rs.' + parseFloat(s.returned_amount).toLocaleString() + ' returned</div>' : '') + '</td><td class="text-right" style="color:#16a34a">Rs.' + parseFloat(s.paid_amount || 0).toLocaleString() + '</td><td class="text-right" style="color:' + (parseFloat(s.balance_due || 0) > 0 ? '#dc2626;font-weight:700' : '#94a3b8') + '">Rs.' + parseFloat(s.balance_due || 0).toLocaleString() + '</td></tr>'
     }).join('')}
 </tbody></table>
 
@@ -1882,9 +1890,30 @@ ${(() => {
       // already reflected in sale.total and don't represent cash moving out
       if (cashReturns.length === 0) return ''
       const totalReturnAmt = cashReturns.reduce((s: number, r: any) => s + r.amount, 0)
-      return '<h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Cash Refunds (' + cashReturns.length + ') — Rs.' + totalReturnAmt.toLocaleString() + '</h3>' +
+      const cashPart = cashReturns.filter((r: any) => String(r.payment_method || '').toLowerCase() !== 'advance').reduce((t: number, r: any) => t + r.amount, 0)
+      const advPart = totalReturnAmt - cashPart
+      // "Cash Refunds" was the header even when every row was an advance credit
+      // and not a rupee had left the drawer. Say which is which.
+      return '<h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Refunds (' + cashReturns.length + ') — Rs.' + totalReturnAmt.toLocaleString() + '</h3>' +
+        '<div style="font-size:11px;color:#666;margin-bottom:6px">' + (cashPart > 0 ? 'Rs.' + cashPart.toLocaleString() + ' paid out in cash/bank' : '') + (cashPart > 0 && advPart > 0 ? ' \u00b7 ' : '') + (advPart > 0 ? 'Rs.' + advPart.toLocaleString() + ' credited to the customer\'s advance balance \u2014 no cash left the shop' : '') + '</div>' +
         '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Method</th><th class="text-right">Refund</th></tr></thead><tbody>' +
-        cashReturns.map((r: any) => '<tr><td><strong>' + (r.invoice_no || '-') + '</strong></td><td>' + r.customer_name + '</td><td style="font-size:11px;color:#666">' + (r.payment_method || 'cash').toUpperCase() + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + r.amount.toLocaleString() + '</td></tr>').join('') +
+        cashReturns.map((r: any) => '<tr><td><strong>' + escapeHtml(r.invoice_no || '-') + '</strong></td><td>' + escapeHtml(r.customer_name) + '</td><td style="font-size:11px;color:#666">' + (String(r.payment_method || '').toLowerCase() === 'advance' ? 'TO ADVANCE BALANCE \u2014 no cash' : escapeHtml(String(r.payment_method || 'cash').toUpperCase())) + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + r.amount.toLocaleString() + '</td></tr>').join('') +
+        '</tbody></table>'
+    })()}
+
+${(() => {
+      // Advance balance applied to older invoices today. Not cash — the money
+      // came in earlier, or was credited back on a return today — so it sits
+      // outside Collected and Credit Collections. But a reader who sees an
+      // Rs.80,000 advance refund and no trace of where it went has been told
+      // half a story. This is the other half.
+      const offs = (advanceOffsets || []).filter((a: any) => colomboBusinessDay(a.created_at) === reportDate)
+      if (offs.length === 0) return ''
+      const tot = offs.reduce((t: number, a: any) => t + a.amount, 0)
+      return '<h3 style="font-size:13px;font-weight:800;color:#7c3aed;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Settled from advance balance (' + offs.length + ') \u2014 Rs.' + tot.toLocaleString() + '</h3>' +
+        '<div style="font-size:11px;color:#666;margin-bottom:6px">Customer credit applied to older invoices. No cash moved today \u2014 not part of Collected.</div>' +
+        '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Invoice date</th><th class="text-right">Applied</th></tr></thead><tbody>' +
+        offs.map((a: any) => '<tr><td><strong>' + escapeHtml(a.invoice_no || '-') + '</strong></td><td>' + escapeHtml(a.customer_name) + '</td><td style="font-size:11px;color:#666">' + escapeHtml(a.sale_created_at ? colomboBusinessDay(a.sale_created_at) : '') + '</td><td class="text-right" style="color:#7c3aed;font-weight:700">Rs.' + a.amount.toLocaleString() + '</td></tr>').join('') +
         '</tbody></table>'
     })()}
 
@@ -2159,7 +2188,7 @@ ${customerRows.map(c => `<tr>
         } catch {}
         let stockAdjustments: any[] = []
         try { if (sm.ok) { const sj = await sm.json(); stockAdjustments = sj.movements || [] } } catch {}
-        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs, dayCreditNotes, daySupplierCredits, stockAdjustments, j.retroactive || [])
+        generateDailyReport(j.sales || [], data?.vendor, date, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], cashSession, corrections, dayExpenses, cashMovements, dayWriteoffs, dayCreditNotes, daySupplierCredits, stockAdjustments, j.retroactive || [], j.advanceOffsets || [])
       }
     } catch { showToast('Failed') }
     setDailyReportLoading(false)
@@ -3981,7 +4010,7 @@ ${customerRows.map(c => `<tr>
                             const r = await fetch(`/api/vendor/sales?from=${prev.toISOString().slice(0, 10)}&to=${reportDate}`)
                             if (!r.ok) { showToast(`Failed (${r.status})`) } else {
                               const j = await r.json()
-                              generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, j.retroactive || [])
+                              generateDailyReport(j.sales || [], data?.vendor, reportDate, vendorSettings, j.collectionsToday || [], j.returnsInPeriod || [], undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, j.retroactive || [], j.advanceOffsets || [])
                             }
                           } catch { showToast('Failed') }
                           setDailyReportLoading(false)
