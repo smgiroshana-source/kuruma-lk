@@ -386,6 +386,8 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   const [posReceipt, setPosReceipt] = useState<any>(null)
   const [posPreview, setPosPreview] = useState(false)
   const [useAdvance, setUseAdvance] = useState(false)
+  // Operator confirmed billing WITHOUT the customer's credit on account — sent to the server, which otherwise refuses
+  const [posCreditAck, setPosCreditAck] = useState(false)
 
   // Draft / On Approval
   const [draftReturning, setDraftReturning] = useState<string | null>(null)
@@ -664,7 +666,11 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     const posDiscountAmt = Math.min(posSubtotal, Math.max(0, Math.round(parseFloat(posDiscount) || 0)))
     const posTotal = Math.max(0, posSubtotal - posDiscountAmt)
     const posPaidAmount = posPayments.reduce((s, p) => s + (parseFloat(p.amount) || 0), 0)
-    const posAdvanceApplied = useAdvance && posCustomer.advance > 0 ? Math.min(posCustomer.advance, Math.max(0, posTotal - posPaidAmount)) : 0
+    // Credit on account is applied FIRST. It used to cover only what was left
+    // after the cash lines, so "Fill remaining" filled the whole bill with
+    // cash and the credit silently applied to nothing — the customer kept a
+    // credit he had already spent, and the drawer expected cash never taken.
+    const posAdvanceApplied = useAdvance && posCustomer.advance > 0 ? Math.min(posCustomer.advance, posTotal) : 0
     const posTotalPaid = posPaidAmount + posAdvanceApplied
     const posBalance = Math.max(0, posTotal - posTotalPaid)
     const posOverpayment = Math.max(0, posTotalPaid - posTotal)
@@ -828,6 +834,19 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       const lines = belowCost.map(it => `• ${it.productName}: Rs.${Number(it.unitPrice).toLocaleString()} — needs Rs.${posCostFloor(it).toLocaleString()} or more`).join('\n')
       if (!confirm(`⚠️ SELLING BELOW COST:\n\n${lines}\n\nContinue with this sale?`)) return
     }
+    // Credit on account: applied first, or skipped on purpose. Never both a
+    // credit left standing and the same money taken again in cash.
+    let creditAck = false
+    if (posCustomer.advance > 0) {
+      if (!useAdvance) {
+        if (!confirm(`${posCustomer.name || 'This customer'} holds Rs.${posCustomer.advance.toLocaleString()} credit on account (from a return or overpayment).\n\nBill WITHOUT using it?\n\nThe customer keeps the credit and the full amount is taken in cash/bank. Only do this if that is really what is happening.`)) return
+        creditAck = true
+      } else if (posPaidAmount > Math.max(0, posTotal - posAdvanceApplied)) {
+        alert(`Too much cash entered.\n\nRs.${posAdvanceApplied.toLocaleString()} credit covers this bill first — only Rs.${Math.max(0, posTotal - posAdvanceApplied).toLocaleString()} is due in cash/bank, but Rs.${posPaidAmount.toLocaleString()} was entered.\n\nFix the payment lines (use "Fill remaining").`)
+        return
+      }
+    }
+    setPosCreditAck(creditAck)
     setPosPreview(true)
   }
 
@@ -842,6 +861,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
             saleId: posDraftId,
             customerId: posCustomer.id || null,
             useAdvance,
+            acknowledgeCredit: posCreditAck,
             // productId/Name/Sku let the API insert rows for items added during finalize
             items: posCart.map(i => ({ id: i.saleItemId, unitPrice: cardPrice(i.unitPrice), quantity: i.quantity, productId: i.productId || null, productName: i.productName, productSku: i.productSku || null, ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC') })),
             payments: posPayments.filter(p => parseFloat(p.amount) > 0).map(p => ({ method: p.method, amount: parseFloat(p.amount), chequeNumber: p.chequeNumber || null, chequeDate: p.chequeDate || null, bankRef: p.bankRef || null })),
@@ -874,7 +894,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC'),
             })),
             discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0),
-            notes: posNotes || null, useAdvance, saleDate: posDate, vehicleNo: posVehicleNo || null,
+            notes: posNotes || null, useAdvance, acknowledgeCredit: posCreditAck, saleDate: posDate, vehicleNo: posVehicleNo || null,
             mileageKm: posMileage.trim() ? parseInt(posMileage) : null,
             ...(isLkTax && posEntityId ? {
               invoiceEntityId: posEntityId,
@@ -1357,13 +1377,18 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                   </div>
                 )}
                 {posCustomer.advance > 0 && (
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-1">
+                  <div className={'border rounded-lg p-2 mt-1 ' + (useAdvance ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-300')}>
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-emerald-700">Advance: Rs.{posCustomer.advance.toLocaleString()}</span>
+                      <span className={'text-xs font-bold ' + (useAdvance ? 'text-emerald-700' : 'text-amber-700')}>Credit on account: Rs.{posCustomer.advance.toLocaleString()}</span>
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input type="checkbox" checked={useAdvance} onChange={e => setUseAdvance(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
-                        <span className="text-xs font-bold text-emerald-700">Use</span>
+                        <span className={'text-xs font-bold ' + (useAdvance ? 'text-emerald-700' : 'text-amber-700')}>Use</span>
                       </label>
+                    </div>
+                    <div className={'text-[11px] mt-1 ' + (useAdvance ? 'text-emerald-700' : 'text-amber-700 font-semibold')}>
+                      {useAdvance
+                        ? (posTotal > 0 ? `Applied first — Rs.${posBalance.toLocaleString()} still due in cash/bank` : 'Applied first to this bill')
+                        : 'NOT applied — the whole bill will be taken in cash/bank and the customer keeps this credit'}
                     </div>
                   </div>
                 )}
@@ -1444,7 +1469,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                   )}
                   <div className="flex gap-3">
                     <button onClick={() => setPosPayments([...posPayments, { method: 'cash', amount: '', chequeNumber: '', chequeDate: '', bankRef: '' }])} className="text-xs font-bold text-blue-600">+ Add Payment Method</button>
-                    {posTotal - posPaidAmount > 0 && <button onClick={() => { const u = [...posPayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(posTotal - posPaidAmount) }; setPosPayments(u) }} className="text-xs font-bold text-orange-600">Fill remaining (Rs.{(posTotal - posPaidAmount).toLocaleString()})</button>}
+                    {posBalance > 0 && <button onClick={() => { const u = [...posPayments]; u[u.length - 1] = { ...u[u.length - 1], amount: String(posBalance) }; setPosPayments(u) }} className="text-xs font-bold text-orange-600">Fill remaining (Rs.{posBalance.toLocaleString()})</button>}
                   </div>
                 </div>
                 <input value={posDiscount} onChange={e => setPosDiscount(e.target.value.replace(/[^0-9]/g, ''))} type="text" inputMode="numeric" className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" placeholder="Discount (Rs.)" />
