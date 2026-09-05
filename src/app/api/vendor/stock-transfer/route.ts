@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { generateProductSlug } from '@/lib/slug'
+import { uniqueProductSlug } from '@/lib/uniqueSlug'
 
 // A shipment is processed line by line, so a container-sized batch needs more
 // than the platform default. Each line is written as it goes, so overrunning
@@ -90,11 +91,9 @@ async function landAtDestination(
   const { images, loc_store: _ls, loc_floor: _lf, loc_sub1: _l1, loc_sub2: _l2,
           last_stock_confirmed_at: _lsc, ...fields } = snap
   // Real slug at creation (nothing "regenerates" null slugs later — that
-  // assumption published UUID-only URLs). slug-sku on collision, like the
-  // products create path.
-  let destSlug = generateProductSlug(fields.name, fields.make, fields.model, fields.condition)
-  const { data: slugTaken } = await admin.from('products').select('id').eq('slug', destSlug).maybeSingle()
-  if (slugTaken) destSlug = `${destSlug}-${(sku || '').toLowerCase().replace(/[^a-z0-9]/g, '-')}`
+  // assumption published UUID-only URLs). The sender already owns slug-sku
+  // for this very item, so keep counting until one is free (src/lib/uniqueSlug.ts).
+  const destSlug = await uniqueProductSlug(admin, generateProductSlug(fields.name, fields.make, fields.model, fields.condition), sku)
 
   const { data: created, error: createErr } = await admin.from('products').insert({
     ...fields,
