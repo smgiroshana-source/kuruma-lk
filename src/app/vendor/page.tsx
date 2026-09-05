@@ -1830,10 +1830,10 @@ ${filtered.map((s: any) => {
 
 ${(() => {
       // Parts this shop transferred out that the receiving shop sold today.
-      // Each is a real sale above (counted in Gross Sales, billed to the
-      // receiving shop at the transfer cost, on credit); this block gathers
-      // them so the reader can see what part of today's figure never crossed
-      // this counter. The receiving shop's own invoice number is in the notes.
+      // Each is a real sale above (counted in Gross Sales at the transfer
+      // cost; nothing paid, nothing owed — the money stays with them); this
+      // block gathers them so the reader can see what part of today's figure
+      // never crossed this counter. Their invoice number is in the notes.
       const through = filtered.filter((s: any) => s.sell_through_of_sale_id)
       if (through.length === 0) return ''
       const tot = through.reduce((t: number, s: any) => t + parseFloat(s.total || 0), 0)
@@ -1843,7 +1843,7 @@ ${(() => {
         return (s.items || []).map((i: any) => '<tr><td><strong>' + escapeHtml(s.invoice_no) + '</strong></td><td>' + escapeHtml(i.product_name) + (i.product_sku ? ' <span style="color:#999;font-size:10px">' + escapeHtml(i.product_sku) + '</span>' : '') + '</td><td class="text-right">' + i.quantity + '</td><td style="font-size:11px;color:#666">' + escapeHtml(theirInv) + '</td><td class="text-right" style="color:#7c3aed;font-weight:700">Rs.' + parseFloat(i.total || 0).toLocaleString() + '</td></tr>').join('')
       }).join('')
       return '<h3 style="font-size:13px;font-weight:800;color:#7c3aed;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Sold through ' + who + ' (' + through.length + ') \u2014 Rs.' + tot.toLocaleString() + '</h3>' +
-        '<div style="font-size:11px;color:#666;margin-bottom:6px">Parts you transferred to them, sold at their counter today. Billed to them at the transfer cost, on credit \u2014 included in Gross Sales and On Credit above.</div>' +
+        '<div style="font-size:11px;color:#666;margin-bottom:6px">Parts you transferred to them, sold at their counter today, recorded at the transfer cost. Sales data only: included in Gross Sales above, nothing collected and nothing owed \u2014 the money stays at their shop.</div>' +
         '<table><thead><tr><th>Invoice</th><th>Item</th><th class="text-right">Qty</th><th>Their invoice</th><th class="text-right">Amount</th></tr></thead><tbody>' +
         rows + '</tbody></table>'
     })()}

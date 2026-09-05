@@ -156,19 +156,25 @@ export async function recordSellThrough(
       const invoiceNo = await nextInvoiceNo(admin, sourceVendorId, sourceName)
       const total = srcLines.reduce((s, l) => s + l.qty * l.transfer.transfer_cost, 0)
 
-      // What the receiving shop already owes the source, for the ledger snapshot
+      // What the receiving shop already owes the source, for the ledger snapshot.
+      // This sale adds nothing to it: see below.
       const { data: owed } = await admin.from('sales').select('balance_due')
         .eq('vendor_id', sourceVendorId).eq('customer_id', customer.id)
         .neq('payment_status', 'voided').gt('balance_due', 0)
-      const totalAmountDue = (owed || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0) + total
+      const totalAmountDue = (owed || []).reduce((s: number, x: any) => s + parseFloat(x.balance_due || 0), 0)
 
+      // Sales data only (owner, 2026-09-05). The money stays at the receiving
+      // shop; nothing moves between the companies. So: full value in `total`
+      // (Gross Sales, Sales Report, commission), nothing paid (not Collected),
+      // nothing owed (not On Credit, not the customer's balance). The method
+      // 'internal' keeps it out of every cash/bank breakdown.
       const { data: sale, error: saleErr } = await admin.from('sales').insert({
         vendor_id: sourceVendorId, customer_id: customer.id,
         invoice_no: invoiceNo, customer_name: customer.name, customer_phone: customer.phone || null,
         subtotal: total, discount: 0, total,
-        paid_amount: 0, balance_due: total, total_amount_due: totalAmountDue,
-        payment_method: 'credit', payment_status: 'credit',
-        notes: `Sold through ${destName} — their invoice ${destSale.invoice_no}. Transferred part billed at the transfer cost.`,
+        paid_amount: 0, balance_due: 0, total_amount_due: totalAmountDue,
+        payment_method: 'internal', payment_status: 'paid',
+        notes: `Sold through ${destName} — their invoice ${destSale.invoice_no}. Transferred part recorded at the transfer cost. Sales data only: no money due, it stays at their shop.`,
         created_at: destSale.created_at || new Date().toISOString(),
         created_by: callerUserId,
         sell_through_of_sale_id: destSale.id,
@@ -218,8 +224,9 @@ export async function recordSellThrough(
 
 /**
  * The receiving shop voided its sale. Void the mirrored source sale(s): no
- * stock moves (none moved on the way in), the transfer units are freed, and
- * anything the receiving shop had already paid on it goes to their advance.
+ * stock moves (none moved on the way in) and the transfer units are freed.
+ * Nothing was paid on it, so there is nothing to refund; the advance step
+ * below only matters if someone recorded a payment on it by hand.
  */
 export async function voidSellThrough(admin: Admin, destSaleId: string, callerUserId: string | null): Promise<string[]> {
   const { data: mirrors } = await admin.from('sales')
@@ -253,7 +260,14 @@ export async function voidSellThrough(admin: Admin, destSaleId: string, callerUs
  * The receiving shop returned some units of its sale (till return or credit
  * note). Mirror the return onto the source sale line by line, at the transfer
  * cost, counted on the day it happens — the same period rule as every other
- * return. Units go back to the transfer so they can be billed again if resold.
+ * return. Units go back to the transfer so they can be recorded again if
+ * resold.
+ *
+ * No money was paid or owed on the source sale, so normally no refund moves.
+ * The return is still written as a 'credit_return' payment row (the app's
+ * "value reversed, no cash moved" entry) so the source shop's returns figure
+ * for the day includes it; only a payment someone recorded by hand would be
+ * refunded to advance.
  */
 export async function returnSellThrough(
   admin: Admin,
@@ -285,10 +299,12 @@ export async function returnSellThrough(
     }
     if (refund <= 0) continue
 
+    // Value reversed is the full line value. Money only moves for whatever
+    // was actually paid or owed — normally nothing.
     const curPaid = parseFloat(m.paid_amount || 0), curBal = parseFloat(m.balance_due || 0)
-    refund = Math.min(refund, curPaid + curBal)
     const balRed = Math.min(refund, curBal)
     const paidRed = Math.min(refund - balRed, curPaid)
+    const noMoney = refund - balRed - paidRed
     const newBal = Math.max(0, curBal - balRed), newPaid = Math.max(0, curPaid - paidRed)
     const at = new Date().toISOString()
     await admin.from('sales').update({
@@ -307,10 +323,11 @@ export async function returnSellThrough(
         amount: -paidRed, payment_method: 'advance', notes: 'RETURN: ' + details.join(', '),
       })
     }
-    if (balRed > 0) {
+    if (balRed + noMoney > 0) {
       await admin.from('payments').insert({
         created_by: callerUserId, sale_id: m.id, vendor_id: m.vendor_id, customer_id: m.customer_id,
-        amount: -balRed, payment_method: 'credit_return', notes: 'RETURN (credit cancelled): ' + details.join(', '),
+        amount: -(balRed + noMoney), payment_method: 'credit_return',
+        notes: 'RETURN (no cash moved): ' + details.join(', ') + ' | Returned at their shop',
       })
     }
     touched.push(m.invoice_no)

@@ -1,7 +1,7 @@
 // One semantic palette for sale payment-status chips, used everywhere a
 // status is shown so color carries consistent meaning across the app:
 //   green = paid · amber = partial/pending · red = credit & void · slate = draft
-export function saleStatusChip(status: string | null | undefined, sale?: { total?: any; returned_amount?: any } | null): { label: string; cls: string } {
+export function saleStatusChip(status: string | null | undefined, sale?: { total?: any; returned_amount?: any; sell_through_of_sale_id?: any } | null): { label: string; cls: string } {
   // A fully returned sale is no longer voided — it keeps the value it sold for
   // so its own month stays put, and the reversal counts in the month the goods
   // came back. Nothing is owed on it, so payment_status settles to 'paid',
@@ -10,6 +10,12 @@ export function saleStatusChip(status: string | null | undefined, sale?: { total
   const total = Number(sale?.total) || 0
   if (total > 0 && (Number(sale?.returned_amount) || 0) >= total && status !== 'voided' && status !== 'draft') {
     return { label: 'RETURNED', cls: 'bg-red-100 text-red-600' }
+  }
+  // A transferred part sold at the receiving shop: sales data only. No money
+  // was paid and none is owed (owner, 2026-09-05), so neither PAID nor CREDIT
+  // is true of it.
+  if (sale?.sell_through_of_sale_id && status !== 'voided') {
+    return { label: 'SOLD ON', cls: 'bg-violet-100 text-violet-700' }
   }
   switch (status) {
     case 'paid':    return { label: 'PAID',    cls: 'bg-green-100 text-green-700' }
