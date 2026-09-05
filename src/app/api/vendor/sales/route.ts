@@ -8,6 +8,7 @@ import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { branchEntityIds, resolveBranch, applyBranchFilter, applyBranchFilterOnSales } from '@/lib/branchScope'
 import { linkSaleToClaim } from '@/lib/claims'
 import { recordSellThrough, voidSellThrough, returnSellThrough } from '@/lib/sellThrough'
+import { creditOnAccountProblem } from '@/lib/creditOnAccount'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -689,6 +690,7 @@ export async function POST(req: NextRequest) {
     const {
       customerId, customerName, customerPhone, items,
       discount, payments: paymentLines, notes, useAdvance, applyToOutstanding,
+      acknowledgeCredit,
       saleDate, vehicleNo, mileageKm,
       // lk_tax fields (only present for WHEEL MART / lk_tax vendors)
       invoiceEntityId, documentType,
@@ -804,6 +806,10 @@ export async function POST(req: NextRequest) {
       if (!cust) return NextResponse.json({ error: 'Customer not found' }, { status: 400 })
       customerAdvance = parseFloat(cust?.advance_balance || 0)
     }
+    // Credit on account is applied first, or billing without it is explicit.
+    // A fresh cash line on top of a refund-to-advance double-counts the money.
+    const creditProblem = creditOnAccountProblem({ customerName, customerAdvance, total, cashPaid, useAdvance: !!useAdvance, acknowledged: !!acknowledgeCredit })
+    if (creditProblem) return NextResponse.json(creditProblem, { status: 409 })
 
     // Step 3: Apply advance to THIS bill if enabled
     let advanceUsedForBill = 0
@@ -1998,11 +2004,15 @@ export async function POST(req: NextRequest) {
       }
 
       let customerAdvance = 0
-      if (resolvedCustomerId && useAdvance) {
+      if (resolvedCustomerId) {
         const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).eq('vendor_id', vendor.id).single()
         customerAdvance = parseFloat(cust?.advance_balance || 0)
       }
       const cashPaid = (paymentLines || []).reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
+      {
+        const creditProblem = creditOnAccountProblem({ customerName: finalCustomerName, customerAdvance, total: partialTotal, cashPaid, useAdvance: !!useAdvance, acknowledged: !!body.acknowledgeCredit })
+        if (creditProblem) return NextResponse.json(creditProblem, { status: 409 })
+      }
       const advanceUsed = useAdvance && customerAdvance > 0 ? Math.min(customerAdvance, Math.max(0, partialTotal - cashPaid)) : 0
       const paidAmt = Math.min(partialTotal, cashPaid + advanceUsed)
       const balanceDue = Math.max(0, partialTotal - paidAmt)
@@ -2133,12 +2143,16 @@ export async function POST(req: NextRequest) {
 
     // Check customer advance (same logic as create_sale)
     let customerAdvance = 0
-    if (resolvedCustomerId && useAdvance) {
+    if (resolvedCustomerId) {
       const { data: cust } = await admin.from('customers').select('advance_balance').eq('id', resolvedCustomerId).eq('vendor_id', vendor.id).single()
       customerAdvance = parseFloat(cust?.advance_balance || 0)
     }
 
     const cashPaid = (paymentLines || []).reduce((s: number, p: any) => s + (parseFloat(p.amount) || 0), 0)
+    {
+      const creditProblem = creditOnAccountProblem({ customerName: finalCustomerName, customerAdvance, total, cashPaid, useAdvance: !!useAdvance, acknowledged: !!body.acknowledgeCredit })
+      if (creditProblem) return NextResponse.json(creditProblem, { status: 409 })
+    }
     const advanceUsedForBill = useAdvance && customerAdvance > 0
       ? Math.min(customerAdvance, Math.max(0, total - cashPaid))
       : 0
