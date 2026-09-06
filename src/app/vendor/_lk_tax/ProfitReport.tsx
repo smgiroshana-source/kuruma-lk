@@ -54,17 +54,19 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
           ${s.serviceRevenue > 0 ? row('Service / labour lines (no stock cost)', money(s.serviceRevenue), { indent: true }) : ''}
           ${row('Cost of goods sold', '− ' + money(s.realCogs + s.roughCogs), { bold: true })}
           ${row('GROSS PROFIT' + (s.grossMarginPct != null ? ` (${s.grossMarginPct}% margin)` : ''), money(s.grossProfit), { bold: true, color: s.grossProfit >= 0 ? '#15803d' : '#dc2626' })}
-          ${row('Operating expenses', '− ' + money(s.expenseTotal), { bold: true })}
+          ${row('Operating expenses' + (s.salaryPaidInWindow > 0 ? ' (excl. salary)' : ''), '− ' + money(s.expenseExclSalary), { bold: true })}
+          ${s.salaryAccrual > 0 ? row('Salary for days worked' + (data.salary?.basis === 'estimated' ? ' (estimated)' : ''), '− ' + money(s.salaryAccrual), { bold: true }) : ''}
           ${s.writeoffTotal > 0 ? row('Stock written off', '− ' + money(s.writeoffTotal), { bold: true, color: '#b45309' }) : ''}
           ${s.supplierCreditTotal > 0 ? row('Supplier discounts received', '+ ' + money(s.supplierCreditTotal), { bold: true, color: '#15803d' }) : ''}
           ${row('NET PROFIT', money(s.netProfit), { bold: true, color: s.netProfit >= 0 ? '#15803d' : '#dc2626' })}
         </tbody>
       </table>
-      ${data.salaryNote ? `
-      <p class="note" style="border-left:3px solid #b45309;padding-left:10px;color:#92400e">
-        ⚠️ Salary for the cycle <strong>${escapeHtml(data.salaryNote.cycle)}</strong> is not paid yet
-        (payday is ~the 25th). This profit is shown before roughly <strong>${money(data.salaryNote.estPending)}</strong> of salary
-        — only advances taken so far appear in the expenses below.
+      ${s.salaryAccrual > 0 ? `
+      <p class="note" style="border-left:3px solid #64748b;padding-left:10px;color:#475569">
+        Salary is charged for the days worked in this period, not for when it is paid:
+        monthly pay ÷ ${data.salary.workingDaysPerMonth} working days × days worked, and daily rates × days worked
+        (${data.salary.staffCount} staff, ${data.salary.daysWorked} staff-days${data.salary.basis === 'estimated' ? ', estimated at 25 working days a month because no attendance is marked for these dates' : ', from the attendance register'}).
+        ${s.salaryPaidInWindow > 0 ? `The <strong>${money(s.salaryPaidInWindow)}</strong> of salary and advances actually paid out in this period is that same cost, so it is not charged again.` : 'Nothing has been paid out for it yet.'}
       </p>` : ''}`
 
     // The no-cost block is deliberately OUTSIDE the profit arithmetic
@@ -112,12 +114,22 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
         </tbody>
       </table>` : ''
 
+    const salaryBlock = (data.salary?.lines || []).length > 0 ? `
+      <h3>Salary for days worked</h3>
+      <table>
+        <thead><tr><th>Staff</th><th>Pay basis</th><th class="num">Days worked</th><th class="num">Accrued</th></tr></thead>
+        <tbody>
+          ${data.salary.lines.map((l: any) => `<tr><td>${escapeHtml(l.name)}</td><td>${l.payType === 'daily' ? 'Daily rate × days' : 'Monthly ÷ ' + data.salary.workingDaysPerMonth + ' × days'}</td><td class="num">${l.daysWorked}</td><td class="num">${money(l.amount)}</td></tr>`).join('')}
+          <tr class="tot"><td colspan="3">Total</td><td class="num">${money(s.salaryAccrual)}</td></tr>
+        </tbody>
+      </table>` : ''
+
     const expenseBlock = data.expenses.length > 0 ? `
       <h3>Operating expenses</h3>
       <table>
         <thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${data.expenses.map((e: any) => `<tr><td>${escapeHtml(e.category)}</td><td class="num">${money(e.amount)}</td></tr>`).join('')}
+          ${data.expenses.map((e: any) => `<tr><td>${escapeHtml(e.category)}${e.category === 'salaries' ? ' <span style="color:#64748b;font-size:11px">— paid out in this period; profit charges the accrual above instead</span>' : ''}</td><td class="num">${money(e.amount)}</td></tr>`).join('')}
           <tr class="tot"><td>Total</td><td class="num">${money(s.expenseTotal)}</td></tr>
         </tbody>
       </table>
@@ -216,6 +228,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
 
       ${groupBlock}
       ${noCostBlock}
+      ${salaryBlock}
       ${expenseBlock}
       ${writeoffBlock}
       ${creditBlock}
