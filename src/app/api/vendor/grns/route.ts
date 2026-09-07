@@ -4,6 +4,7 @@ import { missingVatPaperwork, vatPaperworkMessage } from '@/lib/vatPaperwork'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
+import { applySupplierAdvance } from '@/lib/supplierAdvance'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -269,7 +270,14 @@ export async function POST(req: NextRequest) {
       }).select('id, invoice_no, amount, due_date').single()
       // The stock posting stands either way — a payable failure is reported,
       // never allowed to half-undo a posted GRN.
-      if (!invErr && inv) payable = inv
+      if (!invErr && inv) {
+        payable = inv
+        // Money paid ahead to this supplier settles the new bill first
+        try {
+          const adv = await applySupplierAdvance(admin, vendor.id, inv.id, (vendor as any).callerUserId || null)
+          if (adv.applied > 0) payable = { ...inv, advance_applied: adv.applied, remaining: adv.remaining }
+        } catch (e) { console.error('supplier advance apply failed', inv.id, e) }
+      }
     }
 
     const totalQty = items.reduce((s: number, i: any) => s + i.quantity, 0)

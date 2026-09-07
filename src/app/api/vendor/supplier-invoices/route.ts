@@ -3,6 +3,7 @@ import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/s
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
+import { applySupplierAdvance, bumpSupplierAdvance } from '@/lib/supplierAdvance'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -181,7 +182,74 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ ok: true, invoice })
+    // Money already sent ahead settles this bill first
+    const adv = await applySupplierAdvance(admin, vendor.id, invoice.id, userId)
+    return NextResponse.json({ ok: true, invoice, advanceApplied: adv.applied })
+  }
+
+  // ── RECORD PREPAYMENT (no invoice yet) ─────────────────────────────────────
+  // Owner, 2026-09-06: WHEEL MART sometimes pays a supplier before any invoice
+  // exists. The money sits on the supplier's account and settles their next
+  // invoices. Same payment controls as an invoice payment: cheques need a
+  // number, cheques and transfers get the 8-digit confirmation.
+  if (action === 'record_prepayment') {
+    const { supplier_id, amount, payment_date, method, reference, notes } = body as {
+      supplier_id: string; amount: number; payment_date: string; method: string; reference?: string; notes?: string
+    }
+    if (!supplier_id || amount === undefined || !payment_date || !method)
+      return NextResponse.json({ error: 'supplier_id, amount, payment_date, and method are required' }, { status: 400 })
+    if (!Number.isInteger(amount) || amount <= 0)
+      return NextResponse.json({ error: 'amount must be a positive integer (whole LKR)' }, { status: 400 })
+    const { data: supplier } = await admin.from('suppliers').select('id, name').eq('id', supplier_id).eq('vendor_id', vendor.id).single()
+    if (!supplier) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
+
+    const methodNorm = String(method).toLowerCase()
+    const isCheque = methodNorm.includes('cheque')
+    const isOnline = methodNorm === 'online' || methodNorm.includes('bank') || methodNorm === 'card'
+    if (isCheque && !reference?.trim())
+      return NextResponse.json({ error: 'Cheque number is required for cheque payments' }, { status: 400 })
+    const paymentConfirmNo = (isCheque || isOnline) ? String(Math.floor(10000000 + Math.random() * 90000000)) : null
+    const methodCanon = isCheque ? 'cheque' : isOnline ? 'online' : 'cash'
+
+    const { data: pay, error: payErr } = await admin.from('supplier_payments').insert({
+      vendor_id: vendor.id, supplier_id, supplier_invoice_id: null,
+      amount, payment_date, method: methodCanon,
+      reference: reference ?? null,
+      notes: ('PREPAYMENT — paid ahead of any invoice' + (notes?.trim() ? ' | ' + notes.trim() : '')),
+      payment_confirm_no: paymentConfirmNo, created_by: userId,
+    }).select('id').single()
+    if (payErr || !pay) return NextResponse.json({ error: payErr?.message || 'Could not record' }, { status: 500 })
+
+    const bal = await bumpSupplierAdvance(admin, vendor.id, supplier_id, amount)
+    if (bal == null) {
+      await admin.from('supplier_payments').delete().eq('id', pay.id)
+      return NextResponse.json({ error: 'Could not update the supplier account — try again' }, { status: 409 })
+    }
+    if (methodCanon === 'cash') await recomputeSessionForDate(admin, vendor.id, payment_date)
+
+    // Anything already owed to this supplier is settled from it straight away, oldest first
+    const { data: open } = await admin.from('supplier_invoices').select('id')
+      .eq('vendor_id', vendor.id).eq('supplier_id', supplier_id).neq('status', 'paid').order('due_date', { ascending: true })
+    let appliedTotal = 0
+    for (const inv of (open || [])) {
+      const r = await applySupplierAdvance(admin, vendor.id, inv.id, userId)
+      appliedTotal += r.applied
+      if (r.applied === 0 && r.remaining > 0) break // account is empty
+    }
+    const { data: after } = await admin.from('suppliers').select('advance_balance').eq('id', supplier_id).single()
+    return NextResponse.json({
+      ok: true, confirm_no: paymentConfirmNo, confirm_kind: isCheque ? 'cheque' : isOnline ? 'online' : null,
+      applied: appliedTotal, advance_balance: Number(after?.advance_balance || 0),
+    })
+  }
+
+  // ── APPLY PREPAYMENT TO ONE INVOICE ────────────────────────────────────────
+  if (action === 'apply_advance') {
+    const { invoice_id } = body as { invoice_id: string }
+    if (!invoice_id) return NextResponse.json({ error: 'invoice_id is required' }, { status: 400 })
+    const r = await applySupplierAdvance(admin, vendor.id, invoice_id, userId)
+    if (r.applied === 0) return NextResponse.json({ error: 'Nothing to apply — no prepayment on account, or nothing owed on this invoice' }, { status: 400 })
+    return NextResponse.json({ ok: true, applied: r.applied, remaining: r.remaining })
   }
 
   // ── RECORD PAYMENT ───────────────────────────────────────────────────────────

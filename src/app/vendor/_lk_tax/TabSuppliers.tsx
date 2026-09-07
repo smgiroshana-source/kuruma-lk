@@ -102,6 +102,8 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
   const [vatTouched, setVatTouched] = useState(false)
   const [showAddInvoice, setShowAddInvoice] = useState(false)
   const [showRecordPayment, setShowRecordPayment] = useState<any | null>(null)
+  // Pay the supplier ahead of any invoice — sits on their account, settles the next bills
+  const [showPrepay, setShowPrepay] = useState(false)
 
   // ── filters ───────────────────────────────────────────────────────────────
   const [showIncludePaid, setShowIncludePaid] = useState(false)
@@ -210,6 +212,56 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
       setNewInvoice({ ...BLANK_INVOICE })
       await fetchInvoices(selectedSupplier.id)
       await fetchSuppliers()
+    } catch (e: any) {
+      showToast(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handlePrepayment() {
+    if (!selectedSupplier) return
+    const amt = Math.round(Number(newPayment.amount))
+    if (!amt || amt <= 0) { showToast('Amount must be > 0'); return }
+    if (String(newPayment.method).toLowerCase().includes('cheque') && !newPayment.reference.trim()) {
+      showToast('⚠️ Enter the cheque number — a cheque without one cannot be traced'); return
+    }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/vendor/supplier-invoices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'record_prepayment', vendor_id: vendor.id, supplier_id: selectedSupplier.id, ...newPayment, amount: amt }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? 'Failed to record prepayment')
+      if (d.confirm_no) {
+        setPaySlip({ no: d.confirm_no, kind: d.confirm_kind, supplier: selectedSupplier.name, amount: amt, reference: newPayment.reference, date: newPayment.payment_date })
+      } else {
+        showToast(d.applied > 0 ? `Recorded — Rs.${Number(d.applied).toLocaleString()} settled open invoices, Rs.${Number(d.advance_balance).toLocaleString()} left on account` : `Recorded — Rs.${Number(d.advance_balance).toLocaleString()} on account for the next invoice`)
+      }
+      setShowPrepay(false)
+      setNewPayment({ ...BLANK_PAYMENT })
+      await fetchSuppliers()
+      await fetchInvoices(selectedSupplier.id)
+    } catch (e: any) {
+      showToast(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleApplyAdvance(inv: any) {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/vendor/supplier-invoices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'apply_advance', vendor_id: vendor.id, invoice_id: inv.id }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? 'Could not apply')
+      showToast(`Rs.${Number(d.applied).toLocaleString()} applied from prepayment` + (d.remaining > 0 ? ` — Rs.${Number(d.remaining).toLocaleString()} still due` : ' — invoice settled'))
+      await fetchSuppliers()
+      await fetchInvoices(selectedSupplier.id)
     } catch (e: any) {
       showToast(e.message)
     } finally {
@@ -338,7 +390,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
         />
       ) : (
         <InvoiceListView
-          supplier={selectedSupplier}
+          supplier={suppliers.find((x: any) => x.id === selectedSupplier?.id) || selectedSupplier}
           invoices={invoices}
           loading={loading}
           showIncludePaid={showIncludePaid}
@@ -346,6 +398,8 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           onBack={() => { setView('list'); setSelectedSupplier(null); setInvoices([]) }}
           onAddInvoice={openAddInvoiceModal}
           onPay={(inv) => { setShowRecordPayment(inv); setNewPayment({ ...BLANK_PAYMENT }) }}
+          onPrepay={() => { setNewPayment({ ...BLANK_PAYMENT }); setShowPrepay(true) }}
+          onApplyAdvance={handleApplyAdvance}
           onCreditNote={(inv) => { setVatTouched(false); setCreditNoteFor(inv); setCreditForm({ ...BLANK_CREDIT_NOTE, invoiceNo: inv.invoice_no || '', invoiceDate: inv.invoice_date || '' }) }}
           supplierIsVat={!!selectedSupplier?.vat_registered}
           onDelete={handleDeleteInvoice}
@@ -637,6 +691,44 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
         </div>
       )}
 
+      {showPrepay && selectedSupplier && (
+        <Modal title={`Pay in advance — ${selectedSupplier.name}`} onClose={() => setShowPrepay(false)}>
+          <p className="text-xs text-slate-500 mb-4">No invoice yet. The money sits on the supplier's account and settles their next invoices automatically — or use <strong>Apply prepaid</strong> on an invoice.{(selectedSupplier.total_owed ?? 0) > 0 && <> This supplier is currently owed {formatRs(selectedSupplier.total_owed)}; that is settled first.</>}</p>
+          <div className="flex flex-col gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Amount (Rs.) <span className="text-red-500">*</span></label>
+              <input type="number" min={1} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={newPayment.amount} onChange={e => setNewPayment(p => ({ ...p, amount: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Payment Date</label>
+                <input type="date" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" value={newPayment.payment_date} onChange={e => setNewPayment(p => ({ ...p, payment_date: e.target.value }))} />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">Method</label>
+                <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white" value={newPayment.method} onChange={e => setNewPayment(p => ({ ...p, method: e.target.value }))}>
+                  <option>Cash</option>
+                  <option>Online</option>
+                  <option>Cheque</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">Reference</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder={String(newPayment.method).toLowerCase().includes('cheque') ? 'Cheque number *' : 'Transfer reference'} value={newPayment.reference} onChange={e => setNewPayment(p => ({ ...p, reference: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">What is it for?</label>
+              <input className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" placeholder="e.g. deposit on the October tyre order" value={newPayment.notes} onChange={e => setNewPayment(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-5 pt-4 border-t border-slate-100">
+            <button onClick={() => setShowPrepay(false)} className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-semibold text-slate-500 hover:bg-slate-50 transition-colors">Cancel</button>
+            <button onClick={handlePrepayment} disabled={saving} className="px-5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-bold transition-colors disabled:opacity-50">{saving ? 'Saving…' : 'Record prepayment'}</button>
+          </div>
+        </Modal>
+      )}
+
       {showRecordPayment && (
         <Modal title="Record Payment" onClose={() => setShowRecordPayment(null)}>
           {(() => {
@@ -907,6 +999,8 @@ function InvoiceListView({
   onBack,
   onAddInvoice,
   onPay,
+  onPrepay,
+  onApplyAdvance,
   onCreditNote,
   onDelete,
   supplierIsVat,
@@ -921,6 +1015,8 @@ function InvoiceListView({
   onBack: () => void
   onAddInvoice: () => void
   onPay: (inv: any) => void
+  onPrepay: () => void
+  onApplyAdvance: (inv: any) => void
   onCreditNote: (inv: any) => void
   onDelete: (inv: any) => void
   supplierIsVat: boolean
@@ -949,6 +1045,13 @@ function InvoiceListView({
           />
           Show paid
         </label>
+        <button
+          onClick={onPrepay}
+          title="Pay this supplier before any invoice — the money sits on their account and settles the next bills"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-emerald-400 text-emerald-700 hover:bg-emerald-50 text-sm font-bold transition-colors"
+        >
+          💵 Pay in advance
+        </button>
         <button
           onClick={onAddInvoice}
           className="flex items-center gap-2 px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-bold transition-colors shadow-sm"
@@ -980,6 +1083,13 @@ function InvoiceListView({
             <div className="mt-3">
               <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Total Outstanding</p>
               <p className="text-lg font-black text-orange-500">{formatRs(supplier.total_owed)}</p>
+            </div>
+          )}
+          {(supplier.advance_balance ?? 0) > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">Prepaid on account</p>
+              <p className="text-lg font-black text-emerald-600">{formatRs(supplier.advance_balance)}</p>
+              <p className="text-[11px] text-slate-400">Paid ahead — settles the next invoice automatically</p>
             </div>
           )}
         </div>
@@ -1045,6 +1155,15 @@ function InvoiceListView({
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {inv.status !== 'paid' && (supplier.advance_balance ?? 0) > 0 && (
+                            <button
+                              onClick={() => onApplyAdvance(inv)}
+                              title={`Settle from the ${formatRs(supplier.advance_balance)} paid ahead — no cash moves`}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 text-[11px] font-bold text-white hover:bg-emerald-700 transition-colors"
+                            >
+                              Apply prepaid
+                            </button>
+                          )}
                           {inv.status !== 'paid' && (
                             <button
                               onClick={() => onPay(inv)}
