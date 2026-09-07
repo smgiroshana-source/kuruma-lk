@@ -166,7 +166,7 @@ export default function TabSupplierReturns({ vendor, showToast }: Props) {
         fetch(`/api/vendor/suppliers?vendor_id=${vendor.id}`),
         // The products API is POST-only (actions); the catalogue comes from
         // the full data endpoint, same as every other tab
-        fetch('/api/vendor/data'),
+        fetch('/api/vendor/data?catalog=1'),
       ])
       if (!suppRes.ok) throw new Error('Failed to load suppliers')
       if (!prodRes.ok) throw new Error('Failed to load products')

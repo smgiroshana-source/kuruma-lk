@@ -960,7 +960,7 @@ export default function VendorDashboard() {
   }
   async function fetchAllDrafts() {
     try {
-      const r = await fetch('/api/vendor/sales?period=all')
+      const r = await fetch('/api/vendor/sales?period=all&status=draft')
       if (r.ok) {
         const j = await r.json()
         setAllDrafts(
@@ -2615,7 +2615,7 @@ ${customerRows.map(c => `<tr>
           <QuickItems vendor={vendor} showToast={showToast} onBack={() => setTab('products')} />
         )}
         {tab === 'cash' && isLkTax && (
-          <TabCash vendor={vendor} showToast={showToast} initialView={stockInitialView} onInitialViewConsumed={() => setStockInitialView(null)} onManageChips={() => setTab('quick-items')} />
+          <TabCash vendor={vendor} showToast={showToast} initialView={stockInitialView} onInitialViewConsumed={() => setStockInitialView(null)} onManageChips={() => setTab('quick-items')} products={data?.products || []} />
         )}
 
         {/* REPORTS — WHEEL MART only */}

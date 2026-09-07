@@ -145,8 +145,8 @@ export default function TabWriteoffs({ vendor, showToast }: Props) {
     setLoadingData(true)
     try {
       // The products API is POST-only (actions); the catalogue comes from the
-      // full data endpoint, same as every other tab.
-      const res = await fetch('/api/vendor/data')
+      // slim picker feed (no photos, no history flags).
+      const res = await fetch('/api/vendor/data?catalog=1')
       if (!res.ok) throw new Error('Failed to load products')
       const data = await res.json()
       setProducts(data.products ?? [])

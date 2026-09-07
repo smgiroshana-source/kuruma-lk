@@ -30,7 +30,7 @@ export default function QuickItems({ vendor, showToast, onBack }: Props) {
 
   async function load() {
     try {
-      const r = await fetch('/api/vendor/data')
+      const r = await fetch('/api/vendor/data?catalog=1')
       const j = await r.json()
       setProducts(j.products || [])
     } catch { setProducts([]); showToast('Could not load products') }

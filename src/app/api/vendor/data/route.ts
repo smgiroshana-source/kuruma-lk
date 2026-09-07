@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows } from '@/lib/fetchAll'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -18,36 +19,41 @@ export async function GET(req: NextRequest) {
   // Check if this is a "quick" load (just vendor + stats, no products)
   const quick = req.nextUrl.searchParams.get('quick')
 
+  // Picker catalogue: every product, but only the columns a picker needs and
+  // no photos or history flags. The Money-in dialog, quick items, write-offs
+  // and supplier returns used to pull the FULL load (863 KB, 2 s) to show a
+  // list of names — one query, ~60 KB, and it is cacheable.
+  if (req.nextUrl.searchParams.get('catalog') === '1') {
+    const products = await fetchAllRows((from, to) => admin
+      .from('products')
+      .select('id, sku, name, category, make, model, condition, price, cost, cost_vat_rate, cost_includes_vat, quantity, product_type, show_in_money_in, is_active, parent_product_id, loc_store, loc_floor')
+      .eq('vendor_id', vendor.id)
+      .order('name').order('id')
+      .range(from, to))
+    const response = NextResponse.json({ vendor: { id: vendor.id, name: vendor.name }, products })
+    response.headers.set('Cache-Control', 'private, max-age=20, stale-while-revalidate=60')
+    return response
+  }
+
   if (quick === '1') {
-    // Fast path: only vendor info + stats counts (no products loaded)
+    // Fast path: vendor info + stats counts (no products loaded). Five
+    // independent queries — one round trip, not five in a row.
     const [
       { count: totalProducts },
       { count: activeProducts },
-      { count: totalSalesCount }
+      { count: totalSalesCount },
+      { data: stockData },
+      { data: salesTotals },
     ] = await Promise.all([
       admin.from('products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id),
       admin.from('products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('is_active', true),
       admin.from('sales').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).neq('payment_status', 'draft'),
+      admin.from('products').select('quantity, price').eq('vendor_id', vendor.id).gt('quantity', 0),
+      admin.from('sales').select('total').eq('vendor_id', vendor.id).neq('payment_status', 'voided').neq('payment_status', 'draft'),
     ])
-
-    // Get stock count and stock value with a simple query
-    const { data: stockData } = await admin
-      .from('products')
-      .select('quantity, price')
-      .eq('vendor_id', vendor.id)
-      .gt('quantity', 0)
 
     const totalStock = (stockData || []).reduce((s: number, p: any) => s + (p.quantity || 0), 0)
     const stockValue = (stockData || []).reduce((s: number, p: any) => s + ((p.price || 0) * (p.quantity || 0)), 0)
-
-    // Get total sales amount
-    const { data: salesTotals } = await admin
-      .from('sales')
-      .select('total')
-      .eq('vendor_id', vendor.id)
-      .neq('payment_status', 'voided')
-      .neq('payment_status', 'draft')
-
     const totalSales = (salesTotals || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
 
     const response = NextResponse.json({
@@ -135,27 +141,41 @@ export async function GET(req: NextRequest) {
     const colToday = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
     const todayStart = new Date(colToday + 'T00:00:00+05:30').toISOString()
 
-    const { data: todaySalesRows } = await admin.from('sales')
-      .select('total, customer_name, payment_method, created_at')
-      .eq('vendor_id', vendor.id).neq('payment_status', 'voided').neq('payment_status', 'draft')
-      .gte('created_at', todayStart).order('created_at', { ascending: false })
+    // Every query here is independent of the others — fire them together.
+    // Sequential awaits made the dashboard wait on eight round trips.
+    const [
+      { data: todaySalesRows }, { data: cashSess }, { data: staleOpen }, { data: empRows },
+      { data: creditRowsAll }, { data: payRows }, { data: dueRaises }, { count: grnDrafts },
+    ] = await Promise.all([
+      admin.from('sales')
+        .select('total, customer_name, payment_method, created_at')
+        .eq('vendor_id', vendor.id).neq('payment_status', 'voided').neq('payment_status', 'draft')
+        .gte('created_at', todayStart).order('created_at', { ascending: false }),
+      admin.from('cash_sessions')
+        .select('status, expected_cash, opening_balance, opened_at').eq('vendor_id', vendor.id).eq('session_date', colToday).maybeSingle(),
+      admin.from('cash_sessions')
+        .select('session_date').eq('vendor_id', vendor.id).eq('status', 'open').lt('session_date', colToday)
+        .order('session_date', { ascending: false }).limit(1),
+      admin.from('employees').select('id').eq('vendor_id', vendor.id).eq('active', true),
+      admin.from('sales')
+        .select('balance_due, customer_id, created_at, customer_name').eq('vendor_id', vendor.id)
+        .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0),
+      admin.from('supplier_invoices')
+        .select('invoice_no, amount, amount_paid, credit_total, due_date').eq('vendor_id', vendor.id).neq('status', 'paid'),
+      admin.from('salary_increments')
+        .select('effective_from, new_amount, employee:employees(name)')
+        .eq('vendor_id', vendor.id).eq('status', 'scheduled').lte('effective_from', colToday)
+        .order('effective_from'),
+      admin.from('grns').select('id', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'draft'),
+    ])
     const todaySales = (todaySalesRows || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
     const recentActivity = (todaySalesRows || []).slice(0, 5).map((s: any) => ({
       time: s.created_at, customer: s.customer_name || 'Walk-in', amount: parseFloat(s.total || 0), method: s.payment_method || 'cash',
     }))
 
-    const { data: cashSess } = await admin.from('cash_sessions')
-      .select('status, expected_cash, opening_balance, opened_at').eq('vendor_id', vendor.id).eq('session_date', colToday).maybeSingle()
-
     // A drawer left open from a PREVIOUS day — reconciliation is unknown until
     // someone closes it, so the dashboard flags it loudly
-    const { data: staleOpen } = await admin.from('cash_sessions')
-      .select('session_date').eq('vendor_id', vendor.id).eq('status', 'open').lt('session_date', colToday)
-      .order('session_date', { ascending: false }).limit(1)
-
     // Staff attendance progress for today (drives the daily-flow strip)
-    const { data: empRows } = await admin.from('employees')
-      .select('id').eq('vendor_id', vendor.id).eq('active', true)
     const empIds = (empRows || []).map((e: any) => e.id)
     let attMarked = 0
     if (empIds.length > 0) {
@@ -164,9 +184,6 @@ export async function GET(req: NextRequest) {
       attMarked = count || 0
     }
 
-    const { data: creditRowsAll } = await admin.from('sales')
-      .select('balance_due, customer_id, created_at, customer_name').eq('vendor_id', vendor.id)
-      .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0)
     // TEMPORARY (owner, 2026-09-04): parts sold on credit to the shop's own
     // workshop are not a debt to chase — the two entities will settle through
     // the workshop billing system once it exists. Until then the workshop's
@@ -188,8 +205,6 @@ export async function GET(req: NextRequest) {
     }
 
     let payablesDue = 0, payOverdueCount = 0, payOldestDays = 0
-    const { data: payRows } = await admin.from('supplier_invoices')
-      .select('invoice_no, amount, amount_paid, credit_total, due_date').eq('vendor_id', vendor.id).neq('status', 'paid')
     for (const inv of (payRows || [])) {
       payablesDue += (parseInt(inv.amount || 0) - parseInt(inv.amount_paid || 0) - parseInt(inv.credit_total || 0))
       // Opening balances carry no real due date — they are what was owed when
@@ -207,15 +222,8 @@ export async function GET(req: NextRequest) {
 
     // Salary rises whose month has arrived. The whole point of scheduling one
     // is that nobody remembers it a year later.
-    const { data: dueRaises } = await admin.from('salary_increments')
-      .select('effective_from, new_amount, employee:employees(name)')
-      .eq('vendor_id', vendor.id).eq('status', 'scheduled').lte('effective_from', colToday)
-      .order('effective_from')
     const salaryRaisesDue = (dueRaises || []).length
     const salaryRaiseName = ((dueRaises || [])[0] as any)?.employee?.name || ''
-
-    const { count: grnDrafts } = await admin.from('grns')
-      .select('id', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'draft')
 
     dashboard = {
       todaySales, todayCount: (todaySalesRows || []).length,

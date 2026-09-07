@@ -337,7 +337,7 @@ export function MovementModal({
 export const LABOUR_JOBS: string[] = ['Air / nitrogen fill', 'Tyre Change', 'Wheel Change', 'Tube fitting']
 
 export function QuickIncomeModal({
-  onClose, onSaved, showToast, initialAmount, onManageChips,
+  onClose, onSaved, showToast, initialAmount, onManageChips, initialCatalog,
 }: {
   onClose: () => void
   onSaved: () => void
@@ -345,6 +345,8 @@ export function QuickIncomeModal({
   initialAmount?: number
   /** Opens the Money-in quick items page (owner/manager) */
   onManageChips?: () => void
+  /** The page's already-loaded products — chips appear at once, no fetch */
+  initialCatalog?: any[]
 }) {
   // Sales payments keep the POS vocabulary — 'bank' is what a transfer is
   // stored as across every sale, and the daily report's Payment Methods
@@ -360,7 +362,7 @@ export function QuickIncomeModal({
   // the catalog arrived can still be attached to its product afterwards.
   type Line = { key: string; name: string; qty: number; price: number | ''; productId: string | null; sku: string; stock?: number; loose?: boolean; wantProduct?: string }
   const [lines, setLines] = useState<Line[]>([])
-  const [catalog, setCatalog] = useState<any[] | null>(null)
+  const [catalog, setCatalog] = useState<any[] | null>(initialCatalog && initialCatalog.length > 0 ? initialCatalog : null)
   const [search, setSearch] = useState('')
   const [method, setMethod] = useState<string>('cash')
   const [payRef, setPayRef] = useState('')
@@ -371,7 +373,8 @@ export function QuickIncomeModal({
 
   // The catalog backs both the presets (name → product) and free search.
   useEffect(() => {
-    fetch('/api/vendor/data').then(r => r.json()).then(j => setCatalog(j.products || [])).catch(() => setCatalog([]))
+    if (catalog !== null) return // the page handed us its products
+    fetch('/api/vendor/data?catalog=1').then(r => r.json()).then(j => setCatalog(j.products || [])).catch(() => setCatalog([]))
   }, [])
 
   // "No Proprietorship entity configured" was reported for EVERY failure —

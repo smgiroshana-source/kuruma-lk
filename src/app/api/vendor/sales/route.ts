@@ -323,8 +323,17 @@ export async function GET(req: NextRequest) {
     if (fromDate) query = query.gte('created_at', new Date(fromDate).toISOString())
     if (toDate) { const end = new Date(toDate); end.setDate(end.getDate() + 1); query = query.lt('created_at', end.toISOString()) }
     if (!fromDate && dateFilter) query = query.gte('created_at', dateFilter)
+    if (url.searchParams.get('status') === 'draft') query = query.eq('payment_status', 'draft')
     return query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to)
   })
+  // ?status=draft: the caller wants the On Approval drafts and nothing else.
+  // It used to ask for period=all and filter client-side — every sale ever
+  // made, with items and payments, downloaded to find a handful of drafts,
+  // and then the collections and returns blocks below ran over all of it too.
+  if (url.searchParams.get('status') === 'draft') {
+    return NextResponse.json({ sales: allSales.filter((s: any) => s.payment_status === 'draft') })
+  }
+
   const activeSales = allSales.filter((s: any) => s.payment_status !== 'voided' && s.payment_status !== 'draft')
   // Exclude opening balance entries from sales stats (they're past transaction records, not actual sales)
   const isOpeningBalance = (s: any) => (s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
