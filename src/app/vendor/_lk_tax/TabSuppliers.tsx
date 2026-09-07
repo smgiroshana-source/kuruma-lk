@@ -946,8 +946,13 @@ function SupplierListView({
                     <td className="px-4 py-3 text-right">
                       {(s.total_owed ?? 0) > 0 ? (
                         <span className="font-bold text-orange-500 text-sm">{formatRs(s.total_owed)}</span>
-                      ) : (
+                      ) : (s.advance_balance ?? 0) > 0 ? null : (
                         <span className="text-slate-300 text-sm">—</span>
+                      )}
+                      {(s.advance_balance ?? 0) > 0 && (
+                        <span className="block text-[11px] font-bold text-emerald-600" title="Paid ahead of any invoice — settles the next bill automatically">
+                          {formatRs(s.advance_balance)} prepaid
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-right">
