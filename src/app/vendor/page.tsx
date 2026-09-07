@@ -576,6 +576,13 @@ export default function VendorDashboard() {
   const [sheetProduct, setSheetProduct] = useState<any>(null)
   const [productSearch, setProductSearch] = useState('')
   const [showSoldOut, setShowSoldOut] = useState(false)
+  // Render paging for the product list. Sakura carries 7,376 products with
+  // 21,000 photo thumbnails; drawing every row at once froze the tab for
+  // seconds and the browser fetched thumbnails for rows nobody scrolled to.
+  // Fifty at a time keeps the DOM small; search and filters still run over
+  // the whole catalogue, then the page is cut from the result.
+  const PRODUCT_PAGE_SIZE = 50
+  const [productPage, setProductPage] = useState(1)
   // WHEEL MART only: filter to in-stock products with no cost (cost-entry worklist)
   const [showMissingCost, setShowMissingCost] = useState(false)
   // Spreadsheet view
@@ -1031,9 +1038,13 @@ export default function VendorDashboard() {
     })
   }
   function toggleSelectAll(productList: any[]) {
+    // The list is the visible page: tick selects these rows, tick again
+    // clears them. Rows selected on other pages are left as they are.
     setSelectedProducts(prev => {
-      if (prev.size === productList.length) return new Set()
-      return new Set(productList.map((p: any) => p.id))
+      const next = new Set(prev)
+      const allOn = productList.length > 0 && productList.every((p: any) => next.has(p.id))
+      for (const p of productList) { if (allOn) next.delete(p.id); else next.add(p.id) }
+      return next
     })
   }
   async function deleteSelectedProducts() {
@@ -2479,6 +2490,25 @@ ${customerRows.map(c => `<tr>
       return true
     })
   }, [data, productSearch, showSoldOut, showMissingCost])
+  const productPageCount = Math.max(1, Math.ceil(filteredProducts.length / PRODUCT_PAGE_SIZE))
+  const productPageSafe = Math.min(productPage, productPageCount)
+  const pagedProducts = useMemo(
+    () => filteredProducts.slice((productPageSafe - 1) * PRODUCT_PAGE_SIZE, productPageSafe * PRODUCT_PAGE_SIZE),
+    [filteredProducts, productPageSafe])
+  // A new search or filter starts from page 1
+  useEffect(() => { setProductPage(1) }, [productSearch, showSoldOut, showMissingCost, productsViewMode])
+  const productPager = filteredProducts.length > PRODUCT_PAGE_SIZE ? (
+    <div className="flex items-center justify-between gap-3 flex-wrap text-xs text-slate-500 py-2">
+      <span>Showing <strong className="text-slate-700">{(productPageSafe - 1) * PRODUCT_PAGE_SIZE + 1}–{Math.min(productPageSafe * PRODUCT_PAGE_SIZE, filteredProducts.length)}</strong> of {filteredProducts.length.toLocaleString()}</span>
+      <div className="flex items-center gap-1.5">
+        <button onClick={() => setProductPage(1)} disabled={productPageSafe <= 1} className="px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold disabled:opacity-30">«</button>
+        <button onClick={() => setProductPage(p => Math.max(1, p - 1))} disabled={productPageSafe <= 1} className="px-3 py-1.5 rounded-lg border border-slate-200 font-bold disabled:opacity-30">‹ Prev</button>
+        <span className="px-2 font-bold text-slate-700">Page {productPageSafe} of {productPageCount}</span>
+        <button onClick={() => setProductPage(p => Math.min(productPageCount, p + 1))} disabled={productPageSafe >= productPageCount} className="px-3 py-1.5 rounded-lg border border-slate-200 font-bold disabled:opacity-30">Next ›</button>
+        <button onClick={() => setProductPage(productPageCount)} disabled={productPageSafe >= productPageCount} className="px-2.5 py-1.5 rounded-lg border border-slate-200 font-bold disabled:opacity-30">»</button>
+      </div>
+    </div>
+  ) : null
 
 
 
@@ -2738,9 +2768,10 @@ ${customerRows.map(c => `<tr>
 
             {/* ─── GRID VIEW ─── */}
             {productsViewMode === 'grid' && (<>
+              {productPager}
               {/* Mobile: Grid of image cards with tap-to-reveal actions */}
               <div className="sm:hidden grid grid-cols-2 gap-2.5">
-                {filteredProducts.map((p: any) => { const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]; return (
+                {pagedProducts.map((p: any) => { const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]; return (
                   <div key={p.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
                     <div className="aspect-square bg-slate-100 relative" onClick={() => setSheetProduct(p)}>
                       {img ? <img src={img.url} alt={p.name} loading="lazy" className="w-full h-full object-cover" /> : <ProductThumb product={p} variant="card" className="w-full h-full" />}
@@ -2760,8 +2791,8 @@ ${customerRows.map(c => `<tr>
                 ) })}
               </div>
               {/* Desktop: Full table */}
-              <div className="hidden sm:block bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={selectedProducts.size > 0 && selectedProducts.size === filteredProducts.length} onChange={() => toggleSelectAll(filteredProducts)} className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500 hidden lg:table-cell">Location</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
-                {filteredProducts.map((p: any, i: number) => { const sortedImages = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)); const pendingChange = primaryChanges.get(p.id); const effectivePrimaryId = pendingChange ? pendingChange.imageId : sortedImages[0]?.id; return (<tr key={p.id} className={'border-t border-slate-100 ' + (pendingChange ? 'bg-blue-50/50' : selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5"><div className={'flex gap-1.5 overflow-x-auto ' + (primaryMode ? 'max-w-[420px]' : 'max-w-[300px]')}>{sortedImages.length > 0 ? sortedImages.slice(0, 6).map((img: any) => { const isPrimary = img.id === effectivePrimaryId; const size = primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14'; return (<img key={img.id} src={img.url} alt="" loading="lazy" title={isPrimary ? 'Primary image' : primaryMode ? 'Click to set as primary' : ''} onClick={() => { if (primaryMode && !isPrimary) markAsPrimary(p.id, img.id, p.images) }} className={size + ' rounded-lg object-cover shrink-0 transition-all ' + (isPrimary ? 'ring-2 ring-orange-500' : 'border border-slate-200') + (primaryMode && !isPrimary ? ' cursor-pointer hover:ring-2 hover:ring-blue-400 active:scale-95 active:ring-2 active:ring-blue-400' : '')} />) }) : <ProductThumb product={p} variant="thumb" className={(primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14') + ' rounded-lg shrink-0'} />}{sortedImages.length > 6 && <span className="text-[10px] text-slate-400 self-center shrink-0">+{sortedImages.length - 6}</span>}</div></td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{[p.make && p.make + ' ' + (p.model || ''), p.origin_country && '🌐 ' + p.origin_country].filter(Boolean).join(' · ')}</div></td><td className="px-4 py-2.5 hidden lg:table-cell">{locLabel(p) ? <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">📍 {locLabel(p)}</span> : <span className="text-xs text-slate-300">—</span>}</td><td className="px-4 py-2.5"><div className="font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</div>{p.cost != null && Number(p.cost) > 0 && (<div className={'text-[10px] mt-0.5 ' + (isBelowCost(marginBase(p.price), p.cost) ? 'text-red-600 font-bold' : 'text-slate-400')}>cost Rs.{(isLkTax ? costFloor(p) : Number(p.cost)).toLocaleString()}{isLkTax ? costVatLabel(p) : ''}{gpPercent(marginBase(p.price), p.cost) != null ? ' · GP ' + gpPercent(marginBase(p.price), p.cost) + '%' : ''}{isBelowCost(marginBase(p.price), p.cost) ? ' ⚠' : ''}</div>)}</td><td className={'px-4 py-2.5 font-semibold ' + (p.quantity <= 0 ? 'text-red-500' : '')}>{p.quantity <= 0 ? <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">0 - Sold</span> : p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button>{p.in_history ? (
+              <div className="hidden sm:block bg-white rounded-xl border border-slate-200 overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left"><th className="px-3 py-3 w-10"><input type="checkbox" checked={pagedProducts.length > 0 && pagedProducts.every((p: any) => selectedProducts.has(p.id))} onChange={() => toggleSelectAll(pagedProducts)} title="Select the rows on this page" className="w-4 h-4 accent-orange-500" /></th><th className="px-4 py-3 text-xs font-bold text-slate-500">Image</th><th className="px-4 py-3 text-xs font-bold text-slate-500">ID</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Product</th><th className="px-4 py-3 text-xs font-bold text-slate-500 hidden lg:table-cell">Location</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Price</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Stock</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Status</th><th className="px-4 py-3 text-xs font-bold text-slate-500">Actions</th></tr></thead><tbody>
+                {pagedProducts.map((p: any, i: number) => { const sortedImages = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0)); const pendingChange = primaryChanges.get(p.id); const effectivePrimaryId = pendingChange ? pendingChange.imageId : sortedImages[0]?.id; return (<tr key={p.id} className={'border-t border-slate-100 ' + (pendingChange ? 'bg-blue-50/50' : selectedProducts.has(p.id) ? 'bg-orange-50' : i % 2 ? 'bg-slate-50/50' : '')}><td className="px-3 py-2.5"><input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => toggleProductSelect(p.id)} className="w-4 h-4 accent-orange-500" /></td><td className="px-4 py-2.5"><div className={'flex gap-1.5 overflow-x-auto ' + (primaryMode ? 'max-w-[420px]' : 'max-w-[300px]')}>{sortedImages.length > 0 ? sortedImages.slice(0, 6).map((img: any) => { const isPrimary = img.id === effectivePrimaryId; const size = primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14'; return (<img key={img.id} src={img.url} alt="" loading="lazy" title={isPrimary ? 'Primary image' : primaryMode ? 'Click to set as primary' : ''} onClick={() => { if (primaryMode && !isPrimary) markAsPrimary(p.id, img.id, p.images) }} className={size + ' rounded-lg object-cover shrink-0 transition-all ' + (isPrimary ? 'ring-2 ring-orange-500' : 'border border-slate-200') + (primaryMode && !isPrimary ? ' cursor-pointer hover:ring-2 hover:ring-blue-400 active:scale-95 active:ring-2 active:ring-blue-400' : '')} />) }) : <ProductThumb product={p} variant="thumb" className={(primaryMode ? 'w-16 h-16 sm:w-20 sm:h-20' : 'w-10 h-10 sm:w-14 sm:h-14') + ' rounded-lg shrink-0'} />}{sortedImages.length > 6 && <span className="text-[10px] text-slate-400 self-center shrink-0">+{sortedImages.length - 6}</span>}</div></td><td className="px-4 py-2.5"><span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded font-semibold">{p.sku}</span></td><td className="px-4 py-2.5"><div className="font-semibold text-slate-900">{p.name}</div><div className="text-xs text-slate-400">{[p.make && p.make + ' ' + (p.model || ''), p.origin_country && '🌐 ' + p.origin_country].filter(Boolean).join(' · ')}</div></td><td className="px-4 py-2.5 hidden lg:table-cell">{locLabel(p) ? <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">📍 {locLabel(p)}</span> : <span className="text-xs text-slate-300">—</span>}</td><td className="px-4 py-2.5"><div className="font-bold text-orange-600">{p.price ? 'Rs.' + p.price.toLocaleString() : 'Ask'}</div>{p.cost != null && Number(p.cost) > 0 && (<div className={'text-[10px] mt-0.5 ' + (isBelowCost(marginBase(p.price), p.cost) ? 'text-red-600 font-bold' : 'text-slate-400')}>cost Rs.{(isLkTax ? costFloor(p) : Number(p.cost)).toLocaleString()}{isLkTax ? costVatLabel(p) : ''}{gpPercent(marginBase(p.price), p.cost) != null ? ' · GP ' + gpPercent(marginBase(p.price), p.cost) + '%' : ''}{isBelowCost(marginBase(p.price), p.cost) ? ' ⚠' : ''}</div>)}</td><td className={'px-4 py-2.5 font-semibold ' + (p.quantity <= 0 ? 'text-red-500' : '')}>{p.quantity <= 0 ? <span className="bg-red-50 text-red-600 text-xs font-bold px-2 py-0.5 rounded-full">0 - Sold</span> : p.quantity}</td><td className="px-4 py-2.5"><span className={'text-[10px] font-bold px-2 py-0.5 rounded-full ' + (p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700')}>{p.is_active ? 'ACTIVE' : 'HIDDEN'}</span></td><td className="px-4 py-2.5"><div className="flex gap-1"><button onClick={() => { setEditingProduct({...p}); setEditProductImages(p.images || []) }} className="text-[11px] font-semibold text-blue-600 px-2 py-1 rounded border border-blue-200">Edit</button><button onClick={() => productAction('toggle', p.id)} disabled={actionLoading === p.id} className={'text-[11px] font-semibold px-2 py-1 rounded border disabled:opacity-50 ' + (p.is_active ? 'text-amber-600 border-amber-200' : 'text-emerald-600 border-emerald-200')}>{p.is_active ? 'Hide' : 'Show'}</button>{p.in_history ? (
   /* Named on a sale, GRN or transfer — Postgres will refuse, so don't offer
      the button. Hide is the real answer and is already next to it. */
   <span title="This product appears on a sale, goods-received note or transfer, so it can't be deleted without breaking that record. Use Hide — or, if it was only ever transferred, reverse that transfer from Stock → Transfer Stock → Transfer History and it becomes deletable."
@@ -2770,6 +2801,7 @@ ${customerRows.map(c => `<tr>
   <button onClick={() => { if (confirm(`Delete "${p.name}"? It has never been sold, received or transferred, so nothing else refers to it.`)) productAction('delete', p.id) }} className="text-[11px] font-semibold text-red-500 px-2 py-1 rounded border border-red-200">Del</button>
 )}</div></td></tr>) })}
               </tbody></table></div></div>
+            {productPager}
             </>)}
 
             {/* ─── SPREADSHEET VIEW ─── */}
