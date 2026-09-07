@@ -337,12 +337,14 @@ export function MovementModal({
 export const LABOUR_JOBS: string[] = ['Air / nitrogen fill', 'Tyre Change', 'Wheel Change', 'Tube fitting']
 
 export function QuickIncomeModal({
-  onClose, onSaved, showToast, initialAmount,
+  onClose, onSaved, showToast, initialAmount, onManageChips,
 }: {
   onClose: () => void
   onSaved: () => void
   showToast: (m: string) => void
   initialAmount?: number
+  /** Opens the Money-in quick items page (owner/manager) */
+  onManageChips?: () => void
 }) {
   // Sales payments keep the POS vocabulary — 'bank' is what a transfer is
   // stored as across every sale, and the daily report's Payment Methods
@@ -524,7 +526,8 @@ export function QuickIncomeModal({
       {/* Parts — every chip is a product switched on in Products; its piece comes off stock */}
       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
         Parts — come off stock
-        {catalog !== null && partChips.length === 0 && <span className="normal-case font-semibold text-slate-400"> · none yet — press “Money-in” on a product in Products</span>}
+        {catalog !== null && partChips.length === 0 && <span className="normal-case font-semibold text-slate-400"> · none yet</span>}
+        {onManageChips && <button onClick={onManageChips} className="normal-case font-bold text-emerald-700 ml-2 underline decoration-dotted">manage chips &amp; prices</button>}
       </p>
       <div className="flex flex-wrap gap-1.5 mb-3">
         {catalog === null && <span className="text-[11px] text-slate-400 py-1.5">loading stock…</span>}

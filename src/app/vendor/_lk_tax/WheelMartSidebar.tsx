@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 
 // 'customers' is a navigation alias: page.tsx maps it to the Sales tab's
 // Customers sub-view (there is no standalone customers tab).
-type LkTaxTab = 'claims' | 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings' | 'customers' | 'imports' | 'tax'
+type LkTaxTab = 'claims' | 'overview' | 'products' | 'add' | 'bulk' | 'pos' | 'sales' | 'credit' | 'receivables' | 'stocktake' | 'suppliers' | 'supplier-returns' | 'writeoffs' | 'fleet' | 'cash' | 'reports' | 'staff' | 'settings' | 'customers' | 'imports' | 'tax' | 'quick-items'
 
 type NavItem = {
   id: LkTaxTab | '_signout' | '_coming'

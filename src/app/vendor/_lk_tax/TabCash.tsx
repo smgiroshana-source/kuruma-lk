@@ -129,7 +129,7 @@ const METHOD_LABEL: Record<string, string> = {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TabCash({ vendor, showToast, initialView, onInitialViewConsumed }: Props & { initialView?: string | null; onInitialViewConsumed?: () => void }) {
+export default function TabCash({ vendor, showToast, initialView, onInitialViewConsumed, onManageChips }: Props & { initialView?: string | null; onInitialViewConsumed?: () => void; onManageChips?: () => void }) {
   // Dashboard deep-links: 'expenses' opens the expenses view; 'add-expense'
   // additionally opens the Add Expense modal ready to type.
   const [activeTab, setActiveTab] = useState<'reconciliation' | 'expenses'>(
@@ -1508,6 +1508,7 @@ export default function TabCash({ vendor, showToast, initialView, onInitialViewC
             await Promise.all([fetchTodaySession(), fetchRecentSessions()])
           }}
           showToast={showToast}
+          onManageChips={onManageChips ? () => { setShowQuickIncome(false); onManageChips() } : undefined}
         />
       )}
 
