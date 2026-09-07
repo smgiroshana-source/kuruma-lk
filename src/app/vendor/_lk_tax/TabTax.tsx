@@ -251,6 +251,35 @@ export default function TabTax({ showToast, vendorSettings }: {
         </div>
       )}
 
+      {/* ── Tax invoices to chase ──
+          V-series purchases with no valid tax invoice on record. The claim is
+          only as good as the paper: we must ask within 14 days of supply, and
+          the supplier must issue within 28 days of being asked. */}
+      {(data?.chase || []).length > 0 && (
+        <div className="bg-white rounded-xl border border-red-200 mb-4">
+          <div className="px-4 py-3 border-b border-red-100">
+            <h3 className="font-bold text-sm text-red-800">📞 Tax invoices to chase · {data.chase.length}</h3>
+            <p className="text-[11px] text-slate-500">
+              VAT-registered suppliers whose tax invoice is not on record here, or not confirmed to name us. Until fixed, the input VAT stays out of the return.
+              Ask within <strong>14 days</strong> of the goods arriving; the supplier must issue within <strong>28 days</strong> of being asked.
+            </p>
+          </div>
+          {data.chase.map((c: any) => (
+            <div key={c.id} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-xs flex-wrap">
+              <span className="font-mono font-bold shrink-0">{c.ref}</span>
+              <span className="flex-1 min-w-[160px] truncate text-slate-600">{c.supplier}{c.supplierTin ? ` · TIN ${c.supplierTin}` : ''}</span>
+              <span className="text-slate-400 shrink-0">received {c.receivedAt}</span>
+              <span className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded ${c.pastIssueDeadline ? 'bg-red-100 text-red-700' : c.pastRequestWindow ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                {c.daysOld}d old · {c.pastIssueDeadline ? `past 28-day deadline (${c.issueBy})` : c.pastRequestWindow ? `request window closed ${c.requestBy}` : `request by ${c.requestBy}`}
+              </span>
+              <span className="text-[10px] text-red-600 font-bold basis-full sm:basis-auto">missing: {c.missing.join(', ')}</span>
+              {c.vat > 0 && <span className="font-mono font-black w-24 text-right shrink-0">{rs(c.vat)}</span>}
+            </div>
+          ))}
+          <p className="px-4 py-2 text-[11px] text-slate-400">Fix from Stock → GRN History → &ldquo;Add details&rdquo; on the GRN.</p>
+        </div>
+      )}
+
       {/* ── Input credits claimed this period (the workbench) ── */}
       <div className="bg-white rounded-xl border border-slate-200 mb-4">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
@@ -283,6 +312,19 @@ export default function TabTax({ showToast, vendorSettings }: {
         {claimedNow.length === 0
           ? <div className="p-6 text-center text-sm text-slate-400">No input credits in this period</div>
           : claimedNow.map(i => row(i, true))}
+        {(data?.input?.notClaimable || []).length > 0 && (
+          <div className="border-t border-slate-200 bg-red-50/40">
+            <p className="px-4 pt-2.5 pb-1 text-[11px] font-bold text-red-700">Not claimable yet — {data.input.notClaimable.length} purchase(s) without a valid tax invoice on record. Left out of the figures above.</p>
+            {data.input.notClaimable.map((i: any) => (
+              <div key={key(i)} className="flex items-center gap-2 px-3 py-2 border-t border-red-100 text-xs opacity-80">
+                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-100 text-red-700 shrink-0">NOT YET</span>
+                <span className="font-mono font-bold shrink-0">{i.ref}</span>
+                <span className="flex-1 truncate text-slate-500">{i.partyName} · missing {i.missingFields.join(', ')}</span>
+                <span className="font-mono font-black w-24 text-right shrink-0 line-through text-slate-400">{rs(i.vat)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Parked for later ── */}

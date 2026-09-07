@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   // ── CREATE (or update draft) ──────────────────────────────────────────────
   if (action === 'create_grn') {
-    const { supplierId, supplierName, supplierInvoiceNo, supplierInvoiceDate, receivedAt, notes, items } = body
+    const { supplierId, supplierName, supplierInvoiceNo, supplierInvoiceDate, receivedAt, notes, items, taxInvoiceConfirmed } = body
 
     // A GRN records who the goods came from — supplierless receipts made the
     // payables ledger and the VAT trail silently incomplete (owner-reported).
@@ -72,11 +72,17 @@ export async function POST(req: NextRequest) {
     // null = unknown (manual supplier with no record) — don't assert "not VAT-registered"
     let supplierTin: string | null = null
     let supplierVatRegistered: boolean | null = null
+    let supplierCountry = 'LK'
     if (supplierId) {
       const { data: sup } = await admin.from('suppliers')
-        .select('tin, vat_registered').eq('id', supplierId).eq('vendor_id', vendor.id).single()
-      if (sup) { supplierTin = sup.tin || null; supplierVatRegistered = !!sup.vat_registered }
+        .select('tin, vat_registered, country').eq('id', supplierId).eq('vendor_id', vendor.id).single()
+      if (sup) { supplierTin = sup.tin || null; supplierVatRegistered = !!sup.vat_registered; supplierCountry = sup.country || 'LK' }
     }
+    // Which series this receipt belongs to — decided here, from the supplier
+    // record, so the VAT register (the V series) is gapless on its own.
+    //   V  VAT-registered supplier        N  not registered / one-off name
+    //   I  foreign supplier (import; VAT claimed through the CUSDEC)
+    const grnSeries: 'V' | 'N' | 'I' = supplierCountry !== 'LK' ? 'I' : supplierVatRegistered ? 'V' : 'N'
 
     if (!items || items.length === 0)
       return NextResponse.json({ error: 'At least one item required' }, { status: 400 })
@@ -116,12 +122,13 @@ export async function POST(req: NextRequest) {
     }
     const totalCost = netCost + inputVat
 
-    // Reserve GRN number
-    const { data: seqNum, error: seqErr } = await admin.rpc('next_grn_serial', { p_vendor_id: vendor.id })
+    // Reserve the next number in THIS series (atomic; supabase-grn-series.sql)
+    const { data: seqNum, error: seqErr } = await admin.rpc('next_grn_series_serial', { p_vendor_id: vendor.id, p_series: grnSeries })
     if (seqErr || seqNum == null)
       return NextResponse.json({ error: 'Failed to reserve GRN number: ' + seqErr?.message }, { status: 500 })
 
-    const grnNumber = `GRN-${String(seqNum).padStart(5, '0')}`
+    const grnNumber = `GRN-${grnSeries}-${String(seqNum).padStart(5, '0')}`
+    const confirmed = taxInvoiceConfirmed === true
 
     // Insert GRN header
     const { data: grn, error: grnErr } = await admin.from('grns').insert({
@@ -131,6 +138,10 @@ export async function POST(req: NextRequest) {
       supplier_tin:          supplierTin,
       supplier_vat_registered: supplierVatRegistered,
       grn_number:            grnNumber,
+      grn_series:            grnSeries,
+      tax_invoice_confirmed:    confirmed,
+      tax_invoice_confirmed_at: confirmed ? new Date().toISOString() : null,
+      tax_invoice_confirmed_by: confirmed ? ((vendor as any).callerUserId || null) : null,
       supplier_invoice_no:   supplierInvoiceNo || null,
       // VAT Schedule 02 lists the SUPPLIER's invoice date, not our receipt date
       supplier_invoice_date: supplierInvoiceDate || null,
@@ -192,16 +203,13 @@ export async function POST(req: NextRequest) {
     // record BEFORE the purchase enters the VAT ledger. Chasing them at filing
     // time, weeks later, is how a credit gets lost. Nothing is blocked when
     // there's no VAT to claim — that purchase never reaches Schedule 02.
-    if (parseInt(grn.input_vat || 0) > 0) {
-      const gaps = missingVatPaperwork(grn)
-      if (gaps.length > 0) {
-        return NextResponse.json({
-          error: `${grn.grn_number} can't be posted. ${vatPaperworkMessage(gaps)}`,
-          missingVatPaperwork: gaps,
-          hint: 'Add the details to the draft, or set the VAT rate to 0% if you are not claiming input VAT on this purchase.',
-        }, { status: 400 })
-      }
-    }
+    // Owner, 2026-09-07: goods often arrive on a delivery note with the tax
+    // invoice to follow. Blocking the post here pushed operators to set VAT
+    // to 0% just to get the stock in — and the VAT trail was lost for good.
+    // The post now goes through; the credit simply is not claimable until
+    // the paperwork is on record (the VAT Filing Centre keeps it out of the
+    // return and lists it to chase, with the 14/28-day clocks).
+    const paperworkGaps = parseInt(grn.input_vat || 0) > 0 ? missingVatPaperwork(grn) : []
 
     // 0. Atomically claim the GRN (guards against double-posting from two tabs/clicks)
     const { data: claimed } = await admin.from('grns')
@@ -283,7 +291,9 @@ export async function POST(req: NextRequest) {
     const totalQty = items.reduce((s: number, i: any) => s + i.quantity, 0)
     return NextResponse.json({
       success: true,
-      message: `GRN ${grn.grn_number} posted — ${totalQty} units received, stock updated`,
+      message: `GRN ${grn.grn_number} posted — ${totalQty} units received, stock updated`
+        + (paperworkGaps.length > 0 ? `. ⚠️ Input VAT Rs.${parseInt(grn.input_vat || 0).toLocaleString()} is NOT claimable yet — ${vatPaperworkMessage(paperworkGaps)} Add them from GRN History.` : ''),
+      missingVatPaperwork: paperworkGaps,
       payable,
       payableSkipped: !grn.supplier_id ? 'no_supplier' : (parseInt(grn.total_cost || 0) <= 0 ? 'zero_total' : null),
     })
@@ -390,25 +400,26 @@ export async function POST(req: NextRequest) {
   // layer, so unlike a normal edit this is allowed after posting. Without it
   // the older GRNs that predate the posting gate could never be made filable.
   if (action === 'update_grn_invoice_info') {
-    const { grnId, supplierInvoiceNo, supplierInvoiceDate, supplierTin } = body
+    const { grnId, supplierInvoiceNo, supplierInvoiceDate, supplierTin, taxInvoiceConfirmed } = body
     if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
 
     const { data: grn } = await admin.from('grns')
-      .select('id, grn_number, supplier_id, input_vat').eq('id', grnId).eq('vendor_id', vendor.id).single()
+      .select('id, grn_number, supplier_id, input_vat, tax_invoice_confirmed').eq('id', grnId).eq('vendor_id', vendor.id).single()
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
 
-    const patch = {
+    const confirmed = taxInvoiceConfirmed === true
+    const patch: any = {
       supplier_invoice_no:   (supplierInvoiceNo   || '').trim() || null,
       supplier_invoice_date: (supplierInvoiceDate || '').trim() || null,
       supplier_tin:          (supplierTin         || '').trim() || null,
+      tax_invoice_confirmed: confirmed,
       updated_at:            new Date().toISOString(),
     }
-    if (parseInt(grn.input_vat || 0) > 0) {
-      const gaps = missingVatPaperwork(patch)
-      if (gaps.length > 0) {
-        return NextResponse.json({ error: vatPaperworkMessage(gaps), missingVatPaperwork: gaps }, { status: 400 })
-      }
+    if (confirmed && !grn.tax_invoice_confirmed) {
+      patch.tax_invoice_confirmed_at = new Date().toISOString()
+      patch.tax_invoice_confirmed_by = (vendor as any).callerUserId || null
     }
+    const gapsLeft = parseInt(grn.input_vat || 0) > 0 ? missingVatPaperwork(patch) : []
 
     const { error: upErr } = await admin.from('grns').update(patch).eq('id', grnId).eq('vendor_id', vendor.id)
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 })
@@ -424,7 +435,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, message: `${grn.grn_number} invoice details saved` })
+    return NextResponse.json({
+      success: true,
+      message: `${grn.grn_number} invoice details saved` + (gapsLeft.length > 0 ? ` — still not claimable: ${vatPaperworkMessage(gapsLeft)}` : ' — input VAT is now claimable'),
+      missingVatPaperwork: gapsLeft,
+    })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

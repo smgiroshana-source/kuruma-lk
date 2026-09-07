@@ -22,7 +22,13 @@ export type VatPaperwork = {
   supplier_invoice_no?: string | null
   supplier_invoice_date?: string | null
   supplier_tin?: string | null
+  // GRNs only: the operator has looked at the physical tax invoice and seen
+  // OUR TIN, name and address on it — the legal condition for the claim.
+  // Undefined (an expense row) means the field does not apply.
+  tax_invoice_confirmed?: boolean | null
 }
+
+export const TAX_INVOICE_CONFIRMATION = 'confirmation that our TIN, name and address appear on the tax invoice'
 
 /** Human-readable list of what Schedule 02 is still missing. Empty = filable. */
 export function missingVatPaperwork(row: VatPaperwork): string[] {
@@ -30,6 +36,7 @@ export function missingVatPaperwork(row: VatPaperwork): string[] {
   if (!row.supplier_invoice_no) gaps.push('supplier invoice number')
   if (!row.supplier_invoice_date) gaps.push('supplier invoice date')
   if (!row.supplier_tin) gaps.push('supplier TIN')
+  if (row.tax_invoice_confirmed === false) gaps.push(TAX_INVOICE_CONFIRMATION)
   return gaps
 }
 

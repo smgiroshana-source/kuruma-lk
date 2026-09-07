@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
   // credits parked earlier still surface.
   const localWindowStart = addMonths(period, -12) + '-01'
   const { data: grns, error: grnErr } = await admin.from('grns')
-    .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, net_cost, input_vat, disallowed_vat, vat_claim_period')
+    .select('id, grn_number, grn_series, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, net_cost, input_vat, disallowed_vat, vat_claim_period, tax_invoice_confirmed')
     .eq('vendor_id', caller.vendor.id).eq('status', 'posted').gt('input_vat', 0)
     .gte('received_at', localWindowStart)
     .order('received_at')
@@ -180,8 +180,37 @@ export async function GET(req: NextRequest) {
     }
   })
 
-  const allInput = [...localItems, ...expenseItems, ...importItems]
+  // A claim is only valid on a tax invoice that names us, with its number,
+  // date and the supplier's TIN on record. Anything short of that is not a
+  // credit yet — it is shown separately, with what is missing, and stays
+  // out of the payable figure until fixed (owner, 2026-09-07). It used to be
+  // counted and merely flagged.
+  const claimable = (i: any) => !(i.kind === 'local' && i.missingInvoiceInfo)
+  const notClaimable = localItems.filter(i => !claimable(i))
+  const allInput = [...localItems.filter(claimable), ...expenseItems, ...importItems]
   const claimedNow = allInput.filter(i => i.claimPeriod === period)
+
+  // ── Chase list: V-series purchases whose tax invoice is not yet on record ──
+  // A registered supplier must issue a tax invoice within 28 days of being
+  // asked, and we must ask within 14 days of the supply. Both clocks run
+  // from the day the goods arrived.
+  const todayStr = new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)
+  const dayDiff = (a: string, b: string) => Math.round((new Date(a).getTime() - new Date(b).getTime()) / 86400000)
+  const addDays = (d: string, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10) }
+  const chase = (grns || [])
+    .filter((g: any) => (g.grn_series === 'V' || g.supplier_vat_registered === true) && missingVatPaperwork(g).length > 0)
+    .map((g: any) => {
+      const received = String(g.received_at).slice(0, 10)
+      const daysOld = dayDiff(todayStr, received)
+      return {
+        id: g.id, ref: g.grn_number, supplier: g.supplier_name || '', supplierTin: g.supplier_tin || '',
+        receivedAt: received, daysOld, vat: parseInt(g.input_vat || 0),
+        missing: missingVatPaperwork(g),
+        requestBy: addDays(received, 14), issueBy: addDays(received, 28),
+        pastRequestWindow: daysOld > 14, pastIssueDeadline: daysOld > 28,
+      }
+    })
+    .sort((a: any, b: any) => b.daysOld - a.daysOld)
   const parkedLater = allInput.filter(i => i.claimPeriod > period).sort((a, b) => a.monthsLeft - b.monthsLeft)
   const inputVat = claimedNow.reduce((s, i) => s + i.vat, 0)
 
@@ -282,9 +311,10 @@ export async function GET(req: NextRequest) {
     schedule04: [...schedule04, ...schedule04Supplier],
     schedule04Supplier,
     input: {
-      claimedNow, parkedLater,
+      claimedNow, parkedLater, notClaimable,
       expiringSoon: allInput.filter(i => i.claimPeriod > period && i.monthsLeft <= 3),
     },
+    chase,
     totals: {
       outputNet, outputVat, crnVat, netOutputVat,
       inputVat, supplierCrnVat, netInputVat,
