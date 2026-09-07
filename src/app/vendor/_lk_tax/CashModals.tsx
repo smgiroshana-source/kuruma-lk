@@ -329,27 +329,12 @@ export function MovementModal({
 // The counter jobs that never get an invoice: a puncture patched, air filled,
 // a tyre changed, a valve fitted. One list, one flow.
 //
-// Four of these CONSUME a part from the shelf — a tubeless patch is not "sold"
-// to the customer, it is used doing the repair — so those presets carry a real
-// product line: the money is income and the piece comes off stock, FIFO cost
-// and all. The rest are pure labour with nothing to deduct.
-//
-// Presets bind to products by NAME so the owner can re-price or re-stock them
-// in Products without anyone touching this file.
-export const QUICK_JOBS: { l: string; product?: string }[] = [
-  { l: 'Air / nitrogen fill' },
-  { l: 'Tyre Change' },
-  { l: 'Wheel Change' },
-  { l: 'Tube fitting' },
-  { l: 'Tubeless valve',        product: 'Tubeless Valve' },
-  { l: 'Tubeless patch',        product: 'Tubeless Patch' },
-  { l: 'Tubeless nickel valve', product: 'Tubeless Nickel Valve' },
-  { l: 'Tube Patch',            product: 'Tube Patch' },
-  { l: 'Wheel nut',             product: 'Wheel Nut' },
-  { l: 'Camber shim',           product: 'Camber Shim' },
-  { l: 'Sticker weight',        product: 'Sticker Weight' },
-  { l: 'Clip weight',           product: 'Clip Weight' },
-]
+// Labour presets live here. Every PART chip comes from Products: any product
+// switched on with "Money-in" (products.show_in_money_in) shows as a chip with
+// its price and its stock link, so the owner adds a flap or a cable tie from
+// the Products list without anyone touching this file (2026-09-07). A part
+// chip's piece comes off stock, FIFO cost and all.
+export const LABOUR_JOBS: string[] = ['Air / nitrogen fill', 'Tyre Change', 'Wheel Change', 'Tube fitting']
 
 export function QuickIncomeModal({
   onClose, onSaved, showToast, initialAmount,
@@ -371,7 +356,7 @@ export function QuickIncomeModal({
 
   // wantProduct: the preset this line came from, kept so a line added before
   // the catalog arrived can still be attached to its product afterwards.
-  type Line = { key: string; name: string; qty: number; price: number | ''; productId: string | null; sku: string; stock?: number; wantProduct?: string }
+  type Line = { key: string; name: string; qty: number; price: number | ''; productId: string | null; sku: string; stock?: number; loose?: boolean; wantProduct?: string }
   const [lines, setLines] = useState<Line[]>([])
   const [catalog, setCatalog] = useState<any[] | null>(null)
   const [search, setSearch] = useState('')
@@ -422,6 +407,14 @@ export function QuickIncomeModal({
 
   const findProduct = (name: string) =>
     (catalog || []).find((p: any) => (p.name || '').toLowerCase().trim() === name.toLowerCase())
+  // Chips: what the owner switched on in Products
+  const partChips = (catalog || []).filter((p: any) => p.show_in_money_in && p.is_active !== false)
+  const isLoose = (p: any) => p?.product_type === 'consumable'
+  // Stock search for the free-text box: name or SKU, a handful of hits
+  const q = search.trim().toLowerCase()
+  const hits = q.length >= 2
+    ? (catalog || []).filter((p: any) => p.is_active !== false && ((p.name || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))).slice(0, 6)
+    : []
 
   function addLine(l: Partial<Line>) {
     setLines(prev => [...prev, {
@@ -432,16 +425,17 @@ export function QuickIncomeModal({
     }])
   }
 
-  function addJob(job: { l: string; product?: string }) {
-    if (!job.product) { addLine({ name: job.l }); return }
-    // The catalog is a full product fetch and takes a moment. Tapping a preset
-    // before it lands used to silently drop the line to labour — the piece was
-    // sold and never came off stock. Hold the intent on the line instead; the
-    // effect below attaches it the moment the catalog is there.
-    if (catalog === null) { addLine({ name: job.l, wantProduct: job.product }); return }
-    const p = findProduct(job.product)
-    if (!p) { addLine({ name: job.l }); showToast(`“${job.product}” is not in Products yet — recorded without stock`); return }
-    addLine({ name: p.name, price: Math.round(Number(p.price) || 0) || '', productId: p.id, sku: p.sku || '', stock: p.quantity })
+  function addProduct(p: any) {
+    // Tapping the same part twice is one more piece, not a second line
+    setLines(prev => {
+      const ex = prev.find(l => l.productId === p.id)
+      if (ex) return prev.map(l => l.productId === p.id ? { ...l, qty: l.qty + 1 } : l)
+      return [...prev, {
+        key: Math.random().toString(36).slice(2),
+        name: p.name, qty: 1, price: Math.round(Number(p.price) || 0) || '',
+        productId: p.id, sku: p.sku || '', stock: p.quantity, loose: isLoose(p),
+      }]
+    })
   }
 
   // Attach any line that was waiting on the catalog. Price is only filled in
@@ -516,52 +510,105 @@ export function QuickIncomeModal({
         revenue and the drawer see it like any sale. No VAT. Parts used come off stock.
       </p>
 
-      {/* The counter jobs. Ones marked ◦ take a piece off the shelf. */}
+      {/* Labour — nothing comes off stock */}
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Labour</p>
       <div className="flex flex-wrap gap-1.5 mb-3">
-        {QUICK_JOBS.map(j => (
-          <button key={j.l} onClick={() => addJob(j)}
+        {LABOUR_JOBS.map(l => (
+          <button key={l} onClick={() => addLine({ name: l })}
             className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 border-slate-200 bg-white text-slate-600 hover:border-emerald-400 hover:bg-emerald-50 transition">
-            {j.l}{j.product ? <span className="text-emerald-600"> ◦</span> : null}
+            {l}
           </button>
         ))}
       </div>
 
-      {/* Anything else: a description and an amount. Selling actual items
-          belongs in the POS (owner, 2026-08-25) — this stays a job pad. */}
-      <div className="flex gap-1.5">
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Other income — what was it?"
-          onKeyDown={e => { if (e.key === 'Enter' && search.trim()) { addLine({ name: search.trim() }); setSearch('') } }}
-          className="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
-        <button onClick={() => { if (search.trim()) { addLine({ name: search.trim() }); setSearch('') } }}
-          disabled={!search.trim()}
-          className="px-3.5 py-2 rounded-lg bg-slate-800 text-white text-sm font-bold disabled:opacity-30 shrink-0">+ Add</button>
+      {/* Parts — every chip is a product switched on in Products; its piece comes off stock */}
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">
+        Parts — come off stock
+        {catalog !== null && partChips.length === 0 && <span className="normal-case font-semibold text-slate-400"> · none yet — press “Money-in” on a product in Products</span>}
+      </p>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {catalog === null && <span className="text-[11px] text-slate-400 py-1.5">loading stock…</span>}
+        {partChips.map((p: any) => (
+          <button key={p.id} onClick={() => addProduct(p)}
+            title={`${p.quantity ?? 0} on hand${isLoose(p) ? ' · loose count' : ''}${p.price ? ` · Rs.${Number(p.price).toLocaleString()}` : ' · no price set'}`}
+            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border-2 bg-white text-slate-600 hover:border-emerald-400 hover:bg-emerald-50 transition ${(p.quantity ?? 0) <= 0 && !isLoose(p) ? 'border-red-200 text-red-500' : 'border-slate-200'}`}>
+            {p.name}<span className="text-emerald-600"> ◦</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Search stock, or type other income. A hit adds the product with its
+          piece off stock; free text is labour, as before. */}
+      <div className="relative">
+        <div className="flex gap-1.5">
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search stock, or type other income…"
+            onKeyDown={e => {
+              if (e.key === 'Escape') setSearch('')
+              if (e.key === 'Enter' && search.trim()) {
+                if (hits.length > 0) addProduct(hits[0]); else addLine({ name: search.trim() })
+                setSearch('')
+              }
+            }}
+            className="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-400" />
+          <button onClick={() => { if (search.trim()) { addLine({ name: search.trim() }); setSearch('') } }}
+            disabled={!search.trim()}
+            className="px-3.5 py-2 rounded-lg bg-slate-800 text-white text-sm font-bold disabled:opacity-30 shrink-0">+ Add</button>
+        </div>
+        {search.trim().length >= 2 && (
+          <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-20 overflow-hidden">
+            {hits.map((p: any) => (
+              <button key={p.id} onClick={() => { addProduct(p); setSearch('') }}
+                className="w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-emerald-50 flex items-center gap-3">
+                <span className="flex-1 min-w-0">
+                  <span className="block text-xs font-bold text-slate-800 truncate">{p.name}</span>
+                  <span className="block text-[10px] font-mono text-slate-400">{p.sku}</span>
+                </span>
+                <span className={`text-[10px] font-bold shrink-0 ${(p.quantity ?? 0) > 0 ? 'text-emerald-700' : 'text-amber-600'}`}>
+                  {isLoose(p) ? `${p.quantity ?? 0} · loose` : (p.quantity ?? 0) > 0 ? `${p.quantity} in stock` : 'out of stock'}
+                </span>
+                <span className="text-xs font-black text-orange-600 shrink-0 w-20 text-right">{p.price ? `Rs.${Number(p.price).toLocaleString()}` : 'Ask'}</span>
+              </button>
+            ))}
+            <button onClick={() => { addLine({ name: search.trim() }); setSearch('') }}
+              className="w-full text-left px-3 py-2 text-[11px] italic text-slate-500 hover:bg-slate-50">
+              {hits.length > 0 ? `Or record “${search.trim()}” as other income — labour, nothing off stock` : `Not in stock — record “${search.trim()}” as other income`}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* The job list */}
-      {lines.map((l, idx) => (
+      {lines.map((l, idx) => {
+        const left = l.productId ? (l.stock ?? 0) - l.qty : null
+        return (
         <div key={l.key} className="flex items-center gap-2 mt-2 bg-slate-50 rounded-lg px-2.5 py-2">
           <div className="flex-1 min-w-0">
             <input type="text" value={l.name}
               onChange={e => setLines(prev => prev.map((x, j) => j === idx ? { ...x, name: e.target.value } : x))}
               className="w-full bg-transparent text-xs font-semibold text-slate-700 outline-none" />
             {l.productId
-              ? <span className="text-[10px] text-emerald-700 font-bold">◦ off stock · {l.stock ?? 0} on hand</span>
+              ? (l.loose
+                  ? <span className={`text-[10px] font-bold ${(left ?? 0) < 0 ? 'text-amber-600' : 'text-emerald-700'}`}>◦ off stock · loose count{(left ?? 0) < 0 ? ` · will read ${left} — fix at next GRN` : ` · ${left} left`}</span>
+                  : <span className={`text-[10px] font-bold ${(left ?? 0) < 0 ? 'text-red-600' : 'text-emerald-700'}`}>◦ off stock · {(left ?? 0) < 0 ? `only ${l.stock ?? 0} on hand` : `${left} left after this`}</span>)
               : l.wantProduct
                 ? <span className="text-[10px] text-slate-400">looking up stock…</span>
                 : <span className="text-[10px] text-slate-400">labour — no stock</span>}
           </div>
-          <input type="number" min={1} value={l.qty}
-            onChange={e => setLines(prev => prev.map((x, j) => j === idx ? { ...x, qty: Math.max(1, parseInt(e.target.value) || 1) } : x))}
-            className="w-11 px-1 py-1 border border-slate-200 rounded text-center text-xs" />
+          <div className="flex items-center border border-slate-200 rounded overflow-hidden shrink-0">
+            <button onClick={() => setLines(prev => prev.map((x, j) => j === idx ? { ...x, qty: Math.max(1, x.qty - 1) } : x))} className="w-6 h-7 bg-white text-slate-500 font-black text-sm">−</button>
+            <span className="w-7 text-center text-xs font-black">{l.qty}</span>
+            <button onClick={() => setLines(prev => prev.map((x, j) => j === idx ? { ...x, qty: x.qty + 1 } : x))} className="w-6 h-7 bg-white text-slate-500 font-black text-sm">+</button>
+          </div>
           <span className="text-[10px] text-slate-400">×</span>
           <input type="number" min={0} value={l.price} placeholder="Rs."
             onChange={e => setLines(prev => prev.map((x, j) => j === idx ? { ...x, price: e.target.value === '' ? '' : Math.max(0, Math.round(Number(e.target.value))) } : x))}
-            className="w-24 px-1.5 py-1 border border-slate-200 rounded text-right text-xs font-mono font-bold" />
+            className={`w-24 px-1.5 py-1 border rounded text-right text-xs font-mono font-bold ${l.price === '' ? 'border-orange-400 bg-orange-50' : 'border-slate-200'}`} />
           <button onClick={() => setLines(prev => prev.filter((_, j) => j !== idx))}
             className="text-red-300 hover:text-red-500 font-bold text-sm leading-none">×</button>
         </div>
-      ))}
+        )
+      })}
 
       {lines.length > 0 && (
         <div className="flex justify-between items-center mt-2.5 pt-2 border-t border-slate-100">
