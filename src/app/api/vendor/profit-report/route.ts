@@ -72,8 +72,19 @@ export async function GET(req: NextRequest) {
 
   // Product costs for lines with no sale-time snapshot
   const { data: products } = await admin.from('products')
-    .select('sku, cost, cost_is_estimate, product_type, category').eq('vendor_id', caller.vendor.id)
+    .select('sku, cost, cost_is_estimate, cost_includes_vat, cost_vat_rate, product_type, category').eq('vendor_id', caller.vendor.id)
   const prodBySku = new Map((products || []).filter((p: any) => p.sku).map((p: any) => [p.sku, p]))
+
+  // Cost on the same footing as revenue. Revenue on a tax invoice is taken
+  // net of VAT; the cost must be net too, because the input VAT on stock
+  // comes back through the VAT return and is not a cost of the goods.
+  // Stock bought through a GRN is stored net already. Stock loaded by CSV
+  // (the opening tyres) was keyed VAT-INCLUSIVE and flagged so —
+  // cost_includes_vat — and its FIFO layers and every sale-time snapshot
+  // carry that gross figure. Owner, 2026-09-08: a 300R 18 tyre showed a 2%
+  // loss (net 7,034 against 7,151) when it made 14% (against 6,060).
+  const netCost = (unitCost: number, prod: any): number =>
+    prod?.cost_includes_vat ? Math.round(unitCost * 100 / (100 + vatRate)) : unitCost
 
   type Row = {
     date: string; invoice: string; customer: string
@@ -121,8 +132,8 @@ export async function GET(req: NextRequest) {
       const gross = qty * parseFloat(i.unit_price || 0)
       const revenue = r0(net(gross, docType))
 
-      const snap = i.unit_cost != null && parseInt(i.unit_cost) > 0 ? parseInt(i.unit_cost) : null
       const prod: any = i.product_sku ? prodBySku.get(i.product_sku) : null
+      const snap = i.unit_cost != null && parseInt(i.unit_cost) > 0 ? netCost(parseInt(i.unit_cost), prod) : null
       let cost = 0
       let basis: Row['basis']
 
@@ -134,7 +145,7 @@ export async function GET(req: NextRequest) {
         basis = 'service'
         serviceRev += revenue
       } else if (prod && parseInt(prod.cost) > 0) {
-        cost = parseInt(prod.cost) * qty
+        cost = netCost(parseInt(prod.cost), prod) * qty
         if (prod.cost_is_estimate) { basis = 'rough'; roughRev += revenue; roughCogs += cost }
         else { basis = 'real'; realRev += revenue; realCogs += cost }
       } else {

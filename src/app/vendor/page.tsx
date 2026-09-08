@@ -3514,13 +3514,17 @@ ${customerRows.map(c => `<tr>
                         const qty = i.quantity - (i.returned_quantity || 0)
                         if (qty <= 0) continue
                         const rev = qty * parseFloat(i.unit_price || 0)
-                        const snap = i.unit_cost != null && parseInt(i.unit_cost) > 0 ? parseInt(i.unit_cost) : null
                         const prod: any = i.product_sku ? prodBySku.get(i.product_sku) : null
+                        // CSV-loaded stock is keyed VAT-inclusive (cost_includes_vat); the VAT
+                        // comes back, so the cost of the goods is the ex-VAT figure.
+                        const panelVat = Number(vendorSettings?.vat_rate) || 18
+                        const netC = (c: number) => (isLkTax && prod?.cost_includes_vat) ? Math.round(c * 100 / (100 + panelVat)) : c
+                        const snap = i.unit_cost != null && parseInt(i.unit_cost) > 0 ? netC(parseInt(i.unit_cost)) : null
                         if (snap != null) { realRev += rev; realCogs += snap * qty }
                         else if (!i.product_sku) { realRev += rev } // typed service line — no COGS
                         else if (prod && parseInt(prod.cost) > 0) {
-                          if (prod.cost_is_estimate) { roughRev += rev; roughCogs += parseInt(prod.cost) * qty }
-                          else { realRev += rev; realCogs += parseInt(prod.cost) * qty }
+                          if (prod.cost_is_estimate) { roughRev += rev; roughCogs += netC(parseInt(prod.cost)) * qty }
+                          else { realRev += rev; realCogs += netC(parseInt(prod.cost)) * qty }
                         } else {
                           noCostRev += rev
                           const key = i.product_sku
