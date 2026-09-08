@@ -111,16 +111,30 @@ export async function GET(req: NextRequest) {
     if (r.to_product_id)   inHistory.add(r.to_product_id)
   }
 
-  // Trim images: only keep up to 6 per product
-  products = products.map((p: any) => ({
-    ...p,
-    // One flag rather than a separate id list — the products array is already
-    // being sent, so this costs a boolean per row.
-    in_history: inHistory.has(p.id),
-    images: (p.images || [])
-      .sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
-      .slice(0, 6)
-  }))
+  // First photo only. The list is drawn 50 rows at a time and every picker
+  // shows one thumbnail; the full set is fetched from /api/vendor/images for
+  // the rows someone actually opens (Edit, the sheet, Change Primary Images).
+  // Sakura's list carried 21,000 photo links — 5 MB — for that.
+  // Empty fields are left out of each row. On Sakura's 7,376 products the
+  // nulls alone were 2 MB of a 7.5 MB list — a quarter of it was the word
+  // "null". The client reads every field with ?? / || / == null, so a missing
+  // key behaves exactly as null did. images and in_history are always sent.
+  const compact = (row: any) => {
+    const out: any = {}
+    for (const k in row) { const v = row[k]; if (v !== null && v !== undefined && v !== '') out[k] = v }
+    return out
+  }
+  products = products.map((p: any) => {
+    const sorted = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+    return {
+      ...compact(p),
+      // One flag rather than a separate id list — the products array is already
+      // being sent, so this costs a boolean per row.
+      in_history: inHistory.has(p.id),
+      images: sorted.slice(0, 1),
+      image_count: sorted.length,
+    }
+  })
 
   const totalProducts = products.length
   const activeProducts = products.filter((p: any) => p.is_active).length

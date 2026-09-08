@@ -8,6 +8,48 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
+async function resolveVendor(admin: any, userId: string) {
+  const { data: owner } = await admin.from('vendors').select('id').eq('user_id', userId).eq('status', 'approved').single()
+  if (owner) return owner
+  const { data: staff } = await admin.from('vendor_staff').select('vendor:vendors(id)').eq('user_id', userId).eq('active', true).single()
+  return staff?.vendor || null
+}
+
+/**
+ * GET ?productIds=a,b,c — every photo of those products, grouped by product.
+ *
+ * The product list only carries the FIRST photo per product now (Sakura's
+ * list was 5 MB, almost all of it photo links nobody scrolled to). The rest
+ * are fetched here when someone opens Edit, the product sheet, or "Change
+ * Primary Images" — a page of rows at a time, never the whole catalogue.
+ */
+export async function GET(req: NextRequest) {
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const admin = createAdminClient()
+  const vendor = await resolveVendor(admin, user.id)
+  if (!vendor) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
+
+  const ids = String(req.nextUrl.searchParams.get('productIds') || '')
+    .split(',').map(x => x.trim()).filter(x => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 200)
+  if (ids.length === 0) return NextResponse.json({ images: {} })
+
+  const { data, error } = await admin.from('product_images')
+    .select('id, url, sort_order, product_id, product:products!inner(vendor_id)')
+    .in('product_id', ids).eq('product.vendor_id', vendor.id)
+    .order('sort_order')
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const grouped: Record<string, any[]> = {}
+  for (const id of ids) grouped[id] = []
+  for (const row of (data || []) as any[]) {
+    grouped[row.product_id].push({ id: row.id, url: row.url, sort_order: row.sort_order })
+  }
+  const res = NextResponse.json({ images: grouped })
+  res.headers.set('Cache-Control', 'private, max-age=10')
+  return res
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
