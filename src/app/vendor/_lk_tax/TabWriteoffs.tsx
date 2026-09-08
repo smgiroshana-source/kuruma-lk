@@ -1,6 +1,7 @@
 'use client'
 import { colomboToday } from '@/lib/dates'
 import { useState, useEffect, useRef } from 'react'
+import { netStockCost } from '@/lib/netCost'
 
 type Props = {
   vendor: any
@@ -26,6 +27,7 @@ type Product = {
   name: string
   quantity: number
   cost: number
+  cost_includes_vat?: boolean | null
 }
 
 type WriteoffItem = {
@@ -271,7 +273,9 @@ export default function TabWriteoffs({ vendor, showToast }: Props) {
           product_sku: product.sku,
           product_name: product.name,
           quantity: 1,
-          unit_cost: Math.round(product.cost),
+          // The loss is the ex-VAT cost: the input VAT stays claimed (CLAUDE.md).
+          // CSV-loaded stock is keyed VAT-inclusive, so strip it here.
+          unit_cost: netStockCost(product.cost, product),
         },
       ]
     })

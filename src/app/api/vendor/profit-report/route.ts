@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows } from '@/lib/fetchAll'
 import { netOfVat } from '@/lib/margin'
+import { netStockCost } from '@/lib/netCost'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Profit report — the numbers behind the PDF.
@@ -83,8 +84,7 @@ export async function GET(req: NextRequest) {
   // cost_includes_vat — and its FIFO layers and every sale-time snapshot
   // carry that gross figure. Owner, 2026-09-08: a 300R 18 tyre showed a 2%
   // loss (net 7,034 against 7,151) when it made 14% (against 6,060).
-  const netCost = (unitCost: number, prod: any): number =>
-    prod?.cost_includes_vat ? Math.round(unitCost * 100 / (100 + vatRate)) : unitCost
+  const netCost = (unitCost: number, prod: any): number => netStockCost(unitCost, prod, vatRate)
 
   type Row = {
     date: string; invoice: string; customer: string

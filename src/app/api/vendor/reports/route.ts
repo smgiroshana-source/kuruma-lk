@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
+import { netStockCost } from '@/lib/netCost'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -260,13 +261,19 @@ export async function GET(req: NextRequest) {
 
   // ── Stock value ────────────────────────────────────────────────────────────
   if (type === 'stock_value') {
+    // Cost is valued NET of VAT: the input VAT on stock comes back through the
+    // VAT return. CSV-loaded stock keyed VAT-inclusive (cost_includes_vat) is
+    // taken at its ex-VAT cost (src/lib/netCost.ts).
+    const { data: cfg } = await admin.from('tax_config')
+      .select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').maybeSingle()
+    const vatRate = cfg?.value != null ? parseFloat(cfg.value) : 18
     // Summary — paginated: a vendor with >1000 products would otherwise have its
     // stock valuation computed over only the first 1000 (badly undercounted).
     let rows: any[]
     try {
       rows = await fetchAllRows((from, to) => admin
         .from('products')
-        .select('quantity, cost, price')
+        .select('quantity, cost, price, cost_includes_vat')
         .eq('vendor_id', vendor.id)
         .eq('is_active', true)
         .order('id')
@@ -281,7 +288,7 @@ export async function GET(req: NextRequest) {
 
     for (const p of rows) {
       const qty = parseInt(p.quantity ?? 0)
-      const cost = parseInt(p.cost ?? 0)
+      const cost = netStockCost(p.cost, p, vatRate)
       const price = parseInt(p.price ?? 0)
       total_units += qty
       total_cost_value += qty * cost
@@ -298,7 +305,7 @@ export async function GET(req: NextRequest) {
     try {
       catRows = await fetchAllRows((from, to) => admin
         .from('products')
-        .select('category, quantity, cost')
+        .select('category, quantity, cost, cost_includes_vat')
         .eq('vendor_id', vendor.id)
         .eq('is_active', true)
         .gt('quantity', 0)
@@ -314,7 +321,7 @@ export async function GET(req: NextRequest) {
       const cat = p.category || 'Uncategorized'
       if (!catMap[cat]) catMap[cat] = { category: cat, cost_value: 0, units: 0 }
       const qty = parseInt(p.quantity ?? 0)
-      const cost = parseInt(p.cost ?? 0)
+      const cost = netStockCost(p.cost, p, vatRate)
       catMap[cat].cost_value += qty * cost
       catMap[cat].units += qty
     }
