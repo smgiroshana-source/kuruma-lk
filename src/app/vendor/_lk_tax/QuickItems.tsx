@@ -82,6 +82,7 @@ export default function QuickItems({ vendor, showToast, onBack }: Props) {
       </div>
       <p className="text-sm text-slate-500 mb-4 max-w-2xl">
         These parts show as one-tap chips in <strong>Money in — no invoice</strong> (Cash &amp; Expenses). Tapping a chip adds the part with its price and takes the piece off stock.
+        Every chip is <strong>loose-counted</strong>: it sells even when the count reads 0, and the count is put right at the next GRN or stocktake.
         Labour chips (air fill, tyre change, wheel change, tube fitting) are fixed and need no stock.
       </p>
 
@@ -100,7 +101,7 @@ export default function QuickItems({ vendor, showToast, onBack }: Props) {
                 className="w-full text-left px-3 py-2 border-b border-slate-100 hover:bg-emerald-50 flex items-center gap-3 disabled:opacity-50">
                 <span className="flex-1 min-w-0">
                   <span className="block text-sm font-bold text-slate-800 truncate">{p.name}</span>
-                  <span className="block text-[10px] font-mono text-slate-400">{p.sku}{p.product_type === 'consumable' ? ' · loose count' : ''}</span>
+                  <span className="block text-[10px] font-mono text-slate-400">{p.sku}{p.product_type === 'consumable' ? ' · loose count' : ' · becomes loose count as a chip'}</span>
                 </span>
                 <span className="text-xs text-slate-500 shrink-0">{p.quantity ?? 0} in stock</span>
                 <span className="text-xs font-black text-orange-600 shrink-0 w-20 text-right">{Number(p.price) > 0 ? rs(p.price) : 'Ask'}</span>
@@ -146,10 +147,10 @@ export default function QuickItems({ vendor, showToast, onBack }: Props) {
                     <tr key={p.id} className="border-b border-slate-100">
                       <td className="px-4 py-2.5">
                         <div className="font-semibold text-slate-800">{p.name}</div>
-                        {p.product_type === 'consumable' && <div className="text-[10px] text-amber-700 font-bold">loose count — sells even at 0</div>}
+                        <div className="text-[10px] text-amber-700 font-bold">loose count — sells even at 0</div>
                       </td>
                       <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{p.sku}</td>
-                      <td className={`px-4 py-2.5 text-right font-semibold ${(p.quantity ?? 0) <= 0 && p.product_type !== 'consumable' ? 'text-red-500' : 'text-slate-700'}`}>{p.quantity ?? 0}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-slate-700">{p.quantity ?? 0}</td>
                       <td className="px-4 py-2.5 text-right">
                         <div className="inline-flex items-center gap-1">
                           <span className="text-xs text-slate-400">Rs.</span>

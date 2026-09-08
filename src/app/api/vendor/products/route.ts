@@ -10,6 +10,7 @@ import { revalidatePath } from 'next/cache'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateProductSlug } from '@/lib/slug'
+import { isLooseCount } from '@/lib/looseCount'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -480,7 +481,7 @@ export async function POST(req: NextRequest) {
   if (action === 'adjust_stock') {
     const { productId, newQuantity, reason, note, unitCost, confirmOnly } = body
     const { data: p } = await admin.from('products')
-      .select('id, vendor_id, sku, name, quantity, product_type, cost').eq('id', productId).single()
+      .select('id, vendor_id, sku, name, quantity, product_type, show_in_money_in, cost').eq('id', productId).single()
     if (!p || p.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
 
     const now = new Date().toISOString()
@@ -491,8 +492,8 @@ export async function POST(req: NextRequest) {
 
     const target = Math.round(Number(newQuantity))
     if (!Number.isFinite(target)) return NextResponse.json({ success: false, error: 'newQuantity required' }, { status: 400 })
-    if (target < 0 && p.product_type !== 'consumable') {
-      return NextResponse.json({ success: false, error: 'Only loose-counted consumables can go below zero' }, { status: 400 })
+    if (target < 0 && !isLooseCount(p)) {
+      return NextResponse.json({ success: false, error: 'Only loose-counted stock (consumables and Money-in quick items) can go below zero' }, { status: 400 })
     }
     const delta = target - Number(p.quantity || 0)
 

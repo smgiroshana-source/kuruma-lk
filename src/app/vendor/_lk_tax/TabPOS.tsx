@@ -5,6 +5,7 @@ import { escapeHtml } from '@/lib/escapeHtml'
 import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { gpPercent, isBelowCost, netOfVat, costIncVat, productCostIncVat } from '@/lib/margin'
 import { useState, useEffect, useMemo } from 'react'
+import { isLooseCount } from '@/lib/looseCount'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
 const PAY_LABELS: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', bank: 'Bank Transfer', card: 'Card', advance: 'Advance', credit: 'Credit' }
@@ -600,7 +601,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // ── Cart ───────────────────────────────────────────────────────────────
   function addToCart(product: any) {
     setPosCart(prev => {
-      const loose = product.product_type === 'consumable'
+      const loose = isLooseCount(product)
       const ex = prev.find(i => i.productId === product.id)
       if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: loose ? i.quantity + 1 : Math.min(i.quantity + 1, product.quantity) } : i)
       return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: loose ? null : product.quantity, cost: product.cost ?? null, cost_vat_rate: product.cost_vat_rate ?? 0, cost_includes_vat: product.cost_includes_vat ?? false }]
@@ -754,7 +755,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
     return (products || []).filter((p: any) => {
       // Loose-counted consumables sell even at 0 or minus — the count is
       // approximate by design and must never block a sale.
-      if (p.quantity <= 0 && p.product_type !== 'consumable') return false
+      if (p.quantity <= 0 && !isLooseCount(p)) return false
       // Tyre-size match takes priority when a size pattern is detected
       if (tyreSize && p.product_type === 'tyre') {
         return p.tyre_width === tyreSize.width &&
@@ -788,7 +789,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   }, [quickPickKey])
   const quickPicks = useMemo(() =>
     quickPickIds
-      .map(id => (products || []).find((p: any) => p.id === id && (p.quantity > 0 || p.product_type === 'consumable')))
+      .map(id => (products || []).find((p: any) => p.id === id && (p.quantity > 0 || isLooseCount(p))))
       .filter(Boolean)
       .slice(0, 10),
   [quickPickIds, products])

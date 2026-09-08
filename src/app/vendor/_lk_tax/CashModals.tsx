@@ -9,6 +9,7 @@
 
 import { useState, useEffect } from 'react'
 import { colomboToday } from '@/lib/dates'
+import { isLooseCount } from '@/lib/looseCount'
 
 export function formatRs(n: number): string {
   return 'Rs. ' + Math.round(n).toLocaleString('en-LK', { maximumFractionDigits: 0 })
@@ -414,7 +415,7 @@ export function QuickIncomeModal({
     (catalog || []).find((p: any) => (p.name || '').toLowerCase().trim() === name.toLowerCase())
   // Chips: what the owner switched on in Products
   const partChips = (catalog || []).filter((p: any) => p.show_in_money_in && p.is_active !== false)
-  const isLoose = (p: any) => p?.product_type === 'consumable'
+  const isLoose = isLooseCount
   // Stock search for the free-text box: name or SKU, a handful of hits
   const q = search.trim().toLowerCase()
   const hits = q.length >= 2
