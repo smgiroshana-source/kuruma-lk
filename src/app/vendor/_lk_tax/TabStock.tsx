@@ -1611,6 +1611,9 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   <div className="text-right">
                     <p className="font-black text-sm">Rs.{parseInt(grn.total_cost || 0).toLocaleString()}</p>
                     {grn.input_vat > 0 && <p className="text-[10px] text-orange-500">VAT: Rs.{parseInt(grn.input_vat || 0).toLocaleString()}</p>}
+                    {grn.input_vat > 0 && (grn.doc_vat != null
+                      ? <p className="text-[10px] text-emerald-700 font-bold">as printed: {Number(grn.doc_net ?? grn.net_cost).toFixed(2)} + VAT {Number(grn.doc_vat).toFixed(2)}</p>
+                      : isPosted && grn.status !== 'reversed' && <p className="text-[10px] text-amber-600">printed figures not entered</p>)}
                   </div>
                 </div>
                 {/* Items preview */}
@@ -1641,6 +1644,26 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     }} className="text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 px-2.5 py-1.5 rounded-lg">
                       Add details
                     </button>
+                  </div>
+                )}
+                {/* Posted with VAT: the supplier's document can always be corrected or
+                    completed — printed figures, TIN, confirmation. Nothing else moves. */}
+                {isPosted && parseInt(grn.input_vat || 0) > 0 && vatGaps.length === 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-2 flex-wrap">
+                    <button onClick={() => {
+                      setFixInvoiceGrn(grn)
+                      setFixInvoiceForm({
+                        supplierInvoiceNo:   grn.supplier_invoice_no || '',
+                        supplierInvoiceDate: grn.supplier_invoice_date ? String(grn.supplier_invoice_date).slice(0, 10) : '',
+                        supplierTin:         grn.supplier_tin || '',
+                        taxInvoiceConfirmed: !!grn.tax_invoice_confirmed,
+                        docNet: grn.doc_net != null ? String(grn.doc_net) : '',
+                        docVat: grn.doc_vat != null ? String(grn.doc_vat) : '',
+                      })
+                    }} className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border ${grn.doc_vat == null ? 'text-amber-800 border-amber-300 bg-amber-50' : 'text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                      📄 {grn.doc_vat == null ? 'Enter printed figures' : 'Invoice details'}
+                    </button>
+                    {grn.doc_vat == null && <span className="text-[10px] text-slate-500">Copy net and VAT off the supplier&apos;s tax invoice, cents included — the return files those.</span>}
                   </div>
                 )}
                 {/* Actions */}
