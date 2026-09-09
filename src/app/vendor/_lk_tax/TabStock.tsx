@@ -1589,7 +1589,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
             const totalQty = (grn.items || []).reduce((s: number, i: any) => s + i.quantity, 0)
             // Schedule 02 gaps — flagged on the GRN itself so they get fixed
             // here, not discovered by the accountant on filing day.
-            const vatGaps: string[] = parseInt(grn.input_vat || 0) > 0 && grn.status !== 'reversed' ? ([
+            const vatGaps: string[] = parseInt(grn.input_vat || 0) > 0 && grn.status !== 'reversed' && grn.status !== 'cancelled' ? ([
               !grn.supplier_invoice_no   && 'invoice number',
               !grn.supplier_invoice_date && 'invoice date',
               !grn.supplier_tin          && 'supplier TIN',
@@ -1601,8 +1601,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="font-black font-mono text-sm">{grn.grn_number}</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isPosted ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                        {isPosted ? '✅ POSTED' : '📋 DRAFT'}
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isPosted ? 'bg-green-100 text-green-700' : grn.status === 'cancelled' ? 'bg-slate-200 text-slate-500' : grn.status === 'reversed' ? 'bg-slate-100 text-slate-500' : 'bg-amber-100 text-amber-700'}`}>
+                        {isPosted ? '✅ POSTED' : grn.status === 'cancelled' ? '🚫 CANCELLED' : grn.status === 'reversed' ? '↩ REVERSED' : '📋 DRAFT'}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">{grn.supplier_name || 'No supplier'}{grn.supplier_invoice_no ? ` · ${grn.supplier_invoice_no}` : ''}</p>
@@ -1644,7 +1644,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   </div>
                 )}
                 {/* Actions */}
-                {!isPosted && grn.status !== 'reversed' && (
+                {!isPosted && grn.status !== 'reversed' && grn.status !== 'cancelled' && (
                   <div className="mt-3 pt-3 border-t border-slate-100 flex gap-2 flex-wrap">
                     <button onClick={() => postGrn(grn.id)} disabled={grnPosting === grn.id}
                       title={vatGaps.length > 0 ? `Posts now; input VAT waits for the ${vatGaps.join(', ')}` : ''}
@@ -1683,6 +1683,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 {grn.status === 'reversed' && (
                   <div className="mt-3 pt-3 border-t border-slate-100">
                     <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">REVERSED — stock reduced, cost layers removed</span>
+                  </div>
+                )}
+                {grn.status === 'cancelled' && (
+                  <div className="mt-3 pt-3 border-t border-slate-100">
+                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">CANCELLED — no goods, no document; the number is kept so the series stays complete</span>
                   </div>
                 )}
                 {grn.notes && <p className="text-[10px] text-slate-400 mt-2 italic">{grn.notes}</p>}

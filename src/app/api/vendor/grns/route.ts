@@ -7,6 +7,23 @@ import { adjustProductQuantity } from '@/lib/stock'
 import { applySupplierAdvance } from '@/lib/supplierAdvance'
 import { round2 } from '@/lib/money2'
 
+/**
+ * Hand a GRN number back to its series counter — only while it is still the
+ * highest issued, so the next GRN reuses it and the run stays gapless. Returns
+ * false when a later number exists; the caller must then keep the row as
+ * CANCELLED so the number is accounted for (GRN-V-00003 was lost this way).
+ */
+async function releaseGrnNumber(admin: any, vendorId: string, grnNumber: string): Promise<boolean> {
+  const m = /^GRN-([VNI])-(\d+)$/.exec(grnNumber || '')
+  if (!m) return false
+  const n = parseInt(m[2], 10)
+  const { data } = await admin.from('vendor_sequences')
+    .update({ last_number: n - 1 })
+    .eq('vendor_id', vendorId).eq('series', 'grn_' + m[1].toLowerCase()).eq('last_number', n)
+    .select('series')
+  return !!data && data.length > 0
+}
+
 async function getVendor() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -165,7 +182,14 @@ export async function POST(req: NextRequest) {
       grnItemRows.map(r => ({ ...r, grn_id: grn.id }))
     )
     if (itemsErr) {
-      await admin.from('grns').delete().eq('id', grn.id)
+      // The number was minted. Give it back if it is still the latest; if a
+      // later GRN already took the next one, keep this header as CANCELLED so
+      // the sequence stays accounted for.
+      if (await releaseGrnNumber(admin, vendor.id, grnNumber)) {
+        await admin.from('grns').delete().eq('id', grn.id)
+      } else {
+        await admin.from('grns').update({ status: 'cancelled', notes: 'Save failed after the number was issued: ' + itemsErr.message }).eq('id', grn.id)
+      }
       return NextResponse.json({ error: itemsErr.message }, { status: 500 })
     }
 
@@ -392,11 +416,23 @@ export async function POST(req: NextRequest) {
   // ── DELETE DRAFT GRN ─────────────────────────────────────────────────────
   if (action === 'delete_grn') {
     const { grnId } = body
-    const { data: grn } = await admin.from('grns').select('status, grn_number').eq('id', grnId).eq('vendor_id', vendor.id).single()
+    const { data: grn } = await admin.from('grns').select('status, grn_number, notes').eq('id', grnId).eq('vendor_id', vendor.id).single()
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
     if (grn.status === 'posted') return NextResponse.json({ error: 'Cannot delete a posted GRN' }, { status: 400 })
-    await admin.from('grns').delete().eq('id', grnId)
-    return NextResponse.json({ success: true, message: `${grn.grn_number} deleted` })
+    if (grn.status === 'cancelled') return NextResponse.json({ error: 'Already cancelled' }, { status: 400 })
+    // A draft's number must not vanish with it. Still the latest in its
+    // series → hand it back and remove the draft outright; otherwise the row
+    // stays as CANCELLED so the register shows why that number has no goods.
+    if (await releaseGrnNumber(admin, vendor.id, grn.grn_number)) {
+      await admin.from('grn_items').delete().eq('grn_id', grnId)
+      await admin.from('grns').delete().eq('id', grnId)
+      return NextResponse.json({ success: true, message: `${grn.grn_number} deleted — the number goes back to the next GRN` })
+    }
+    await admin.from('grns').update({
+      status: 'cancelled', updated_at: new Date().toISOString(),
+      notes: (grn.notes ? grn.notes + '\n' : '') + 'Cancelled ' + new Date().toISOString().slice(0, 10) + ' — draft discarded, number kept in the sequence',
+    }).eq('id', grnId)
+    return NextResponse.json({ success: true, message: `${grn.grn_number} cancelled — a later GRN exists, so the number stays in the sequence as CANCELLED` })
   }
 
   // ── FIX PAPERWORK on an already-posted GRN ────────────────────────────────
