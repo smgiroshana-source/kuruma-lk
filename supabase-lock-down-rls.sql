@@ -23,6 +23,12 @@
 -- through the service role too.
 --
 -- Safe to re-run.
+--
+-- EXEMPT: Workshop Pulse (the MacForce app) shares this database and reads
+-- its three tables straight from the browser under its own RLS policies
+-- (wp_is_staff / wp_is_super_admin). Those tables, and the two helper
+-- functions, are skipped here. If they ever get caught, run
+-- workshop-pulse/supabase-restore-access.sql.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 do $$
@@ -35,6 +41,7 @@ begin
       join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'public'
        and c.relkind = 'r'
+       and c.relname not in ('jobs', 'store_data', 'user_roles')   -- Workshop Pulse
   loop
     -- RLS on, and forced even for the table owner, so a future "permissive"
     -- policy cannot be added by accident without being deliberate.
@@ -58,6 +65,7 @@ begin
     select schemaname, tablename, policyname, roles
       from pg_policies
      where schemaname = 'public'
+       and tablename not in ('jobs', 'store_data', 'user_roles')   -- Workshop Pulse
        and (roles::text[] && array['anon','authenticated','public'])
   loop
     execute format('drop policy if exists %I on public.%I', p.policyname, p.tablename);
@@ -87,6 +95,7 @@ begin
     select p.oid::regprocedure as sig
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'public'
+       and p.proname not in ('wp_is_staff', 'wp_is_super_admin')   -- Workshop Pulse
   loop
     execute format('revoke all on function %s from anon', f.sig);
     execute format('revoke all on function %s from authenticated', f.sig);
