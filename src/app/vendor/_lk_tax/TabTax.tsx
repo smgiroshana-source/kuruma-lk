@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
 import TaxRegisters from './TaxRegisters'
+import { fmt2 } from '@/lib/money2'
 
 const rs = (n: number) => 'Rs.' + Math.round(n || 0).toLocaleString()
 const addMonths = (ym: string, n: number) => {
@@ -121,18 +122,18 @@ export default function TabTax({ showToast, vendorSettings }: {
   const genSchedule02 = () => download('02',
     "Serial No,Invoice Date,Tax Invoice No,Supplier's TIN,Name of the Supplier,Description,Value of purchase,VAT Amount,Disallowed VAT Amount",
     localAndExpense.map((r: any, i: number) =>
-      [i + 1, mdy(r.invoiceDate), csvCell(r.invoiceNo), r.partyTin, csvCell(r.partyName), DESCRIPTION, r.value, r.vat, r.disallowedVat || 0].join(',')))
+      [i + 1, mdy(r.invoiceDate), csvCell(r.invoiceNo), r.partyTin, csvCell(r.partyName), DESCRIPTION, fmt2(r.value), fmt2(r.vat), fmt2(r.disallowedVat || 0)].join(',')))
 
   const genSchedule03 = () => download('03',
     'Serial No,Cusdec Date,Cusdec No,Cusdec Serial ID,Cusdec Reg Date,Cusdec Office ID,VAT Deferred,VAT Upfront,Disallowed VAT',
     claimedNow.filter(i => i.kind === 'import').map((r: any, i: number) =>
       [i + 1, mdy(r.invoiceDate), r.ref, r.cusdecSerialId || '', mdy(r.cusdecRegDate || r.invoiceDate), r.cusdecOfficeId || '',
-       Number(r.vatDeferred).toFixed(2), r.vatUpfront, Number(r.disallowedVat).toFixed(2)].join(',')))
+       fmt2(r.vatDeferred), fmt2(r.vatUpfront), fmt2(r.disallowedVat)].join(',')))
 
   const genSchedule04 = () => download('04',
     'Serial No,TIN No,Invoice Date,Invoice No,Tax Credit / Tax Debit Note,Date of Tax Credit / Tax Debit Note,Tax Credit No. / Tax Debit Note No.,Value of Tax Credit Note / Tax Debit Note,VAT Amount,Issued By Me',
     (data?.schedule04 || []).map((r: any, i: number) =>
-      [i + 1, r.tin, mdy(r.invoiceDate), r.invoiceNo, r.noteType, mdy(r.noteDate), r.noteNo, r.value, r.vatAmount, r.issuedByMe].join(',')))
+      [i + 1, r.tin, mdy(r.invoiceDate), r.invoiceNo, r.noteType, mdy(r.noteDate), r.noteNo, fmt2(r.value), fmt2(r.vatAmount), r.issuedByMe].join(',')))
 
   const sectionTabs = (
     <div className="flex gap-1 mb-4 bg-slate-100 rounded-lg p-1 w-fit">

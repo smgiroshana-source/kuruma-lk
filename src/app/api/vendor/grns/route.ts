@@ -5,6 +5,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { applySupplierAdvance } from '@/lib/supplierAdvance'
+import { round2 } from '@/lib/money2'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
 
   // ── CREATE (or update draft) ──────────────────────────────────────────────
   if (action === 'create_grn') {
-    const { supplierId, supplierName, supplierInvoiceNo, supplierInvoiceDate, receivedAt, notes, items, taxInvoiceConfirmed } = body
+    const { supplierId, supplierName, supplierInvoiceNo, supplierInvoiceDate, receivedAt, notes, items, taxInvoiceConfirmed, docNet, docVat } = body
 
     // A GRN records who the goods came from — supplierless receipts made the
     // payables ledger and the VAT trail silently incomplete (owner-reported).
@@ -143,6 +144,10 @@ export async function POST(req: NextRequest) {
       tax_invoice_confirmed_at: confirmed ? new Date().toISOString() : null,
       tax_invoice_confirmed_by: confirmed ? ((vendor as any).callerUserId || null) : null,
       supplier_invoice_no:   supplierInvoiceNo || null,
+      // As printed on the supplier's tax invoice, to the cent — what Schedule
+      // 02 carries. Never recomputed from the lines (owner + accountant, 2026-09-09).
+      doc_net: docNet !== '' && docNet != null && Number.isFinite(Number(docNet)) ? round2(docNet) : null,
+      doc_vat: docVat !== '' && docVat != null && Number.isFinite(Number(docVat)) ? round2(docVat) : null,
       // VAT Schedule 02 lists the SUPPLIER's invoice date, not our receipt date
       supplier_invoice_date: supplierInvoiceDate || null,
       received_at:         receivedAt || new Date().toISOString().slice(0, 10),
@@ -400,7 +405,7 @@ export async function POST(req: NextRequest) {
   // layer, so unlike a normal edit this is allowed after posting. Without it
   // the older GRNs that predate the posting gate could never be made filable.
   if (action === 'update_grn_invoice_info') {
-    const { grnId, supplierInvoiceNo, supplierInvoiceDate, supplierTin, taxInvoiceConfirmed } = body
+    const { grnId, supplierInvoiceNo, supplierInvoiceDate, supplierTin, taxInvoiceConfirmed, docNet, docVat } = body
     if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
 
     const { data: grn } = await admin.from('grns')
@@ -415,6 +420,8 @@ export async function POST(req: NextRequest) {
       tax_invoice_confirmed: confirmed,
       updated_at:            new Date().toISOString(),
     }
+    if (docNet !== undefined) patch.doc_net = docNet !== '' && docNet != null && Number.isFinite(Number(docNet)) ? round2(docNet) : null
+    if (docVat !== undefined) patch.doc_vat = docVat !== '' && docVat != null && Number.isFinite(Number(docVat)) ? round2(docVat) : null
     if (confirmed && !grn.tax_invoice_confirmed) {
       patch.tax_invoice_confirmed_at = new Date().toISOString()
       patch.tax_invoice_confirmed_by = (vendor as any).callerUserId || null

@@ -10,6 +10,7 @@
 import { useState, useEffect } from 'react'
 import { colomboToday } from '@/lib/dates'
 import { isLooseCount } from '@/lib/looseCount'
+import { round2 } from '@/lib/money2'
 
 export function formatRs(n: number): string {
   return 'Rs. ' + Math.round(n).toLocaleString('en-LK', { maximumFractionDigits: 0 })
@@ -742,7 +743,7 @@ export function ExpenseModal({
           supplier_tin:          f.claim_vat ? f.supplier_tin.trim() : null,
           supplier_invoice_no:   f.claim_vat ? f.supplier_invoice_no.trim() : null,
           supplier_invoice_date: f.claim_vat ? (f.supplier_invoice_date || f.expense_date) : null,
-          input_vat:             f.claim_vat ? Math.round(Number(f.input_vat) || 0) : 0,
+          input_vat:             f.claim_vat ? round2(f.input_vat) : 0, // as printed, cents kept
           // A cash expense dated today belongs in the open till session so the
           // expected-cash count reconciles; non-cash / back-dated stay unlinked.
           cash_session_id:
@@ -806,7 +807,7 @@ export function ExpenseModal({
                 ...p,
                 amount: amt,
                 // Keep the suggested VAT in step while they type
-                input_vat: p.claim_vat && amt !== '' ? Math.round(Number(amt) * 18 / 118) : p.input_vat,
+                input_vat: p.claim_vat && amt !== '' ? round2(Number(amt) * 18 / 118) : p.input_vat,
               }))
             }}
           />
@@ -947,8 +948,10 @@ export function ExpenseModal({
                   type="number"
                   min={0}
                   className="flex-1 text-xl font-black text-violet-700 outline-none"
+                  step="0.01"
+                  inputMode="decimal"
                   value={f.input_vat}
-                  onChange={e => setF(p => ({ ...p, input_vat: e.target.value === '' ? '' : Math.round(Number(e.target.value)) }))}
+                  onChange={e => setF(p => ({ ...p, input_vat: e.target.value === '' ? '' : round2(e.target.value) }))}
                 />
               </div>
               <p className="text-[10px] text-slate-400 mt-0.5">

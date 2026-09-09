@@ -3,6 +3,7 @@ import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/s
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
+import { round2 } from '@/lib/money2'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -134,7 +135,9 @@ export async function POST(req: NextRequest) {
 
     // Input VAT is only claimable against a valid tax invoice from a
     // VAT-registered supplier — no invoice number, no claim.
-    const claimVat = Math.round(Number(input_vat) || 0)
+    // As printed on the bill, to the cent (Schedule 02); the books hold the rupee
+    const docVat = round2(input_vat)
+    const claimVat = Math.round(docVat)
     if (claimVat < 0) return NextResponse.json({ error: 'Input VAT cannot be negative' }, { status: 400 })
     if (claimVat > 0) {
       if (!supplier_invoice_no || !String(supplier_invoice_no).trim()) {
@@ -178,6 +181,8 @@ export async function POST(req: NextRequest) {
         supplier_invoice_no:   supplier_invoice_no ? String(supplier_invoice_no).trim() : null,
         supplier_invoice_date: supplier_invoice_date || null,
         input_vat:             claimVat,
+        doc_vat:               docVat > 0 ? docVat : null,
+        doc_net:               docVat > 0 ? round2(Number(amount) - docVat) : null,
         created_by: userId,
       })
       .select()
@@ -207,7 +212,9 @@ export async function POST(req: NextRequest) {
       .from('expenses').select('id, amount').eq('id', expenseId).eq('vendor_id', vendor.id).single()
     if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
 
-    const claimVat = Math.round(Number(input_vat) || 0)
+    // As printed on the bill, to the cent (Schedule 02); the books hold the rupee
+    const docVat = round2(input_vat)
+    const claimVat = Math.round(docVat)
     if (claimVat < 0) return NextResponse.json({ error: 'Input VAT cannot be negative' }, { status: 400 })
     if (claimVat > 0) {
       if (!supplier_invoice_no || !String(supplier_invoice_no).trim()) {
@@ -227,6 +234,8 @@ export async function POST(req: NextRequest) {
       supplier_invoice_no:   supplier_invoice_no ? String(supplier_invoice_no).trim() : null,
       supplier_invoice_date: supplier_invoice_date || null,
       input_vat:             claimVat,
+      doc_vat:               docVat > 0 ? docVat : null,
+      doc_net:               docVat > 0 ? round2(Number(expense.amount) - docVat) : null,
     }).eq('id', expenseId).eq('vendor_id', vendor.id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 

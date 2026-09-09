@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { round2 } from '@/lib/money2'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Import shipments — one record per Customs declaration (IRD VAT Schedule 03).
@@ -96,6 +97,10 @@ export async function POST(req: NextRequest) {
       vat_deferred: Math.round(Number(e.vatDeferred) || 0),
       vat_upfront: Math.round(Number(e.vatUpfront) || 0),
       disallowed_vat: Math.round(Number(e.disallowedVat) || 0),
+      // As on the CUSDEC, to the cent — Schedule 03 carries these
+      doc_vat_deferred: round2(e.vatDeferred),
+      doc_vat_upfront: round2(e.vatUpfront),
+      doc_disallowed_vat: round2(e.disallowedVat),
       supplier: e.supplier?.trim() || null,
       reference: e.reference?.trim() || null,
       notes: e.notes?.trim() || null,

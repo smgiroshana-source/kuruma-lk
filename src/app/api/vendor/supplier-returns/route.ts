@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { recomputeSupplierInvoice } from '@/lib/supplierInvoice'
+import { round2 } from '@/lib/money2'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -301,7 +302,8 @@ export async function POST(req: NextRequest) {
 
     if (ret.status !== 'confirmed') return NextResponse.json({ error: 'Confirm the return before recording the supplier credit note' }, { status: 400 })
     if (!credit_note_date) return NextResponse.json({ error: 'Credit note date required' }, { status: 400 })
-    const vat = Math.round(Number(credit_vat) || 0)
+    const docVat = round2(credit_vat)           // as printed on the supplier's credit note
+    const vat = Math.round(docVat)
     if (vat < 0) return NextResponse.json({ error: 'VAT credited cannot be negative' }, { status: 400 })
     // The VAT on a credit note can never exceed the VAT on what was returned
     if (vat > Math.round(Number(ret.total_amount || 0))) {
@@ -314,6 +316,7 @@ export async function POST(req: NextRequest) {
       supplier_invoice_no:       invoice_no ? String(invoice_no).trim() : null,
       supplier_invoice_date:     invoice_date || null,
       credit_vat:                vat,
+      doc_credit_vat:            docVat,
     }).eq('id', returnId).eq('vendor_id', vendor.id)
     if (error) {
       if (String(error.message).includes('supplier_returns_crn_uniq')) {

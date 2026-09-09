@@ -1133,7 +1133,7 @@ function CreditNoteModal({
           credit_note_date: noteDate,
           invoice_no: invNo.trim() || null,
           invoice_date: invDate || null,
-          credit_vat: Math.round(Number(vat) || 0),
+          credit_vat: Math.round(Number(vat) * 100) / 100, // as printed, cents kept
         }),
       })
       const j = await res.json()

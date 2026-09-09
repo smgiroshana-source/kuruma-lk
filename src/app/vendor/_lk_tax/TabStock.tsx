@@ -141,7 +141,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [vatRate, setVatRate] = useState(18)
   const supplierVatRate = (supplierId: string) =>
     suppliers.find((x: any) => x.id === supplierId)?.vat_registered ? vatRate : 0
-  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false })
+  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false, docNet: '', docVat: '' })
   // The delivery paperwork (invoice no/date, notes) is folded away: the work at
   // a receiving door is the ITEMS, and the form was pushing them below the fold.
   const [grnPaperOpen, setGrnPaperOpen] = useState(false)
@@ -162,7 +162,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [grnSupplierEditId, setGrnSupplierEditId] = useState<string | null>(null)
   // Filling in Schedule 02 details on an already-posted GRN
   const [fixInvoiceGrn, setFixInvoiceGrn] = useState<any>(null)
-  const [fixInvoiceForm, setFixInvoiceForm] = useState({ supplierInvoiceNo: '', supplierInvoiceDate: '', supplierTin: '', taxInvoiceConfirmed: false })
+  const [fixInvoiceForm, setFixInvoiceForm] = useState({ supplierInvoiceNo: '', supplierInvoiceDate: '', supplierTin: '', taxInvoiceConfirmed: false, docNet: '', docVat: '' })
   const [fixInvoiceSaving, setFixInvoiceSaving] = useState(false)
   // Supplier management
   const [supplierFormOpen, setSupplierFormOpen] = useState(false)
@@ -269,7 +269,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         } else {
           showToast(`✅ ${j.grnNumber} saved as draft`)
         }
-        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false })
+        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false, docNet: '', docVat: '' })
         setGrnProductSearch(''); setGrnCsvPreview(null); setGrnCsvFileName('')
         fetchGrnList(); onDataChanged(); setStockMainView('history')
       } else showToast('⚠️ ' + j.error)
@@ -997,6 +997,32 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice date') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
                     <p className="text-[10px] text-slate-400 mt-1">The date on their invoice — not always the delivery day.</p>
                   </div>
+                  {grnInputVat > 0 && (() => {
+                    const printedVat = grnForm.docVat === '' ? null : Number(grnForm.docVat)
+                    const off = printedVat != null && Number.isFinite(printedVat) ? Math.abs(printedVat - grnInputVat) : 0
+                    return (
+                      <div className="sm:col-span-3 grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                        <div className="col-span-2 text-[10px] font-bold text-slate-500 uppercase tracking-wide">As printed on their tax invoice — copy the figures, cents included</div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Net (excl. VAT)</label>
+                          <input type="number" step="0.01" min={0} inputMode="decimal" value={grnForm.docNet} placeholder={grnNetCost.toFixed(2)}
+                            onChange={e => setGrnForm(f => ({ ...f, docNet: e.target.value }))}
+                            className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400 bg-white" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">VAT</label>
+                          <input type="number" step="0.01" min={0} inputMode="decimal" value={grnForm.docVat} placeholder={grnInputVat.toFixed(2)}
+                            onChange={e => setGrnForm(f => ({ ...f, docVat: e.target.value }))}
+                            className={`w-full px-3 py-2 rounded-lg border-2 text-sm font-mono outline-none focus:border-orange-400 bg-white ${off > 1 ? 'border-amber-400' : 'border-slate-200'}`} />
+                        </div>
+                        <p className="col-span-2 text-[10px] text-slate-500">
+                          {off > 1
+                            ? <span className="text-amber-700 font-bold">Printed VAT is Rs.{off.toFixed(2)} away from 18% of the costs entered (Rs.{grnInputVat.toLocaleString()}) — check the lines or the paper.</span>
+                            : <>Left blank, the return uses the figures worked out from the lines ({grnNetCost.toLocaleString()} + {grnInputVat.toLocaleString()}). The books stay in whole rupees either way.</>}
+                        </p>
+                      </div>
+                    )
+                  })()}
                   {grnInputVat > 0 && (
                     <label className={`sm:col-span-3 flex items-start gap-2.5 rounded-lg border-2 px-3 py-2.5 cursor-pointer ${grnForm.taxInvoiceConfirmed ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'}`}>
                       <input type="checkbox" checked={grnForm.taxInvoiceConfirmed} onChange={e => setGrnForm(f => ({ ...f, taxInvoiceConfirmed: e.target.checked }))} className="w-4 h-4 mt-0.5 accent-emerald-600 shrink-0" />
@@ -1609,6 +1635,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                         supplierInvoiceDate: grn.supplier_invoice_date ? String(grn.supplier_invoice_date).slice(0, 10) : '',
                         supplierTin:         grn.supplier_tin || '',
                         taxInvoiceConfirmed: !!grn.tax_invoice_confirmed,
+                        docNet: grn.doc_net != null ? String(grn.doc_net) : '',
+                        docVat: grn.doc_vat != null ? String(grn.doc_vat) : '',
                       })
                     }} className="text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 px-2.5 py-1.5 rounded-lg">
                       Add details
@@ -2207,6 +2235,21 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   placeholder="9 digits"
                   className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
                 <p className="text-[10px] text-slate-400 mt-1">Saved to the supplier too, so the next GRN already has it.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Net as printed</label>
+                  <input type="number" step="0.01" min={0} inputMode="decimal" value={fixInvoiceForm.docNet} placeholder={String(fixInvoiceGrn.net_cost ?? '')}
+                    onChange={e => setFixInvoiceForm(f => ({ ...f, docNet: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">VAT as printed</label>
+                  <input type="number" step="0.01" min={0} inputMode="decimal" value={fixInvoiceForm.docVat} placeholder={String(fixInvoiceGrn.input_vat ?? '')}
+                    onChange={e => setFixInvoiceForm(f => ({ ...f, docVat: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" />
+                </div>
+                <p className="col-span-2 text-[10px] text-slate-400 -mt-1">Cents included — Schedule 02 carries these exactly as the supplier declared them.</p>
               </div>
               <label className={`flex items-start gap-2.5 rounded-lg border-2 px-3 py-2.5 cursor-pointer ${fixInvoiceForm.taxInvoiceConfirmed ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'}`}>
                 <input type="checkbox" checked={fixInvoiceForm.taxInvoiceConfirmed} onChange={e => setFixInvoiceForm(f => ({ ...f, taxInvoiceConfirmed: e.target.checked }))} className="w-4 h-4 mt-0.5 accent-emerald-600 shrink-0" />

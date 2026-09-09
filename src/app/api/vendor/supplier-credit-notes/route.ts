@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { round2 } from '@/lib/money2'
 // One rule for settling an invoice, shared with the supplier-returns route,
 // which raises a credit note when goods go back.
 import { recomputeSupplierInvoice as recomputeInvoice } from '@/lib/supplierInvoice'
@@ -79,6 +80,8 @@ export async function POST(req: NextRequest) {
 
     const net = r0(netAmount)
     const vat = r0(vatAmount)
+    // As printed on the supplier's note — Schedule 04 carries these to the cent
+    const docNet = round2(netAmount), docVat = round2(vatAmount)
     if (net <= 0) return NextResponse.json({ error: 'The credited amount must be more than zero' }, { status: 400 })
     if (vat < 0) return NextResponse.json({ error: 'VAT cannot be negative' }, { status: 400 })
     if (vat > net) return NextResponse.json({ error: `VAT (${vat}) is larger than the credited value (${net}) — check the note` }, { status: 400 })
@@ -149,6 +152,8 @@ export async function POST(req: NextRequest) {
       net_amount:          net,
       vat_amount:          vat,
       total_amount:        net + vat,
+      doc_net:             docNet,
+      doc_vat:             docVat,
       created_by:          userId,
     }).select().single()
 

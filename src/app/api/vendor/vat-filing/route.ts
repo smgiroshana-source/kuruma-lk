@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { missingVatPaperwork } from '@/lib/vatPaperwork'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { round2, exactOr } from '@/lib/money2'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VAT Filing Centre — everything one taxable period needs, in one call.
@@ -96,7 +97,7 @@ export async function GET(req: NextRequest) {
   // credits parked earlier still surface.
   const localWindowStart = addMonths(period, -12) + '-01'
   const { data: grns, error: grnErr } = await admin.from('grns')
-    .select('id, grn_number, grn_series, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, net_cost, input_vat, disallowed_vat, vat_claim_period, tax_invoice_confirmed')
+    .select('id, grn_number, grn_series, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, net_cost, input_vat, doc_net, doc_vat, disallowed_vat, vat_claim_period, tax_invoice_confirmed')
     .eq('vendor_id', caller.vendor.id).eq('status', 'posted').gt('input_vat', 0)
     .gte('received_at', localWindowStart)
     .order('received_at')
@@ -105,7 +106,7 @@ export async function GET(req: NextRequest) {
   // Overheads and consumables with a supplier tax invoice — same 12-month
   // window as any other local purchase.
   const { data: expenses, error: expErr } = await admin.from('expenses')
-    .select('id, expense_date, category, description, supplier_name, supplier_tin, supplier_invoice_no, supplier_invoice_date, amount, input_vat, vat_claim_period')
+    .select('id, expense_date, category, description, supplier_name, supplier_tin, supplier_invoice_no, supplier_invoice_date, amount, input_vat, doc_net, doc_vat, vat_claim_period')
     .eq('vendor_id', caller.vendor.id).gt('input_vat', 0)
     .gte('expense_date', localWindowStart)
     .order('expense_date')
@@ -133,7 +134,8 @@ export async function GET(req: NextRequest) {
         missingInvoiceInfo: missingVatPaperwork(g).length > 0,
         missingFields: missingVatPaperwork(g),
         partyTin: g.supplier_tin || '', partyName: g.supplier_name || '',
-        value: parseInt(g.net_cost || 0), vat: parseInt(g.input_vat || 0),
+        // As printed on the supplier's invoice when recorded; else the book figures
+        value: exactOr(g.doc_net, g.net_cost), vat: exactOr(g.doc_vat, g.input_vat),
         disallowedVat: parseInt(g.disallowed_vat || 0),
         originMonth, claimPeriod, deadline,
         monthsLeft: monthsBetween(nowMonth, deadline),
@@ -148,11 +150,11 @@ export async function GET(req: NextRequest) {
       kind: 'import' as const, id: im.id, ref: im.cusdec_no,
       invoiceDate: String(im.cusdec_date).slice(0, 10),
       cusdecSerialId: im.cusdec_serial_id, cusdecRegDate: im.cusdec_reg_date, cusdecOfficeId: im.cusdec_office_id,
-      vatDeferred: parseInt(im.vat_deferred || 0), vatUpfront: parseInt(im.vat_upfront || 0),
-      disallowedVat: parseInt(im.disallowed_vat || 0),
+      vatDeferred: exactOr(im.doc_vat_deferred, im.vat_deferred), vatUpfront: exactOr(im.doc_vat_upfront, im.vat_upfront),
+      disallowedVat: exactOr(im.doc_disallowed_vat, im.disallowed_vat),
       partyName: im.supplier || '', partyTin: '',
       value: 0,
-      vat: parseInt(im.vat_upfront || 0) + parseInt(im.vat_deferred || 0) - parseInt(im.disallowed_vat || 0),
+      vat: round2(exactOr(im.doc_vat_upfront, im.vat_upfront) + exactOr(im.doc_vat_deferred, im.vat_deferred) - exactOr(im.doc_disallowed_vat, im.disallowed_vat)),
       originMonth, claimPeriod, deadline,
       monthsLeft: monthsBetween(nowMonth, deadline),
     }
@@ -163,7 +165,7 @@ export async function GET(req: NextRequest) {
     const originMonth = monthOf(invoiceDate)
     const claimPeriod = e.vat_claim_period || originMonth
     const deadline = addMonths(originMonth, 12)
-    const vat = parseInt(e.input_vat || 0)
+    const vat = exactOr(e.doc_vat, e.input_vat)
     return {
       kind: 'expense' as const, id: e.id,
       ref: e.supplier_invoice_no || e.description,
@@ -172,7 +174,7 @@ export async function GET(req: NextRequest) {
       missingFields: missingVatPaperwork(e),
       partyTin: e.supplier_tin || '', partyName: e.supplier_name || e.description || '',
       // The amount paid is VAT-inclusive; Schedule 02 wants the value excluding it
-      value: Math.round(parseInt(e.amount || 0) - vat), vat,
+      value: e.doc_net != null ? round2(e.doc_net) : Math.round(parseInt(e.amount || 0) - vat), vat,
       disallowedVat: 0,
       category: e.category,
       originMonth, claimPeriod, deadline,
@@ -212,7 +214,7 @@ export async function GET(req: NextRequest) {
     })
     .sort((a: any, b: any) => b.daysOld - a.daysOld)
   const parkedLater = allInput.filter(i => i.claimPeriod > period).sort((a, b) => a.monthsLeft - b.monthsLeft)
-  const inputVat = claimedNow.reduce((s, i) => s + i.vat, 0)
+  const inputVat = round2(claimedNow.reduce((s, i) => s + i.vat, 0))
 
   // ── Schedule 04: credit notes issued to customers in the period ──
   const { data: crns, error: crnErr } = await admin.from('credit_notes')
@@ -246,7 +248,7 @@ export async function GET(req: NextRequest) {
   // Only returns where the supplier's credit note has actually been received and
   // recorded belong on the return.
   const { data: supRets, error: supErr } = await admin.from('supplier_returns')
-    .select('return_no, supplier_credit_note_no, supplier_credit_note_date, supplier_invoice_no, supplier_invoice_date, credit_vat, total_amount, supplier:suppliers(name, tin)')
+    .select('return_no, supplier_credit_note_no, supplier_credit_note_date, supplier_invoice_no, supplier_invoice_date, credit_vat, doc_credit_vat, total_amount, supplier:suppliers(name, tin)')
     .eq('vendor_id', caller.vendor.id)
     .not('supplier_credit_note_no', 'is', null)
     .gte('supplier_credit_note_date', from).lte('supplier_credit_note_date', to)
@@ -260,7 +262,7 @@ export async function GET(req: NextRequest) {
     noteDate: String(r.supplier_credit_note_date).slice(0, 10),
     noteNo: r.supplier_credit_note_no,
     value: parseInt(r.total_amount || 0),
-    vatAmount: parseInt(r.credit_vat || 0),
+    vatAmount: exactOr(r.doc_credit_vat, r.credit_vat),
     issuedByMe: 'No',
     _ref: r.return_no,
     _party: r.supplier?.name || '',
@@ -274,7 +276,7 @@ export async function GET(req: NextRequest) {
   // It still reduces the payable and still counts in profit; it just isn't the
   // VAT return's business.
   const { data: supCns, error: supCnErr } = await admin.from('supplier_credit_notes')
-    .select('credit_note_no, credit_note_date, invoice_no, invoice_date, net_amount, vat_amount, reason, supplier:suppliers(name, tin)')
+    .select('credit_note_no, credit_note_date, invoice_no, invoice_date, net_amount, vat_amount, reason, supplier:suppliers(name, tin), doc_net, doc_vat')
     .eq('vendor_id', caller.vendor.id).gt('vat_amount', 0)
     .gte('credit_note_date', from).lte('credit_note_date', to)
     .order('credit_note_date')
@@ -287,8 +289,8 @@ export async function GET(req: NextRequest) {
       noteType: 'Credit',
       noteDate: String(c.credit_note_date).slice(0, 10),
       noteNo: c.credit_note_no,
-      value: parseInt(c.net_amount || 0),
-      vatAmount: parseInt(c.vat_amount || 0),
+      value: exactOr(c.doc_net, c.net_amount),
+      vatAmount: exactOr(c.doc_vat, c.vat_amount),
       issuedByMe: 'No',
       _ref: c.reason,
       _party: c.supplier?.name || '',
@@ -298,10 +300,12 @@ export async function GET(req: NextRequest) {
   const supplierCrnVat = schedule04Supplier.reduce((s: number, r: any) => s + r.vatAmount, 0)
 
   // Output VAT is reduced by credit notes issued in this period
-  const netOutputVat = outputVat - crnVat
-  // …and reduced further on the input side by what suppliers credited back
-  const netInputVat = inputVat - supplierCrnVat
-  const netPayable = netOutputVat - netInputVat
+  const netOutputVat = round2(outputVat - crnVat)
+  // …and reduced further on the input side by what suppliers credited back.
+  // Input figures carry cents (as printed); the payable is exact to the cent
+  // and the screen shows it to the rupee.
+  const netInputVat = round2(inputVat - supplierCrnVat)
+  const netPayable = round2(netOutputVat - netInputVat)
 
   return NextResponse.json({
     period, from, to,
