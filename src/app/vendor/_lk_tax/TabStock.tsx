@@ -1000,6 +1000,12 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                   {grnInputVat > 0 && (() => {
                     const printedVat = grnForm.docVat === '' ? null : Number(grnForm.docVat)
                     const off = printedVat != null && Number.isFinite(printedVat) ? Math.abs(printedVat - grnInputVat) : 0
+                    // Our lines are whole rupees; the supplier's unit prices carry
+                    // cents. Rounding alone can move the VAT by up to 50 cents × 18%
+                    // per unit, so the warning only speaks beyond that bound — a real
+                    // gap (a discount line not entered, a mistyped cost), not rounding.
+                    const grnUnits = grnItems.reduce((t, i) => t + i.quantity, 0)
+                    const tolerance = 1 + grnUnits * 0.5 * (vatRate / 100)
                     return (
                       <div className="sm:col-span-3 grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <div className="col-span-2 text-[10px] font-bold text-slate-500 uppercase tracking-wide">As printed on their tax invoice — copy the figures, cents included</div>
@@ -1013,12 +1019,14 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                           <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">VAT</label>
                           <input type="number" step="0.01" min={0} inputMode="decimal" value={grnForm.docVat} placeholder={grnInputVat.toFixed(2)}
                             onChange={e => setGrnForm(f => ({ ...f, docVat: e.target.value }))}
-                            className={`w-full px-3 py-2 rounded-lg border-2 text-sm font-mono outline-none focus:border-orange-400 bg-white ${off > 1 ? 'border-amber-400' : 'border-slate-200'}`} />
+                            className={`w-full px-3 py-2 rounded-lg border-2 text-sm font-mono outline-none focus:border-orange-400 bg-white ${off > tolerance ? 'border-amber-400' : 'border-slate-200'}`} />
                         </div>
                         <p className="col-span-2 text-[10px] text-slate-500">
-                          {off > 1
-                            ? <span className="text-amber-700 font-bold">Printed VAT is Rs.{off.toFixed(2)} away from 18% of the costs entered (Rs.{grnInputVat.toLocaleString()}) — check the lines or the paper.</span>
-                            : <>Left blank, the return uses the figures worked out from the lines ({grnNetCost.toLocaleString()} + {grnInputVat.toLocaleString()}). The books stay in whole rupees either way.</>}
+                          {off > tolerance
+                            ? <span className="text-amber-700 font-bold">Printed VAT is Rs.{off.toFixed(2)} from {vatRate}% of the lines (Rs.{grnInputVat.toLocaleString()}) — more than whole-rupee costs can explain for {grnUnits} unit{grnUnits !== 1 ? 's' : ''} (up to Rs.{tolerance.toFixed(2)}). A discount not entered, or a mistyped cost?</span>
+                            : off > 0
+                              ? <span className="text-emerald-700">Rs.{off.toFixed(2)} from the lines — within what whole-rupee unit costs explain for {grnUnits} unit{grnUnits !== 1 ? 's' : ''}. The return files the printed figure; the books keep the rupees.</span>
+                              : <>Left blank, the return uses the figures worked out from the lines ({grnNetCost.toLocaleString()} + {grnInputVat.toLocaleString()}). The books stay in whole rupees either way.</>}
                         </p>
                       </div>
                     )
