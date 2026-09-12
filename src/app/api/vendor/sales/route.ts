@@ -315,7 +315,7 @@ export async function GET(req: NextRequest) {
   const allSales = await fetchAllRows((from, to) => {
     let query = admin
       .from('sales')
-      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method, source_method)')
+      .select('*, items:sale_items(id, product_id, product_name, product_sku, quantity, unit_price, unit_cost, total, returned_quantity), customer:customers(id, name, phone), payments:payments(id, amount, payment_method, source_method), returns:sale_returns(kind, amount, rebill_invoice_no, reason, created_at)')
       .eq('vendor_id', vendor.id)
     // Branch view: shop (PART/PROP) vs workshop (REPR/WPRO). A scoped login is
     // pinned to its own side; owners choose with ?branch=
@@ -1502,7 +1502,8 @@ export async function POST(req: NextRequest) {
   }
 
   if (action === 'return_items') {
-    const { saleId, returnItems, refundMethod, return_reason: returnReason } = body
+    const { saleId, returnItems, refundMethod, return_reason: returnReason, return_kind: returnKind, rebill_invoice_no: rebillInvoiceNo } = body
+    if (!['rebill', 'goods_back', 'faulty'].includes(returnKind)) return NextResponse.json({ error: 'Say why: wrong invoice (re-billing), goods came back, or faulty' }, { status: 400 })
     // returnItems: [{ saleItemId, quantity }]
     // refundMethod: 'advance' | 'cash'
     if (!saleId || !returnItems || !Array.isArray(returnItems) || returnItems.length === 0)
@@ -1660,6 +1661,17 @@ export async function POST(req: NextRequest) {
         })
       }
     }
+
+    // One row per return event, with the reason — so returns can be split
+    // into paperwork (re-billed) and goods that came back (owner, 2026-09-12).
+    try {
+      await admin.from('sale_returns').insert({
+        vendor_id: vendor.id, sale_id: saleId, kind: returnKind,
+        reason: returnReason ? String(returnReason).slice(0, 300) : null,
+        rebill_invoice_no: rebillInvoiceNo ? String(rebillInvoiceNo).trim().slice(0, 40) : null,
+        amount: totalRefund, items: claimedReturns, created_by: vendor.callerUserId || null,
+      })
+    } catch (e) { console.error('sale_returns insert failed', saleId, e) }
 
     return NextResponse.json({
       success: true,

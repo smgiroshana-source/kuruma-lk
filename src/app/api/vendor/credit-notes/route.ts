@@ -22,7 +22,8 @@ export async function POST(req: NextRequest) {
   const vendor = await getVendor()
   if (!vendor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { saleId, returnedItems, reason, refundMethod } = await req.json()
+  const { saleId, returnedItems, reason, refundMethod, return_kind: returnKind, rebill_invoice_no: rebillInvoiceNo } = await req.json()
+  if (!['rebill', 'goods_back', 'faulty'].includes(returnKind)) return NextResponse.json({ error: 'Say why: wrong invoice (re-billing), goods came back, or faulty' }, { status: 400 })
   // returnedItems: [{ saleItemId: string, quantity: number }]
   // refundMethod: 'advance' | 'cash' | undefined
 
@@ -199,6 +200,16 @@ export async function POST(req: NextRequest) {
   }
   if (allReturned) salesUpdate.voided_at = returnedAt
   await admin.from('sales').update(salesUpdate).eq('id', sale.id)
+
+  // Why — one row per return event, same table as till returns
+  try {
+    await admin.from('sale_returns').insert({
+      vendor_id: vendor.id, sale_id: sale.id, kind: returnKind,
+      reason: reason ? String(reason).slice(0, 300) : null,
+      rebill_invoice_no: rebillInvoiceNo ? String(rebillInvoiceNo).trim().slice(0, 40) : null,
+      credit_note_no: creditNoteNo, amount: totalAmount, items: mirroredReturns,
+    })
+  } catch (e) { console.error('sale_returns insert failed', sale.id, e) }
 
   // 6. Record refund payment entries (for cash reconciliation visibility)
   if (paidReduction > 0) {

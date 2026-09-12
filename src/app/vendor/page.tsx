@@ -732,6 +732,11 @@ export default function VendorDashboard() {
   const [returnModal, setReturnModal] = useState<any>(null)
   const [returnItems, setReturnItems] = useState<Record<string, number>>({})
   const [returnReason, setReturnReason] = useState('')
+  // Why the goods are coming back — required before a return saves. 'rebill'
+  // is paperwork (wrong invoice, re-billed); the other two are goods on the
+  // counter. Reported separately so returns don't read as lost sales.
+  const [returnKind, setReturnKind] = useState<'rebill' | 'goods_back' | 'faulty' | ''>('')
+  const [rebillInvoiceNo, setRebillInvoiceNo] = useState('')
   const [returnLoading, setReturnLoading] = useState(false)
 
   // Feature 1,2: Bulk upload duplicate detection + progress
@@ -1405,6 +1410,7 @@ export default function VendorDashboard() {
     if (!returnModal) return
     const items = Object.entries(returnItems).filter(([, qty]) => qty > 0).map(([saleItemId, quantity]) => ({ saleItemId, quantity }))
     if (items.length === 0) { showToast('Select items to return'); return }
+    if (!returnKind) { showToast('Say why — wrong invoice, goods came back, or faulty'); return }
     setReturnLoading(true)
     try {
       if (returnModal.tax_serial) {
@@ -1417,27 +1423,29 @@ export default function VendorDashboard() {
             returnedItems: items,
             reason: returnReason.trim() || 'goods_returned',
             refundMethod,
+            return_kind: returnKind,
+            rebill_invoice_no: rebillInvoiceNo.trim() || null,
           }),
         })
         const j = await r.json()
         if (r.ok) {
           showToast('✅ Credit Note ' + j.creditNoteNo + ' issued')
           setIssuedCreditNote(j.creditNote)
-          setReturnModal(null); setReturnItems({}); setReturnReason('')
+          setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo('')
           fetchSales(); fetchData()
         } else {
           showToast('⚠️ ' + (j.error || 'Failed to issue credit note'))
         }
       } else {
         // ── Receipt: direct return (no credit note required) ──
-        const payload: Record<string, unknown> = { action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod }
+        const payload: Record<string, unknown> = { action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod, return_kind: returnKind, rebill_invoice_no: rebillInvoiceNo.trim() || null }
         if (returnReason.trim()) payload.return_reason = returnReason.trim()
         const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
         const j = await r.json()
         if (j.success) {
           showToast(j.message)
           fetchSales(); fetchData()
-          setReturnModal(null); setReturnItems({}); setReturnReason('')
+          setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo('')
         } else showToast('Error: ' + j.error)
       }
     } catch { showToast('Network error') }
@@ -2032,6 +2040,12 @@ ${(() => {
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
+    // Returns keep the sale's total (period model) — say what came back and why
+    const totalReturned = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.returned_amount || 0), 0)
+    const totalSoldOn = filtered.reduce((s: number, sale: any) => s + (sale.sell_through_of_sale_id ? parseFloat(sale.total || 0) : 0), 0)
+    const retKinds = { rebill: 0, goods_back: 0, faulty: 0 }
+    filtered.forEach((sale: any) => (sale.returns || []).forEach((r: any) => { const k = (r.kind === 'rebill' || r.kind === 'faulty') ? r.kind : 'goods_back'; retKinds[k as keyof typeof retKinds] += parseFloat(r.amount || 0) }))
+    const retUnclassified = Math.max(0, totalReturned - retKinds.rebill - retKinds.goods_back - retKinds.faulty)
 
     const methodTotals: Record<string, number> = { cash: 0, cheque: 0, bank: 0, card: 0, advance: 0 }
     filtered.forEach((sale: any) => {
@@ -2076,8 +2090,10 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
 <div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">Balance Due</div></div>
+${totalReturned > 0 ? '<div class="summary-box"><div class="val" style="color:#b45309">Rs.' + totalReturned.toLocaleString() + '</div><div class="lbl">Returned</div><div style="font-size:10px;color:#666;margin-top:4px">' + [retKinds.rebill > 0 ? 're-billed ' + retKinds.rebill.toLocaleString() : '', retKinds.goods_back > 0 ? 'came back ' + retKinds.goods_back.toLocaleString() : '', retKinds.faulty > 0 ? 'faulty ' + retKinds.faulty.toLocaleString() : '', retUnclassified > 0 ? 'no reason recorded ' + retUnclassified.toLocaleString() : ''].filter(Boolean).join(' · ') + '</div></div>' : ''}
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
 </div>
+${(totalReturned > 0 || totalSoldOn > 0) ? '<p style="font-size:11px;color:#666;margin:-8px 0 12px">Total sales ' + totalSales.toLocaleString() + ' − returned ' + totalReturned.toLocaleString() + (totalSoldOn > 0 ? ' − sold on ' + totalSoldOn.toLocaleString() + ' (parts sold at the receiving shop; no money moves)' : '') + ' = collected ' + totalPaid.toLocaleString() + ' + balance due ' + totalCredit.toLocaleString() + '. A returned sale keeps its original total; the value comes off in the period it came back.</p>' : ''}
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
 <div class="method-grid">
@@ -4281,14 +4297,23 @@ ${customerRows.map(c => `<tr>
         {/* PERIOD REPORT MODAL */}
         {periodReportModal && (() => {
           // Group sales by customer
-          const byCustomer: Record<string, { key: string; name: string; phone: string; invoices: number; total: number; paid: number; balance: number; sales: any[] }> = {}
+          const byCustomer: Record<string, { key: string; name: string; phone: string; invoices: number; total: number; paid: number; balance: number; returned: number; soldOn: number; rebill: number; goodsBack: number; faulty: number; sales: any[] }> = {}
           periodReportSales.forEach((s: any) => {
             const key = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
-            if (!byCustomer[key]) byCustomer[key] = { key, name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, balance: 0, sales: [] }
+            if (!byCustomer[key]) byCustomer[key] = { key, name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, balance: 0, returned: 0, soldOn: 0, rebill: 0, goodsBack: 0, faulty: 0, sales: [] }
             byCustomer[key].invoices++
             byCustomer[key].total += parseFloat(s.total || 0)
             byCustomer[key].paid += parseFloat(s.paid_amount || 0)
             byCustomer[key].balance += parseFloat(s.balance_due || 0)
+            // A returned sale keeps its total (period model); the value that came
+            // back is in returned_amount, and sale_returns says why.
+            byCustomer[key].returned += parseFloat(s.returned_amount || 0)
+            if (s.sell_through_of_sale_id) byCustomer[key].soldOn += parseFloat(s.total || 0)
+            for (const r of (s.returns || [])) {
+              if (r.kind === 'rebill') byCustomer[key].rebill += parseFloat(r.amount || 0)
+              else if (r.kind === 'faulty') byCustomer[key].faulty += parseFloat(r.amount || 0)
+              else byCustomer[key].goodsBack += parseFloat(r.amount || 0)
+            }
             byCustomer[key].sales.push(s)
           })
           const customers = Object.values(byCustomer).sort((a, b) => b.total - a.total)
@@ -4298,6 +4323,12 @@ ${customerRows.map(c => `<tr>
           const selTotal = selectedCustomers.reduce((s, c) => s + c.total, 0)
           const selPaid = selectedCustomers.reduce((s, c) => s + c.paid, 0)
           const selBalance = selectedCustomers.reduce((s, c) => s + c.balance, 0)
+          const selReturned = selectedCustomers.reduce((s, c) => s + c.returned, 0)
+          const selSoldOn = selectedCustomers.reduce((s, c) => s + c.soldOn, 0)
+          const selRebill = selectedCustomers.reduce((s, c) => s + c.rebill, 0)
+          const selFaulty = selectedCustomers.reduce((s, c) => s + c.faulty, 0)
+          const selGoodsBack = selectedCustomers.reduce((s, c) => s + c.goodsBack, 0)
+          const selUnclassified = Math.max(0, selReturned - selRebill - selFaulty - selGoodsBack)
           const fromStr = new Date(reportFrom).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
           const toStr = new Date(reportTo).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
 
@@ -4315,14 +4346,27 @@ ${customerRows.map(c => `<tr>
                 </div>
 
                 {/* Summary bar */}
-                <div className="grid grid-cols-3 divide-x divide-slate-100 shrink-0 bg-slate-50 border-b border-slate-100">
-                  {[['Total Sales', selTotal], ['Total Paid', selPaid], ['Balance Due', selBalance]].map(([lbl, val]) => (
-                    <div key={lbl as string} className="px-4 py-3 text-center">
+                <div className={'grid divide-x divide-slate-100 shrink-0 bg-slate-50 border-b border-slate-100 ' + (selReturned > 0 ? 'grid-cols-4' : 'grid-cols-3')}>
+                  {[['Total Sales', selTotal], ['Total Paid', selPaid], ['Balance Due', selBalance], ...(selReturned > 0 ? [['Returned', selReturned]] : [])].map(([lbl, val]) => (
+                    <div key={lbl as string} className="px-3 py-3 text-center">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lbl}</p>
-                      <p className={'font-black text-sm mt-0.5 ' + (lbl === 'Balance Due' && (val as number) > 0 ? 'text-red-600' : 'text-slate-800')}>Rs.{(val as number).toLocaleString()}</p>
+                      <p className={'font-black text-sm mt-0.5 ' + (lbl === 'Balance Due' && (val as number) > 0 ? 'text-red-600' : lbl === 'Returned' ? 'text-amber-700' : 'text-slate-800')}>Rs.{(val as number).toLocaleString()}</p>
+                      {lbl === 'Returned' && (
+                        <p className="text-[9px] text-slate-500 mt-0.5 leading-tight">
+                          {selRebill > 0 && <>re-billed {selRebill.toLocaleString()}<br /></>}
+                          {selGoodsBack > 0 && <>came back {selGoodsBack.toLocaleString()}<br /></>}
+                          {selFaulty > 0 && <>faulty {selFaulty.toLocaleString()}<br /></>}
+                          {selUnclassified > 0 && <>no reason recorded {selUnclassified.toLocaleString()}</>}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>
+                {(selReturned > 0 || selSoldOn > 0) && (
+                  <p className="px-4 py-1.5 text-[10px] text-slate-500 bg-slate-50 border-b border-slate-100 shrink-0">
+                    Total sales {selTotal.toLocaleString()} − returned {selReturned.toLocaleString()}{selSoldOn > 0 ? ` − sold on ${selSoldOn.toLocaleString()} (no money moves)` : ''} = paid {selPaid.toLocaleString()} + due {selBalance.toLocaleString()}
+                  </p>
+                )}
 
                 {/* Select all row */}
                 <div className="flex items-center justify-between px-5 py-2.5 border-b border-slate-100 shrink-0">
@@ -4528,13 +4572,31 @@ ${customerRows.map(c => `<tr>
                   })}
                 </div>
                 <div className="mt-4">
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Reason <span className="text-slate-300 font-normal normal-case">(optional)</span></label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Why? <span className="text-red-500">*</span></label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {([
+                      { v: 'rebill', l: 'Wrong invoice', d: 'Re-billing it — paperwork, goods stay with the customer' },
+                      { v: 'goods_back', l: 'Goods came back', d: 'Back on the shelf, can be sold again' },
+                      { v: 'faulty', l: 'Faulty / not sellable', d: 'Came back but cannot be sold as it is' },
+                    ] as const).map(k => (
+                      <button key={k.v} type="button" onClick={() => setReturnKind(k.v)}
+                        className={'text-left px-3 py-2.5 rounded-xl border-2 transition ' + (returnKind === k.v ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white hover:border-slate-300')}>
+                        <div className={'text-sm font-bold ' + (returnKind === k.v ? 'text-amber-800' : 'text-slate-700')}>{k.l}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">{k.d}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {returnKind === 'rebill' && (
+                    <input type="text" value={rebillInvoiceNo} onChange={e => setRebillInvoiceNo(e.target.value)}
+                      placeholder="New invoice number, if already issued (optional)"
+                      className="mt-2 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                  )}
                   <input
                     type="text"
                     value={returnReason}
                     onChange={e => setReturnReason(e.target.value)}
-                    placeholder="e.g. Wrong item, Defective, Customer changed mind"
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                    placeholder="Note (optional) — e.g. wrong size, customer changed mind, fault found on fitting"
+                    className="mt-2 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300"
                   />
                 </div>
                 {(() => {
@@ -4553,12 +4615,12 @@ ${customerRows.map(c => `<tr>
                       <div className="space-y-2">
                         {/* Advance only works for registered customers — for walk-ins the
                             server can't credit anyone and the money would vanish */}
-                        {returnModal.customer_id && <button onClick={() => handleReturn('advance')} disabled={returnLoading}
+                        {returnModal.customer_id && <button onClick={() => handleReturn('advance')} disabled={returnLoading || !returnKind}
                           className="w-full text-left px-4 py-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 active:bg-emerald-100 transition disabled:opacity-50">
                           <div className="font-bold text-sm text-emerald-800">💰 Add Rs.{totalRefund.toLocaleString()} to Advance</div>
                           <p className="text-xs text-emerald-600 mt-0.5">Customer can use it for future purchases</p>
                         </button>}
-                        <button onClick={() => handleReturn('cash')} disabled={returnLoading}
+                        <button onClick={() => handleReturn('cash')} disabled={returnLoading || !returnKind}
                           className="w-full text-left px-4 py-3 rounded-xl border-2 border-slate-200 bg-slate-50 active:bg-slate-100 transition disabled:opacity-50">
                           <div className="font-bold text-sm text-slate-800">💵 Cash Refund Rs.{totalRefund.toLocaleString()}</div>
                           <p className="text-xs text-slate-500 mt-0.5">Give cash back to customer</p>
@@ -4569,7 +4631,7 @@ ${customerRows.map(c => `<tr>
                 })()}
               </div>
               <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex-shrink-0">
-                <button onClick={() => { setReturnModal(null); setReturnReason('') }} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
+                <button onClick={() => { setReturnModal(null); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo('') }} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
               </div>
             </div>
           </div>
