@@ -666,6 +666,8 @@ export default function VendorDashboard() {
   const [periodReportModal, setPeriodReportModal] = useState(false)
   const [periodReportLoading, setPeriodReportLoading] = useState(false)
   const [periodReportSales, setPeriodReportSales] = useState<any[]>([])
+  // Returns that happened inside the window, with their reason (period model)
+  const [periodReportReturns, setPeriodReportReturns] = useState<any[]>([])
   const [periodReportSelected, setPeriodReportSelected] = useState<Set<string>>(new Set())
   const [customerHistoryId, setCustomerHistoryId] = useState<string | null>(null)
   const [customerHistoryName, setCustomerHistoryName] = useState('')
@@ -2023,6 +2025,7 @@ ${(() => {
         !(s.items || []).some((i: any) => i.product_sku === 'OPENING-BAL')
       )
       setPeriodReportSales(sales)
+      setPeriodReportReturns(j.saleReturnsInPeriod || [])
       // Pre-select all unique customer keys
       const keys = new Set<string>(sales.map((s: any) => s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')))
       setPeriodReportSelected(keys)
@@ -2031,7 +2034,7 @@ ${(() => {
     setPeriodReportLoading(false)
   }
 
-  function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any) {
+  function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any, returnsList: any[] = []) {
     const filtered = salesList.filter((s: any) =>
       s.payment_status !== 'voided' &&
       s.payment_status !== 'draft' &&
@@ -2040,12 +2043,16 @@ ${(() => {
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const totalPaid = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.paid_amount || 0), 0)
     const totalCredit = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.balance_due || 0), 0)
-    // Returns keep the sale's total (period model) — say what came back and why
-    const totalReturned = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.returned_amount || 0), 0)
+    // Returns by the day they happened (period model): net sales = invoiced in
+    // the window − returned in the window, whichever invoice they were on.
+    const selectedKeys = new Set(filtered.map((sale: any) => sale.customer_id || 'walkin-' + (sale.customer_name || 'Unknown')))
+    const periodReturns = (returnsList || []).filter((r: any) => selectedKeys.has(r.customerId || 'walkin-' + (r.customerName || 'Unknown')))
+    const totalReturned = periodReturns.reduce((s: number, r: any) => s + parseFloat(r.amount || 0), 0)
+    const totalNet = totalSales - totalReturned
     const totalSoldOn = filtered.reduce((s: number, sale: any) => s + (sale.sell_through_of_sale_id ? parseFloat(sale.total || 0) : 0), 0)
     const retKinds = { rebill: 0, goods_back: 0, faulty: 0 }
-    filtered.forEach((sale: any) => (sale.returns || []).forEach((r: any) => { const k = (r.kind === 'rebill' || r.kind === 'faulty') ? r.kind : 'goods_back'; retKinds[k as keyof typeof retKinds] += parseFloat(r.amount || 0) }))
-    const retUnclassified = Math.max(0, totalReturned - retKinds.rebill - retKinds.goods_back - retKinds.faulty)
+    periodReturns.forEach((r: any) => { const k = (r.kind === 'rebill' || r.kind === 'faulty') ? r.kind : 'goods_back'; retKinds[k as keyof typeof retKinds] += parseFloat(r.amount || 0) })
+    const retUnclassified = 0
 
     const methodTotals: Record<string, number> = { cash: 0, cheque: 0, bank: 0, card: 0, advance: 0 }
     filtered.forEach((sale: any) => {
@@ -2060,16 +2067,21 @@ ${(() => {
     })
 
     // Customer-wise breakdown — ALL customers sorted by total desc
-    const byCustomer: Record<string, { name: string; phone: string; invoices: number; total: number; paid: number; due: number }> = {}
+    const byCustomer: Record<string, { name: string; phone: string; invoices: number; total: number; paid: number; due: number; returned: number }> = {}
     filtered.forEach((s: any) => {
       const id = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
-      if (!byCustomer[id]) byCustomer[id] = { name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, due: 0 }
+      if (!byCustomer[id]) byCustomer[id] = { name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, due: 0, returned: 0 }
       byCustomer[id].invoices++
       byCustomer[id].total += parseFloat(s.total || 0)
       byCustomer[id].paid += parseFloat(s.paid_amount || 0)
       byCustomer[id].due += parseFloat(s.balance_due || 0)
     })
-    const customerRows = Object.values(byCustomer).sort((a, b) => b.total - a.total)
+    periodReturns.forEach((r: any) => {
+      const id = r.customerId || 'walkin-' + (r.customerName || 'Unknown')
+      if (!byCustomer[id]) byCustomer[id] = { name: r.customerName || 'Walk-in', phone: '', invoices: 0, total: 0, paid: 0, due: 0, returned: 0 }
+      byCustomer[id].returned += parseFloat(r.amount || 0)
+    })
+    const customerRows = Object.values(byCustomer).sort((a, b) => (b.total - b.returned) - (a.total - a.returned))
 
     const shopName = escapeHtml(settings?.invoice_title || vendorInfo?.name) || 'kuruma.lk'
     const fromStr = new Date(fromDate).toLocaleDateString('en-LK', { day: '2-digit', month: 'long', year: 'numeric' })
@@ -2087,13 +2099,14 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="header"><div class="shop">${shopName}</div>${vendorInfo?.location ? '<div style="font-size:12px;color:#666">' + escapeHtml(vendorInfo.location) + (vendorInfo?.phone ? ' | Tel: ' + escapeHtml(vendorInfo.phone) : '') + '</div>' : ''}<div class="report-title">Sales Report</div><div class="date">${fromStr} — ${toStr}</div></div>
 
 <div class="summary">
-<div class="summary-box"><div class="val orange">Rs.${totalSales.toLocaleString()}</div><div class="lbl">Total Sales</div></div>
+<div class="summary-box"><div class="val orange">Rs.${totalNet.toLocaleString()}</div><div class="lbl">Net Sales</div></div>
+${totalReturned > 0 ? '<div class="summary-box"><div class="val">Rs.' + totalSales.toLocaleString() + '</div><div class="lbl">Invoiced</div></div>' : ''}
 <div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">Balance Due</div></div>
 ${totalReturned > 0 ? '<div class="summary-box"><div class="val" style="color:#b45309">Rs.' + totalReturned.toLocaleString() + '</div><div class="lbl">Returned</div><div style="font-size:10px;color:#666;margin-top:4px">' + [retKinds.rebill > 0 ? 're-billed ' + retKinds.rebill.toLocaleString() : '', retKinds.goods_back > 0 ? 'came back ' + retKinds.goods_back.toLocaleString() : '', retKinds.faulty > 0 ? 'faulty ' + retKinds.faulty.toLocaleString() : '', retUnclassified > 0 ? 'no reason recorded ' + retUnclassified.toLocaleString() : ''].filter(Boolean).join(' · ') + '</div></div>' : ''}
 <div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
 </div>
-${(totalReturned > 0 || totalSoldOn > 0) ? '<p style="font-size:11px;color:#666;margin:-8px 0 12px">Total sales ' + totalSales.toLocaleString() + ' − returned ' + totalReturned.toLocaleString() + (totalSoldOn > 0 ? ' − sold on ' + totalSoldOn.toLocaleString() + ' (parts sold at the receiving shop; no money moves)' : '') + ' = collected ' + totalPaid.toLocaleString() + ' + balance due ' + totalCredit.toLocaleString() + '. A returned sale keeps its original total; the value comes off in the period it came back.</p>' : ''}
+${(totalReturned > 0 || totalSoldOn > 0) ? '<p style="font-size:11px;color:#666;margin:-8px 0 12px">Net sales = invoiced ' + totalSales.toLocaleString() + ' − returned in this period ' + totalReturned.toLocaleString() + ' = <strong>' + totalNet.toLocaleString() + '</strong>. Returns count on the day they came back, whichever invoice they were on, so a re-billed invoice counts once.' + (totalSoldOn > 0 ? ' Sold on ' + totalSoldOn.toLocaleString() + ' (parts sold at the receiving shop) is inside net sales but carries no money.' : '') + '</p>' : ''}
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
 <div class="method-grid">
@@ -2108,7 +2121,9 @@ ${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="co
 <table><thead><tr>
   <th>Customer</th><th>Phone</th>
   <th class="text-right">Invoices</th>
-  <th class="text-right">Total Sales</th>
+  <th class="text-right">Invoiced</th>
+  <th class="text-right">Returned</th>
+  <th class="text-right">Net Sales</th>
   <th class="text-right">Paid</th>
   <th class="text-right">Balance Due</th>
 </tr></thead><tbody>
@@ -2116,13 +2131,17 @@ ${customerRows.map(c => `<tr>
   <td><strong>${escapeHtml(c.name)}</strong></td>
   <td style="font-size:11px;color:#64748b">${escapeHtml(c.phone)}</td>
   <td class="text-right">${c.invoices}</td>
-  <td class="text-right">Rs.${c.total.toLocaleString()}</td>
+  <td class="text-right" style="color:#64748b">Rs.${c.total.toLocaleString()}</td>
+  <td class="text-right" style="color:${c.returned > 0 ? '#b45309' : '#94a3b8'}">${c.returned > 0 ? 'Rs.' + c.returned.toLocaleString() : '—'}</td>
+  <td class="text-right"><strong>Rs.${(c.total - c.returned).toLocaleString()}</strong></td>
   <td class="text-right" style="color:#16a34a">Rs.${c.paid.toLocaleString()}</td>
   <td class="text-right" style="color:${c.due > 0 ? '#dc2626' : '#94a3b8'};font-weight:${c.due > 0 ? '700' : '400'}">${c.due > 0 ? 'Rs.' + c.due.toLocaleString() : '—'}</td>
 </tr>`).join('')}
 <tr style="background:#f1f5f9">
   <td colspan="3"><strong>TOTAL</strong></td>
-  <td class="text-right"><strong style="color:#ff6b35">Rs.${totalSales.toLocaleString()}</strong></td>
+  <td class="text-right"><strong>Rs.${totalSales.toLocaleString()}</strong></td>
+  <td class="text-right"><strong style="color:#b45309">${totalReturned > 0 ? 'Rs.' + totalReturned.toLocaleString() : '—'}</strong></td>
+  <td class="text-right"><strong style="color:#ff6b35">Rs.${totalNet.toLocaleString()}</strong></td>
   <td class="text-right"><strong style="color:#16a34a">Rs.${totalPaid.toLocaleString()}</strong></td>
   <td class="text-right"><strong style="color:#dc2626">Rs.${totalCredit.toLocaleString()}</strong></td>
 </tr>
@@ -4305,18 +4324,21 @@ ${customerRows.map(c => `<tr>
             byCustomer[key].total += parseFloat(s.total || 0)
             byCustomer[key].paid += parseFloat(s.paid_amount || 0)
             byCustomer[key].balance += parseFloat(s.balance_due || 0)
-            // A returned sale keeps its total (period model); the value that came
-            // back is in returned_amount, and sale_returns says why.
-            byCustomer[key].returned += parseFloat(s.returned_amount || 0)
             if (s.sell_through_of_sale_id) byCustomer[key].soldOn += parseFloat(s.total || 0)
-            for (const r of (s.returns || [])) {
-              if (r.kind === 'rebill') byCustomer[key].rebill += parseFloat(r.amount || 0)
-              else if (r.kind === 'faulty') byCustomer[key].faulty += parseFloat(r.amount || 0)
-              else byCustomer[key].goodsBack += parseFloat(r.amount || 0)
-            }
             byCustomer[key].sales.push(s)
           })
-          const customers = Object.values(byCustomer).sort((a, b) => b.total - a.total)
+          // Returns by the day they happened, whatever invoice they were on
+          // (period model). Net sales = invoiced in the window − returned in the
+          // window, so a wrong invoice that was re-billed counts once.
+          periodReportReturns.forEach((r: any) => {
+            const key = r.customerId || 'walkin-' + (r.customerName || 'Unknown')
+            if (!byCustomer[key]) byCustomer[key] = { key, name: r.customerName || 'Walk-in', phone: '', invoices: 0, total: 0, paid: 0, balance: 0, returned: 0, soldOn: 0, rebill: 0, goodsBack: 0, faulty: 0, sales: [] }
+            byCustomer[key].returned += r.amount
+            if (r.kind === 'rebill') byCustomer[key].rebill += r.amount
+            else if (r.kind === 'faulty') byCustomer[key].faulty += r.amount
+            else byCustomer[key].goodsBack += r.amount
+          })
+          const customers = Object.values(byCustomer).sort((a, b) => (b.total - b.returned) - (a.total - a.returned))
           const allKeys = customers.map(c => c.key)
           const allSelected = allKeys.every(k => periodReportSelected.has(k))
           const selectedCustomers = customers.filter(c => periodReportSelected.has(c.key))
@@ -4329,6 +4351,7 @@ ${customerRows.map(c => `<tr>
           const selFaulty = selectedCustomers.reduce((s, c) => s + c.faulty, 0)
           const selGoodsBack = selectedCustomers.reduce((s, c) => s + c.goodsBack, 0)
           const selUnclassified = Math.max(0, selReturned - selRebill - selFaulty - selGoodsBack)
+          const selNet = selTotal - selReturned
           const fromStr = new Date(reportFrom).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
           const toStr = new Date(reportTo).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
 
@@ -4346,11 +4369,11 @@ ${customerRows.map(c => `<tr>
                 </div>
 
                 {/* Summary bar */}
-                <div className={'grid divide-x divide-slate-100 shrink-0 bg-slate-50 border-b border-slate-100 ' + (selReturned > 0 ? 'grid-cols-4' : 'grid-cols-3')}>
-                  {[['Total Sales', selTotal], ['Total Paid', selPaid], ['Balance Due', selBalance], ...(selReturned > 0 ? [['Returned', selReturned]] : [])].map(([lbl, val]) => (
+                <div className={'grid divide-x divide-slate-100 shrink-0 bg-slate-50 border-b border-slate-100 ' + (selReturned > 0 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-3')}>
+                  {[['Net Sales', selNet], ...(selReturned > 0 ? [['Invoiced', selTotal], ['Returned', selReturned]] : []), ['Total Paid', selPaid], ['Balance Due', selBalance]].map(([lbl, val]) => (
                     <div key={lbl as string} className="px-3 py-3 text-center">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lbl}</p>
-                      <p className={'font-black text-sm mt-0.5 ' + (lbl === 'Balance Due' && (val as number) > 0 ? 'text-red-600' : lbl === 'Returned' ? 'text-amber-700' : 'text-slate-800')}>Rs.{(val as number).toLocaleString()}</p>
+                      <p className={'font-black mt-0.5 ' + (lbl === 'Net Sales' ? 'text-base text-orange-600' : 'text-sm ') + (lbl === 'Balance Due' && (val as number) > 0 ? 'text-red-600' : lbl === 'Returned' ? 'text-amber-700' : lbl === 'Net Sales' ? '' : 'text-slate-800')}>Rs.{(val as number).toLocaleString()}</p>
                       {lbl === 'Returned' && (
                         <p className="text-[9px] text-slate-500 mt-0.5 leading-tight">
                           {selRebill > 0 && <>re-billed {selRebill.toLocaleString()}<br /></>}
@@ -4364,7 +4387,9 @@ ${customerRows.map(c => `<tr>
                 </div>
                 {(selReturned > 0 || selSoldOn > 0) && (
                   <p className="px-4 py-1.5 text-[10px] text-slate-500 bg-slate-50 border-b border-slate-100 shrink-0">
-                    Total sales {selTotal.toLocaleString()} − returned {selReturned.toLocaleString()}{selSoldOn > 0 ? ` − sold on ${selSoldOn.toLocaleString()} (no money moves)` : ''} = paid {selPaid.toLocaleString()} + due {selBalance.toLocaleString()}
+                    Net sales = invoiced {selTotal.toLocaleString()} − returned in this period {selReturned.toLocaleString()} = <strong>{selNet.toLocaleString()}</strong>.
+                    Returns count on the day they came back, whichever invoice they were on, so a re-billed invoice counts once.
+                    {selSoldOn > 0 && <> Sold on {selSoldOn.toLocaleString()} is inside net sales but carries no money.</>}
                   </p>
                 )}
 
@@ -4393,7 +4418,8 @@ ${customerRows.map(c => `<tr>
                         </div>
                         <div className="text-right shrink-0 space-y-0.5">
                           <p className="text-xs text-slate-400">{c.invoices} invoice{c.invoices !== 1 ? 's' : ''}</p>
-                          <p className="font-bold text-sm text-slate-800">Rs.{c.total.toLocaleString()}</p>
+                          <p className="font-bold text-sm text-slate-800">Rs.{(c.total - c.returned).toLocaleString()}</p>
+                          {c.returned > 0 && <p className="text-[10px] text-amber-700">invoiced {c.total.toLocaleString()} · returned {c.returned.toLocaleString()}{c.rebill > 0 ? ` (re-billed ${c.rebill.toLocaleString()})` : ''}</p>}
                           {c.balance > 0 && <p className="text-xs font-bold text-red-500">Due Rs.{c.balance.toLocaleString()}</p>}
                         </div>
                       </label>
@@ -4410,7 +4436,7 @@ ${customerRows.map(c => `<tr>
                         const key = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
                         return periodReportSelected.has(key)
                       })
-                      generatePeriodReport(selectedSales, data?.vendor, reportFrom, reportTo, vendorSettings)
+                      generatePeriodReport(selectedSales, data?.vendor, reportFrom, reportTo, vendorSettings, periodReportReturns)
                     }}
                     className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-sm py-3 rounded-xl">
                     📄 Generate PDF ({periodReportSelected.size} customer{periodReportSelected.size !== 1 ? 's' : ''})

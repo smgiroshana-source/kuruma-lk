@@ -487,6 +487,27 @@ export async function GET(req: NextRequest) {
       }))
   }
 
+  // Returns by the day they HAPPENED, with their reason — the period model.
+  // A sale keeps its total; net sales for a window is what was invoiced in
+  // the window minus what came back in the window, whichever invoice it was
+  // on. A re-billed invoice therefore counts once: original + return + re-bill.
+  let saleReturnsInPeriod: any[] = []
+  {
+    let q = admin.from('sale_returns')
+      .select('id, sale_id, kind, amount, rebill_invoice_no, created_at, sale:sales!inner(invoice_no, customer_id, customer_name, vendor_id, payment_status)')
+      .eq('vendor_id', vendor.id)
+    if (periodStart) q = q.gte('created_at', periodStart)
+    if (periodEnd) q = q.lt('created_at', periodEnd)
+    const { data: srows } = await q.order('created_at')
+    saleReturnsInPeriod = (srows || [])
+      .filter((r: any) => r.sale?.payment_status !== 'voided')
+      .map((r: any) => ({
+        id: r.id, saleId: r.sale_id, invoiceNo: r.sale?.invoice_no || '',
+        customerId: r.sale?.customer_id || null, customerName: r.sale?.customer_name || 'Walk-in',
+        kind: r.kind, amount: parseFloat(r.amount || 0), rebillInvoiceNo: r.rebill_invoice_no || null, createdAt: r.created_at,
+      }))
+  }
+
   // Separate positive collections from negative (returns/refunds)
   const positiveCollections = collectionsToday.filter((c: any) => c.amount > 0)
   const returnsInPeriod = collectionsToday
@@ -680,6 +701,7 @@ export async function GET(req: NextRequest) {
     collectionsToday: positiveCollections,
     advanceOffsets,
     returnsInPeriod,
+    saleReturnsInPeriod,
     topProducts,
     paymentBreakdown,
     dailyRevenue,
