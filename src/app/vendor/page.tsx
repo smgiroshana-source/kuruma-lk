@@ -668,6 +668,9 @@ export default function VendorDashboard() {
   const [periodReportSales, setPeriodReportSales] = useState<any[]>([])
   // Returns that happened inside the window, with their reason (period model)
   const [periodReportReturns, setPeriodReportReturns] = useState<any[]>([])
+  // Staff need three numbers: net sales, paid, due. The working (invoiced,
+  // returned by reason, sold on) stays behind a toggle (owner, 2026-09-13).
+  const [periodReportDetails, setPeriodReportDetails] = useState(false)
   const [periodReportSelected, setPeriodReportSelected] = useState<Set<string>>(new Set())
   const [customerHistoryId, setCustomerHistoryId] = useState<string | null>(null)
   const [customerHistoryName, setCustomerHistoryName] = useState('')
@@ -2100,13 +2103,10 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 
 <div class="summary">
 <div class="summary-box"><div class="val orange">Rs.${totalNet.toLocaleString()}</div><div class="lbl">Net Sales</div></div>
-${totalReturned > 0 ? '<div class="summary-box"><div class="val">Rs.' + totalSales.toLocaleString() + '</div><div class="lbl">Invoiced</div></div>' : ''}
-<div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Collected</div></div>
+<div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Total Paid</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">Balance Due</div></div>
-${totalReturned > 0 ? '<div class="summary-box"><div class="val" style="color:#b45309">Rs.' + totalReturned.toLocaleString() + '</div><div class="lbl">Returned</div><div style="font-size:10px;color:#666;margin-top:4px">' + [retKinds.rebill > 0 ? 're-billed ' + retKinds.rebill.toLocaleString() : '', retKinds.goods_back > 0 ? 'came back ' + retKinds.goods_back.toLocaleString() : '', retKinds.faulty > 0 ? 'faulty ' + retKinds.faulty.toLocaleString() : '', retUnclassified > 0 ? 'no reason recorded ' + retUnclassified.toLocaleString() : ''].filter(Boolean).join(' · ') + '</div></div>' : ''}
-<div class="summary-box"><div class="val blue">${filtered.length}</div><div class="lbl">Invoices</div></div>
 </div>
-${(totalReturned > 0 || totalSoldOn > 0) ? '<p style="font-size:11px;color:#666;margin:-8px 0 12px">Net sales = invoiced ' + totalSales.toLocaleString() + ' − returned in this period ' + totalReturned.toLocaleString() + ' = <strong>' + totalNet.toLocaleString() + '</strong>. Returns count on the day they came back, whichever invoice they were on, so a re-billed invoice counts once.' + (totalSoldOn > 0 ? ' Sold on ' + totalSoldOn.toLocaleString() + ' (parts sold at the receiving shop) is inside net sales but carries no money.' : '') + '</p>' : ''}
+<p style="font-size:11px;color:#94a3b8;margin:-8px 0 12px;text-align:center">${filtered.length} invoices${totalReturned > 0 ? ' · invoiced Rs.' + totalSales.toLocaleString() + ' less returns Rs.' + totalReturned.toLocaleString() + ' (' + [retKinds.rebill > 0 ? 're-billed ' + retKinds.rebill.toLocaleString() : '', retKinds.goods_back > 0 ? 'came back ' + retKinds.goods_back.toLocaleString() : '', retKinds.faulty > 0 ? 'faulty ' + retKinds.faulty.toLocaleString() : '', retUnclassified > 0 ? 'no reason ' + retUnclassified.toLocaleString() : ''].filter(Boolean).join(', ') + ')' : ''}${totalSoldOn > 0 ? ' · includes Rs.' + totalSoldOn.toLocaleString() + ' sold on at the other shop (no money here)' : ''}</p>
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
 <div class="method-grid">
@@ -2121,8 +2121,6 @@ ${methodTotals.advance > 0 ? '<div class="method-box"><div class="val" style="co
 <table><thead><tr>
   <th>Customer</th><th>Phone</th>
   <th class="text-right">Invoices</th>
-  <th class="text-right">Invoiced</th>
-  <th class="text-right">Returned</th>
   <th class="text-right">Net Sales</th>
   <th class="text-right">Paid</th>
   <th class="text-right">Balance Due</th>
@@ -2131,17 +2129,13 @@ ${customerRows.map(c => `<tr>
   <td><strong>${escapeHtml(c.name)}</strong></td>
   <td style="font-size:11px;color:#64748b">${escapeHtml(c.phone)}</td>
   <td class="text-right">${c.invoices}</td>
-  <td class="text-right" style="color:#64748b">Rs.${c.total.toLocaleString()}</td>
-  <td class="text-right" style="color:${c.returned > 0 ? '#b45309' : '#94a3b8'}">${c.returned > 0 ? 'Rs.' + c.returned.toLocaleString() : '—'}</td>
-  <td class="text-right"><strong>Rs.${(c.total - c.returned).toLocaleString()}</strong></td>
+  <td class="text-right"><strong>Rs.${(c.total - c.returned).toLocaleString()}</strong>${c.returned > 0 ? '<div style="font-size:10px;color:#b45309">after returns Rs.' + c.returned.toLocaleString() + '</div>' : ''}</td>
   <td class="text-right" style="color:#16a34a">Rs.${c.paid.toLocaleString()}</td>
   <td class="text-right" style="color:${c.due > 0 ? '#dc2626' : '#94a3b8'};font-weight:${c.due > 0 ? '700' : '400'}">${c.due > 0 ? 'Rs.' + c.due.toLocaleString() : '—'}</td>
 </tr>`).join('')}
 <tr style="background:#f1f5f9">
   <td colspan="3"><strong>TOTAL</strong></td>
-  <td class="text-right"><strong>Rs.${totalSales.toLocaleString()}</strong></td>
-  <td class="text-right"><strong style="color:#b45309">${totalReturned > 0 ? 'Rs.' + totalReturned.toLocaleString() : '—'}</strong></td>
-  <td class="text-right"><strong style="color:#ff6b35">Rs.${totalNet.toLocaleString()}</strong></td>
+  <td class="text-right"><strong style="color:#ff6b35">Rs.${totalNet.toLocaleString()}</strong>${totalReturned > 0 ? '<div style="font-size:10px;color:#b45309">after returns Rs.' + totalReturned.toLocaleString() + '</div>' : ''}</td>
   <td class="text-right"><strong style="color:#16a34a">Rs.${totalPaid.toLocaleString()}</strong></td>
   <td class="text-right"><strong style="color:#dc2626">Rs.${totalCredit.toLocaleString()}</strong></td>
 </tr>
@@ -4368,29 +4362,34 @@ ${customerRows.map(c => `<tr>
                   <button onClick={() => setPeriodReportModal(false)} className="text-slate-400 hover:text-slate-600 text-xl font-bold px-2">✕</button>
                 </div>
 
-                {/* Summary bar */}
-                <div className={'grid divide-x divide-slate-100 shrink-0 bg-slate-50 border-b border-slate-100 ' + (selReturned > 0 ? 'grid-cols-3 sm:grid-cols-5' : 'grid-cols-3')}>
-                  {[['Net Sales', selNet], ...(selReturned > 0 ? [['Invoiced', selTotal], ['Returned', selReturned]] : []), ['Total Paid', selPaid], ['Balance Due', selBalance]].map(([lbl, val]) => (
-                    <div key={lbl as string} className="px-3 py-3 text-center">
+                {/* Summary bar — the three numbers staff use */}
+                <div className="grid grid-cols-3 divide-x divide-slate-100 shrink-0 bg-slate-50 border-b border-slate-100">
+                  {[['Net Sales', selNet, 'text-orange-600'], ['Total Paid', selPaid, 'text-emerald-600'], ['Balance Due', selBalance, selBalance > 0 ? 'text-red-600' : 'text-slate-800']].map(([lbl, val, cls]) => (
+                    <div key={lbl as string} className="px-3 py-3.5 text-center">
                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{lbl}</p>
-                      <p className={'font-black mt-0.5 ' + (lbl === 'Net Sales' ? 'text-base text-orange-600' : 'text-sm ') + (lbl === 'Balance Due' && (val as number) > 0 ? 'text-red-600' : lbl === 'Returned' ? 'text-amber-700' : lbl === 'Net Sales' ? '' : 'text-slate-800')}>Rs.{(val as number).toLocaleString()}</p>
-                      {lbl === 'Returned' && (
-                        <p className="text-[9px] text-slate-500 mt-0.5 leading-tight">
-                          {selRebill > 0 && <>re-billed {selRebill.toLocaleString()}<br /></>}
-                          {selGoodsBack > 0 && <>came back {selGoodsBack.toLocaleString()}<br /></>}
-                          {selFaulty > 0 && <>faulty {selFaulty.toLocaleString()}<br /></>}
-                          {selUnclassified > 0 && <>no reason recorded {selUnclassified.toLocaleString()}</>}
-                        </p>
-                      )}
+                      <p className={'font-black mt-0.5 text-base ' + cls}>Rs.{(val as number).toLocaleString()}</p>
                     </div>
                   ))}
                 </div>
+                {/* The working, folded away */}
                 {(selReturned > 0 || selSoldOn > 0) && (
-                  <p className="px-4 py-1.5 text-[10px] text-slate-500 bg-slate-50 border-b border-slate-100 shrink-0">
-                    Net sales = invoiced {selTotal.toLocaleString()} − returned in this period {selReturned.toLocaleString()} = <strong>{selNet.toLocaleString()}</strong>.
-                    Returns count on the day they came back, whichever invoice they were on, so a re-billed invoice counts once.
-                    {selSoldOn > 0 && <> Sold on {selSoldOn.toLocaleString()} is inside net sales but carries no money.</>}
-                  </p>
+                  <div className="bg-slate-50 border-b border-slate-100 shrink-0">
+                    <button onClick={() => setPeriodReportDetails(v => !v)} className="w-full px-4 py-1.5 text-[10px] font-bold text-slate-400 hover:text-slate-600 text-left">
+                      {periodReportDetails ? '▾ Hide details' : '▸ Details'}{!periodReportDetails && selReturned > 0 && <span className="font-normal"> · after returns of Rs.{selReturned.toLocaleString()}</span>}
+                    </button>
+                    {periodReportDetails && (
+                      <div className="px-4 pb-2.5 text-[11px] text-slate-600 space-y-0.5">
+                        <p>Invoiced <strong>Rs.{selTotal.toLocaleString()}</strong></p>
+                        {selReturned > 0 && (
+                          <p>Returned <strong className="text-amber-700">Rs.{selReturned.toLocaleString()}</strong>
+                            <span className="text-slate-400"> ({[selRebill > 0 ? `re-billed ${selRebill.toLocaleString()}` : '', selGoodsBack > 0 ? `came back ${selGoodsBack.toLocaleString()}` : '', selFaulty > 0 ? `faulty ${selFaulty.toLocaleString()}` : '', selUnclassified > 0 ? `no reason ${selUnclassified.toLocaleString()}` : ''].filter(Boolean).join(' · ')})</span>
+                          </p>
+                        )}
+                        <p>Net Sales <strong>Rs.{selNet.toLocaleString()}</strong> = invoiced − returned in this period</p>
+                        {selSoldOn > 0 && <p>Sold on Rs.{selSoldOn.toLocaleString()} (parts sold at the other shop) is inside net sales; no money for it comes here.</p>}
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* Select all row */}
@@ -4419,7 +4418,7 @@ ${customerRows.map(c => `<tr>
                         <div className="text-right shrink-0 space-y-0.5">
                           <p className="text-xs text-slate-400">{c.invoices} invoice{c.invoices !== 1 ? 's' : ''}</p>
                           <p className="font-bold text-sm text-slate-800">Rs.{(c.total - c.returned).toLocaleString()}</p>
-                          {c.returned > 0 && <p className="text-[10px] text-amber-700">invoiced {c.total.toLocaleString()} · returned {c.returned.toLocaleString()}{c.rebill > 0 ? ` (re-billed ${c.rebill.toLocaleString()})` : ''}</p>}
+                          {c.returned > 0 && periodReportDetails && <p className="text-[10px] text-amber-700">invoiced {c.total.toLocaleString()} · returned {c.returned.toLocaleString()}{c.rebill > 0 ? ` (re-billed ${c.rebill.toLocaleString()})` : ''}</p>}
                           {c.balance > 0 && <p className="text-xs font-bold text-red-500">Due Rs.{c.balance.toLocaleString()}</p>}
                         </div>
                       </label>
