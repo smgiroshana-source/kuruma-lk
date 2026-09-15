@@ -3544,8 +3544,8 @@ ${customerRows.map(c => `<tr>
                         if (qty <= 0) continue
                         const rev = qty * parseFloat(i.unit_price || 0)
                         const prod: any = i.product_sku ? prodBySku.get(i.product_sku) : null
-                        // CSV-loaded stock is keyed VAT-inclusive (cost_includes_vat); the VAT
-                        // comes back, so the cost of the goods is the ex-VAT figure.
+                        // Costs are stored net; only a product flagged cost_includes_vat
+                        // (none today) has VAT stripped here. See src/lib/netCost.ts.
                         const panelVat = Number(vendorSettings?.vat_rate) || 18
                         const netC = (c: number) => (isLkTax && prod?.cost_includes_vat) ? Math.round(c * 100 / (100 + panelVat)) : c
                         const snap = i.unit_cost != null && parseInt(i.unit_cost) > 0 ? netC(parseInt(i.unit_cost)) : null

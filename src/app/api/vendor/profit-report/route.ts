@@ -79,11 +79,12 @@ export async function GET(req: NextRequest) {
   // Cost on the same footing as revenue. Revenue on a tax invoice is taken
   // net of VAT; the cost must be net too, because the input VAT on stock
   // comes back through the VAT return and is not a cost of the goods.
-  // Stock bought through a GRN is stored net already. Stock loaded by CSV
-  // (the opening tyres) was keyed VAT-INCLUSIVE and flagged so —
-  // cost_includes_vat — and its FIFO layers and every sale-time snapshot
-  // carry that gross figure. Owner, 2026-09-08: a 300R 18 tyre showed a 2%
-  // loss (net 7,034 against 7,151) when it made 14% (against 6,060).
+  // Stock bought through a GRN is stored net already, and so is the CSV-loaded
+  // opening stock (the import divided the sheet's VAT-inclusive figures by
+  // 1.18). Only a product flagged cost_includes_vat is stripped here — none
+  // today. The 300R 18 tyre the owner asked about on 2026-09-08 really did
+  // lose 2% on its tax invoice (net 7,034 against a net cost of 7,151); the
+  // "14%" came from the CSV stock being wrongly flagged (see src/lib/netCost.ts).
   const netCost = (unitCost: number, prod: any): number => netStockCost(unitCost, prod, vatRate)
 
   type Row = {

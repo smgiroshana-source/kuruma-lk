@@ -2,12 +2,18 @@
  * The ex-VAT cost of a unit of stock — the figure to set against net revenue,
  * to value the shelf, and to write off.
  *
- * Stock bought through a GRN is stored net (the input VAT comes back through
- * the VAT return and is not a cost of the goods). The opening stock loaded by
- * CSV was keyed VAT-INCLUSIVE and flagged cost_includes_vat; its FIFO layers
- * and sale-time snapshots carry that gross figure. Any figure that came from
- * such a product must be taken net here. Owner, 2026-09-08: a 300R 18 tyre
- * read as a 2% loss against its gross cost when it made 14%.
+ * products.cost is stored NET in every path: a GRN writes the net unit cost,
+ * and the 22 Aug 2026 CSV import divided the owner's VAT-inclusive figures by
+ * 1.18 before storing them (75,943 on the sheet → 64,358). The FIFO layers and
+ * sale-time snapshots carry those same net figures.
+ *
+ * cost_includes_vat is the one exception: a product whose stored figure still
+ * contains VAT. Nothing is flagged that way today. On 26 Aug 2026 the CSV
+ * tyres were flagged by mistake (the flag was set as if the net figure were
+ * gross), which made this helper strip VAT a second time and understate cost
+ * by 15% in the profit report, stock value and write-offs. Corrected 15 Sep
+ * 2026: those products carry cost_vat_rate = 18 and the flag is false. Don't
+ * re-flag CSV stock; check the stored figure against the sheet first.
  */
 export const DEFAULT_VAT_RATE = 18
 

@@ -262,8 +262,8 @@ export async function GET(req: NextRequest) {
   // ── Stock value ────────────────────────────────────────────────────────────
   if (type === 'stock_value') {
     // Cost is valued NET of VAT: the input VAT on stock comes back through the
-    // VAT return. CSV-loaded stock keyed VAT-inclusive (cost_includes_vat) is
-    // taken at its ex-VAT cost (src/lib/netCost.ts).
+    // VAT return. products.cost is already net (GRN and CSV import alike); only
+    // a product flagged cost_includes_vat is stripped (src/lib/netCost.ts).
     const { data: cfg } = await admin.from('tax_config')
       .select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').maybeSingle()
     const vatRate = cfg?.value != null ? parseFloat(cfg.value) : 18
