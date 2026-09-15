@@ -34,6 +34,25 @@ const SMALL_DROP_VALUE = 5000
 // Write-offs, not vanish inside a stocktake.
 const DROP_REASONS = ['miscounted', 'found_elsewhere', 'used_in_shop', 'data_entry_error']
 
+// A count that goes DOWN leaves the FIFO layers claiming more units than the
+// shelf holds (IT/1177: on-hand 1, layers 3). Take the missing units off the
+// newest layers first — the oldest stock is what was sold, the newest is what
+// was never there.
+async function trimCostLayers(admin: any, productId: string, units: number) {
+  let left = Math.max(0, Math.round(units))
+  if (left <= 0) return
+  const { data: layers } = await admin.from('cost_layers')
+    .select('id, quantity_remaining').eq('product_id', productId).gt('quantity_remaining', 0)
+    .order('received_at', { ascending: false }).order('created_at', { ascending: false })
+  for (const l of layers || []) {
+    if (left <= 0) break
+    const take = Math.min(left, Number(l.quantity_remaining) || 0)
+    if (take <= 0) continue
+    await admin.from('cost_layers').update({ quantity_remaining: Number(l.quantity_remaining) - take }).eq('id', l.id)
+    left -= take
+  }
+}
+
 function generateSKU() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   let id = 'P-'
@@ -316,10 +335,30 @@ export async function POST(req: NextRequest) {
   // ─── UPDATE PRODUCT ───
   if (action === 'update') {
     const { productId, data: updateData } = body
-    const { data: existing } = await admin.from('products').select('vendor_id, slug, cost, quantity').eq('id', productId).single()
+    const { data: existing } = await admin.from('products').select('vendor_id, slug, sku, cost, quantity').eq('id', productId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
     const { error } = await admin.from('products').update(updateData).eq('id', productId)
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
+
+    // A quantity that arrives here is a count changed by hand with no reason
+    // asked (Sakura's count screen; older forms). It must still leave a trace:
+    // the owner changed a tyre 3 → 1 on the WHEEL MART edit form on
+    // 2026-09-15 and nothing anywhere recorded it. So every quantity change
+    // through this path writes a stock_movements row naming who did it, and
+    // the daily report lists it. WHEEL MART's forms no longer send quantity
+    // at all — they go through adjust_stock, which also asks why.
+    const qtyBefore = Number(existing.quantity || 0)
+    const qtyAfter = updateData?.quantity != null && Number.isFinite(parseInt(updateData.quantity)) ? parseInt(updateData.quantity) : qtyBefore
+    if (qtyAfter !== qtyBefore) {
+      await admin.from('stock_movements').insert({
+        vendor_id: vendor.id, product_id: productId, product_sku: existing.sku || '',
+        movement_type: 'adjustment',
+        quantity_change: qtyAfter - qtyBefore, quantity_before: qtyBefore, quantity_after: qtyAfter,
+        notes: 'edited on the product form — no reason asked',
+        created_by: (vendor as any).callerUserId || null,
+      })
+      if (qtyAfter < qtyBefore) await trimCostLayers(admin, productId, qtyBefore - qtyAfter)
+    }
 
     // "Add the cost later" workflow: products often get listed without a cost
     // and receive one manually afterwards. Without this, typing a cost into the
@@ -546,6 +585,7 @@ export async function POST(req: NextRequest) {
         notes: [reason || 'stocktake', note?.trim() || null].filter(Boolean).join(' — '),
         created_by: (vendor as any).callerUserId || null,
       })
+      if (delta < 0) await trimCostLayers(admin, productId, -delta)
       // Initial stock / found stock with a cost → seed a FIFO layer so later
       // sales carry a real cost instead of zero.
       const cost = Math.round(Number(unitCost) || 0)

@@ -39,7 +39,16 @@ export async function GET(req: NextRequest) {
       .lte('created_at', toTs)
       .order('created_at')
     if (adjErr) return NextResponse.json({ error: adjErr.message }, { status: 500 })
-    return NextResponse.json({ movements: adj || [] })
+    // Name who did it: the report is read by the owner, and "3 → 1" means
+    // little without a name beside it.
+    const ids = Array.from(new Set((adj || []).map((m: any) => m.created_by).filter(Boolean)))
+    const names = new Map<string, string>()
+    if (ids.length > 0) {
+      const { data: staff } = await admin.from('vendor_staff').select('user_id, name').eq('vendor_id', vendor.id).in('user_id', ids)
+      for (const s of staff || []) if (s.user_id) names.set(s.user_id, s.name || 'Staff')
+      if (vendor.user_id && ids.includes(vendor.user_id)) names.set(vendor.user_id, 'Owner')
+    }
+    return NextResponse.json({ movements: (adj || []).map((m: any) => ({ ...m, by_name: m.created_by ? (names.get(m.created_by) || 'Unknown') : null })) })
   }
 
   if (!productId) {
