@@ -57,6 +57,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
           ${row('Operating expenses' + (s.salaryPaidInWindow > 0 ? ' (excl. salary)' : ''), '− ' + money(s.expenseExclSalary), { bold: true })}
           ${s.salaryAccrual > 0 ? row('Salary for days worked' + (data.salary?.basis === 'estimated' ? ' (estimated)' : ''), '− ' + money(s.salaryAccrual), { bold: true }) : ''}
           ${s.writeoffTotal > 0 ? row('Stock written off', '− ' + money(s.writeoffTotal), { bold: true, color: '#b45309' }) : ''}
+          ${(data.adjustments?.downValue || 0) > 0 ? row(`Stock count corrections down (${data.adjustments.downUnits} units, not charged)`, money(data.adjustments.downValue), { indent: true, color: '#b45309' }) : ''}
           ${s.supplierCreditTotal > 0 ? row('Supplier discounts received', '+ ' + money(s.supplierCreditTotal), { bold: true, color: '#15803d' }) : ''}
           ${row('NET PROFIT', money(s.netProfit), { bold: true, color: s.netProfit >= 0 ? '#15803d' : '#dc2626' })}
         </tbody>
@@ -148,6 +149,25 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       </table>
       <p class="note">Goods that left the shelf without being sold. The cost is a loss of this period — it is not in cost of goods sold, because nothing was sold.</p>` : ''
 
+    // Count corrections: not charged to profit (a correction says the goods
+    // were never there), but a month of small "miscounted" drops is how stock
+    // leaks, so the owner sees them here as one figure and one list.
+    const adj = data.adjustments
+    const adjustBlock = adj && (adj.list || []).length > 0 ? `
+      <h3>Stock count corrections</h3>
+      <p class="note" style="margin-top:0">
+        <strong style="color:#b45309">${adj.downUnits} unit${adj.downUnits === 1 ? '' : 's'} down · ${money(adj.downValue)} at cost</strong>
+        ${adj.upUnits > 0 ? ` &nbsp;·&nbsp; ${adj.upUnits} unit${adj.upUnits === 1 ? '' : 's'} up · ${money(adj.upValue)}` : ''}
+        &nbsp;·&nbsp; ${adj.list.length} correction${adj.list.length === 1 ? '' : 's'}
+      </p>
+      <table>
+        <thead><tr><th>Date</th><th>Product</th><th class="num">Change</th><th>Reason</th><th class="num">Value</th></tr></thead>
+        <tbody>
+          ${adj.list.map((m: any) => `<tr><td>${escapeHtml(m.date)}</td><td>${escapeHtml(m.name)}</td><td class="num" style="color:${m.change < 0 ? '#b45309' : '#15803d'}">${m.change > 0 ? '+' : ''}${m.change} (${m.before} → ${m.after})</td><td>${escapeHtml(m.note)}</td><td class="num">${money(m.value)}</td></tr>`).join('')}
+        </tbody>
+      </table>
+      <p class="note">Counts changed by hand — not sales, GRNs or write-offs. Not charged to profit: a correction says the goods were never there. Damaged, lost or stolen stock belongs in Write-offs, where the loss does reach profit.</p>` : ''
+
     const creditBlock = (data.supplierCredits || []).length > 0 ? `
       <h3>Supplier discounts received</h3>
       <table>
@@ -231,6 +251,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       ${salaryBlock}
       ${expenseBlock}
       ${writeoffBlock}
+      ${adjustBlock}
       ${creditBlock}
       ${mode === 'full' ? productBlock + detailBlock : productBlock}
 

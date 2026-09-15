@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { netStockCost } from '@/lib/netCost'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -24,15 +25,20 @@ export async function GET(req: NextRequest) {
 
   const productId = req.nextUrl.searchParams.get('product_id')
   const date = req.nextUrl.searchParams.get('date')
+  // Report mode: one Colombo day (?date=) or a range (?from=&to=), for the
+  // daily report, the period Sales Report and the dashboard.
+  const isDay = (s: string | null): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+  const rangeFrom = isDay(date) ? date : req.nextUrl.searchParams.get('from')
+  const rangeTo = isDay(date) ? date : req.nextUrl.searchParams.get('to')
 
-  // Daily-report mode: every ADJUSTMENT of one Colombo day, with the product
-  // name attached — recounts and initial stock are part of the day's story.
-  if (!productId && date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    const fromTs = new Date(date + 'T00:00:00+05:30').toISOString()
-    const toTs = new Date(date + 'T23:59:59.999+05:30').toISOString()
+  // Every ADJUSTMENT in the window, with the product name attached — recounts,
+  // initial stock and corrections are part of the period's story.
+  if (!productId && isDay(rangeFrom) && isDay(rangeTo)) {
+    const fromTs = new Date(rangeFrom + 'T00:00:00+05:30').toISOString()
+    const toTs = new Date(rangeTo + 'T23:59:59.999+05:30').toISOString()
     const { data: adj, error: adjErr } = await admin
       .from('stock_movements')
-      .select('*, product:products(name, product_type)')
+      .select('*, product:products(name, product_type, cost, cost_includes_vat)')
       .eq('vendor_id', vendor.id)
       .eq('movement_type', 'adjustment')
       .gte('created_at', fromTs)
@@ -48,7 +54,19 @@ export async function GET(req: NextRequest) {
       for (const s of staff || []) if (s.user_id) names.set(s.user_id, s.name || 'Staff')
       if (vendor.user_id && ids.includes(vendor.user_id)) names.set(vendor.user_id, 'Owner')
     }
-    return NextResponse.json({ movements: (adj || []).map((m: any) => ({ ...m, by_name: m.created_by ? (names.get(m.created_by) || 'Unknown') : null })) })
+    // Value each correction at the product's net cost so a month of small
+    // "miscounted" drops can be read as one rupee figure.
+    const movements = (adj || []).map((m: any) => ({
+      ...m,
+      by_name: m.created_by ? (names.get(m.created_by) || 'Unknown') : null,
+      value: Math.abs(Number(m.quantity_change) || 0) * netStockCost(m.product?.cost, m.product),
+    }))
+    const summary = movements.reduce((s: any, m: any) => {
+      const q = Number(m.quantity_change) || 0
+      if (q < 0) { s.downCount++; s.downUnits += -q; s.downValue += m.value } else if (q > 0) { s.upCount++; s.upUnits += q; s.upValue += m.value }
+      return s
+    }, { downCount: 0, downUnits: 0, downValue: 0, upCount: 0, upUnits: 0, upValue: 0 })
+    return NextResponse.json({ movements, summary })
   }
 
   if (!productId) {

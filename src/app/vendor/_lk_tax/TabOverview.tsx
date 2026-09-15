@@ -131,6 +131,9 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   // undefined = still loading, null = no session opened today.
   const [flowSession, setFlowSession] = useState<any | undefined>(undefined)
   const [attToday, setAttToday] = useState<{ marked: number; total: number } | null>(null)
+  // Count corrections this month — seen here without opening a report
+  // (owner, 2026-09-15: "fraud can happen right?").
+  const [adjMonth, setAdjMonth] = useState<{ downCount: number; downUnits: number; downValue: number; upUnits: number } | null>(null)
   type Popup =
     | { kind: 'open' } | { kind: 'close' } | { kind: 'att' }
     | { kind: 'chooser'; dir: 'in' | 'out'; amount: number }
@@ -160,6 +163,11 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
           const marked = new Set((j.attendance || []).filter((a: any) => ids.has(a.employee_id)).map((a: any) => a.employee_id)).size
           setAttToday({ marked, total: emps.length })
         }
+      } catch {}
+      try {
+        const today = colomboToday()
+        const r = await fetch(`/api/vendor/stock-movements?from=${today.slice(0, 7)}-01&to=${today}`)
+        if (r.ok) { const j = await r.json(); setAdjMonth(j.summary || null) }
       } catch {}
     }
   }, [role])
@@ -306,6 +314,14 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
     // legitimate state — the profit report excludes them honestly and offers
     // inline rough-cost entry where it matters. The Products "Missing cost"
     // filter remains for deliberate cleanup sessions.
+    if (adjMonth && adjMonth.downCount > 0) {
+      attention.push({
+        icon: '🧮', tone: 'amber',
+        text: `Stock counts corrected down ${adjMonth.downCount} time${adjMonth.downCount !== 1 ? 's' : ''} this month — ${adjMonth.downUnits} unit${adjMonth.downUnits !== 1 ? 's' : ''}, ${formatRs(adjMonth.downValue)} at cost` +
+              (adjMonth.upUnits > 0 ? ` (${adjMonth.upUnits} up)` : ''),
+        cta: 'Review', tab: 'stocktake',
+      })
+    }
     if (lowStock.length > 0) {
       attention.push({
         icon: '📉', tone: 'amber',

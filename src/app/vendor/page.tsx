@@ -669,6 +669,9 @@ export default function VendorDashboard() {
   const [periodReportSales, setPeriodReportSales] = useState<any[]>([])
   // Returns that happened inside the window, with their reason (period model)
   const [periodReportReturns, setPeriodReportReturns] = useState<any[]>([])
+  // Counts changed by hand inside the window — listed on the PDF so a month
+  // of small corrections is seen as one table (owner, 2026-09-15).
+  const [periodReportAdjustments, setPeriodReportAdjustments] = useState<any[]>([])
   // Staff need three numbers: net sales, paid, due. The working (invoiced,
   // returned by reason, sold on) stays behind a toggle (owner, 2026-09-13).
   const [periodReportDetails, setPeriodReportDetails] = useState(false)
@@ -2024,9 +2027,13 @@ ${(() => {
     if (to) setReportTo(to)
     setPeriodReportLoading(true)
     try {
-      const r = await fetch(`/api/vendor/sales?from=${pFrom}&to=${pTo}`)
+      const [r, sm] = await Promise.all([
+        fetch(`/api/vendor/sales?from=${pFrom}&to=${pTo}`),
+        fetch(`/api/vendor/stock-movements?from=${pFrom}&to=${pTo}`),
+      ])
       if (!r.ok) { showToast(`Failed to fetch sales (${r.status})`); setPeriodReportLoading(false); return }
       const j = await r.json()
+      try { setPeriodReportAdjustments(sm.ok ? ((await sm.json()).movements || []) : []) } catch { setPeriodReportAdjustments([]) }
       const sales = (j.sales || []).filter((s: any) =>
         s.payment_status !== 'voided' &&
         s.payment_status !== 'draft' &&
@@ -2042,7 +2049,7 @@ ${(() => {
     setPeriodReportLoading(false)
   }
 
-  function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any, returnsList: any[] = []) {
+  function generatePeriodReport(salesList: any[], vendorInfo: any, fromDate: string, toDate: string, settings?: any, returnsList: any[] = [], adjustmentsList: any[] = []) {
     const filtered = salesList.filter((s: any) =>
       s.payment_status !== 'voided' &&
       s.payment_status !== 'draft' &&
@@ -2145,6 +2152,27 @@ ${customerRows.map(c => `<tr>
   <td class="text-right"><strong style="color:#dc2626">Rs.${totalCredit.toLocaleString()}</strong></td>
 </tr>
 </tbody></table>
+${(adjustmentsList || []).length > 0 ? (() => {
+      // Counts changed by hand inside the window. One correction a day looks
+      // harmless; a month of them is how stock leaks, so the period report
+      // carries the whole list with who did it (owner, 2026-09-15).
+      const down = adjustmentsList.filter((m: any) => Number(m.quantity_change) < 0)
+      const downUnits = down.reduce((s: number, m: any) => s - Number(m.quantity_change), 0)
+      const downValue = down.reduce((s: number, m: any) => s + (Number(m.value) || 0), 0)
+      const upUnits = adjustmentsList.filter((m: any) => Number(m.quantity_change) > 0).reduce((s: number, m: any) => s + Number(m.quantity_change), 0)
+      return '<h3 style="font-size:13px;font-weight:800;color:#64748b;margin:20px 0 8px;text-transform:uppercase;letter-spacing:1px">Stock Adjustments (' + adjustmentsList.length + ')</h3>' +
+        '<p style="font-size:11px;color:#b45309;margin:0 0 6px"><strong>' + downUnits.toLocaleString() + ' unit' + (downUnits === 1 ? '' : 's') + ' down · Rs.' + downValue.toLocaleString() + ' at cost</strong>' + (upUnits > 0 ? ' &nbsp;·&nbsp; ' + upUnits.toLocaleString() + ' up' : '') + '</p>' +
+        '<table><thead><tr><th>Date</th><th>Product</th><th class="text-right">Change</th><th>Reason</th><th>By</th><th class="text-right">Value</th></tr></thead><tbody>' +
+        adjustmentsList.map((m: any) => '<tr>' +
+          '<td>' + new Date(m.created_at).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', timeZone: 'Asia/Colombo' }) + '</td>' +
+          '<td><strong>' + escapeHtml(m.product?.name || m.product_sku || '?') + '</strong></td>' +
+          '<td class="text-right" style="color:' + (Number(m.quantity_change) < 0 ? '#b45309' : '#16a34a') + '">' + (Number(m.quantity_change) > 0 ? '+' : '') + Number(m.quantity_change) + ' (' + Number(m.quantity_before) + ' → ' + Number(m.quantity_after) + ')</td>' +
+          '<td style="font-size:11px">' + escapeHtml(m.notes || '') + '</td>' +
+          '<td style="font-size:11px;color:#64748b">' + escapeHtml(m.by_name || '') + '</td>' +
+          '<td class="text-right">' + (Number(m.value) > 0 ? 'Rs.' + Number(m.value).toLocaleString() : '—') + '</td></tr>').join('') +
+        '</tbody></table>' +
+        '<p style="font-size:10px;color:#94a3b8;margin:-8px 0 12px">Counts changed by hand — not sales, GRNs or write-offs. Damaged, lost or stolen stock belongs in Write-offs.</p>'
+    })() : ''}
 
 <div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
 
@@ -4446,7 +4474,7 @@ ${customerRows.map(c => `<tr>
                         const key = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
                         return periodReportSelected.has(key)
                       })
-                      generatePeriodReport(selectedSales, data?.vendor, reportFrom, reportTo, vendorSettings, periodReportReturns)
+                      generatePeriodReport(selectedSales, data?.vendor, reportFrom, reportTo, vendorSettings, periodReportReturns, periodReportAdjustments)
                     }}
                     className="flex-1 bg-orange-500 hover:bg-orange-600 disabled:opacity-40 text-white font-black text-sm py-3 rounded-xl">
                     📄 Generate PDF ({periodReportSelected.size} customer{periodReportSelected.size !== 1 ? 's' : ''})

@@ -218,6 +218,30 @@ export async function GET(req: NextRequest) {
     writeoffTotal += amt
   }
 
+  // Count corrections of the period (owner, 2026-09-15). A tyre removed with
+  // "miscounted" costs profit nothing and would otherwise leave no mark on the
+  // month — which is exactly how stock leaks. Shown as its own block, valued at
+  // net cost, NOT charged to profit: a count correction says the goods were
+  // never there, a write-off says they were and are gone.
+  const { data: adjRows } = await admin.from('stock_movements')
+    .select('product_sku, quantity_change, quantity_before, quantity_after, notes, created_at, created_by, product:products(name)')
+    .eq('vendor_id', caller.vendor.id).eq('movement_type', 'adjustment')
+    .gte('created_at', fromTs).lte('created_at', toTs).order('created_at')
+  const adjustments = { downCount: 0, downUnits: 0, downValue: 0, upCount: 0, upUnits: 0, upValue: 0 }
+  const adjustmentList = (adjRows || []).map((m: any) => {
+    const q = Number(m.quantity_change) || 0
+    const prod = m.product_sku ? prodBySku.get(m.product_sku) : null
+    const value = Math.abs(q) * netCost(Number(prod?.cost) || 0, prod)
+    if (q < 0) { adjustments.downCount++; adjustments.downUnits += -q; adjustments.downValue += value }
+    else if (q > 0) { adjustments.upCount++; adjustments.upUnits += q; adjustments.upValue += value }
+    return {
+      date: new Date(m.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }),
+      sku: m.product_sku, name: m.product?.name || m.product_sku || '?',
+      change: q, before: Number(m.quantity_before) || 0, after: Number(m.quantity_after) || 0,
+      note: m.notes || '', value: r0(value),
+    }
+  })
+
   // Credit notes received from suppliers — settlement and quantity discounts,
   // price adjustments. Owner decision 2026-08-22: shown as income of the
   // period rather than reducing what the goods cost, so the margin on invoices
@@ -340,6 +364,7 @@ export async function GET(req: NextRequest) {
     noCost: [...noCostAgg.values()].sort((a, b) => b.revenue - a.revenue),
     expenses: [...expenseByCat.entries()].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount),
     writeoffs: [...writeoffByReason.entries()].map(([reason, amount]) => ({ reason, amount })).sort((a, b) => b.amount - a.amount),
+    adjustments: { ...adjustments, downValue: r0(adjustments.downValue), upValue: r0(adjustments.upValue), list: adjustmentList },
     supplierCredits: (supCredits || []).map((c: any) => ({
       no: c.credit_note_no, date: String(c.credit_note_date).slice(0, 10),
       supplier: c.supplier?.name || '', reason: c.reason, amount: r0(c.net_amount),
