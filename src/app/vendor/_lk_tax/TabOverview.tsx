@@ -133,7 +133,26 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const [attToday, setAttToday] = useState<{ marked: number; total: number } | null>(null)
   // Count corrections this month — seen here without opening a report
   // (owner, 2026-09-15: "fraud can happen right?").
-  const [adjMonth, setAdjMonth] = useState<{ downCount: number; downUnits: number; downValue: number; upUnits: number } | null>(null)
+  const [adjMonth, setAdjMonth] = useState<{ downCount: number; downUnits: number; downValue: number; upUnits: number; unreviewedDownCount: number; unreviewedDownUnits: number; unreviewedDownValue: number; unreviewedUpUnits: number } | null>(null)
+  const [reviewing, setReviewing] = useState(false)
+  // Owner/manager has looked at this month's corrections: stamp them reviewed
+  // so the line clears. A new correction reopens it with only the fresh ones.
+  async function reviewAdjustments() {
+    setReviewing(true)
+    try {
+      const today = colomboToday()
+      const r = await fetch('/api/vendor/stock-movements', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'review', from: today.slice(0, 7) + '-01', to: today }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Failed')
+      showToast(`${j.reviewed} correction${j.reviewed !== 1 ? 's' : ''} marked reviewed`)
+      const rr = await fetch(`/api/vendor/stock-movements?from=${today.slice(0, 7)}-01&to=${today}`)
+      if (rr.ok) { const jj = await rr.json(); setAdjMonth(jj.summary || null) }
+    } catch (e: any) { showToast('⚠️ ' + e.message) }
+    setReviewing(false)
+  }
   type Popup =
     | { kind: 'open' } | { kind: 'close' } | { kind: 'att' }
     | { kind: 'chooser'; dir: 'in' | 'out'; amount: number }
@@ -283,7 +302,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const flowDone = flow.every(s => s.state === 'done')
 
   // ── Needs-attention queue (red = money leaking now, amber = drifting) ──
-  type Attn = { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string }
+  type Attn = { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string; done?: { label: string; run: () => void; busy?: boolean } }
   const attention: Attn[] = []
   if (!isCashier) {
     if (d.staleOpenSessionDate) {
@@ -314,12 +333,16 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
     // legitimate state — the profit report excludes them honestly and offers
     // inline rough-cost entry where it matters. The Products "Missing cost"
     // filter remains for deliberate cleanup sessions.
-    if (adjMonth && adjMonth.downCount > 0) {
+    // Only corrections nobody has looked at yet. Reviewed ones stay in every
+    // report; the line's job is to make sure someone looks.
+    if (adjMonth && adjMonth.unreviewedDownCount > 0) {
+      const n = adjMonth.unreviewedDownCount, u = adjMonth.unreviewedDownUnits
       attention.push({
         icon: '🧮', tone: 'amber',
-        text: `Stock counts corrected down ${adjMonth.downCount} time${adjMonth.downCount !== 1 ? 's' : ''} this month — ${adjMonth.downUnits} unit${adjMonth.downUnits !== 1 ? 's' : ''}, ${formatRs(adjMonth.downValue)} at cost` +
-              (adjMonth.upUnits > 0 ? ` (${adjMonth.upUnits} up)` : ''),
-        cta: 'Review', tab: 'stocktake',
+        text: `Stock counts corrected down ${n} time${n !== 1 ? 's' : ''} this month — ${u} unit${u !== 1 ? 's' : ''}, ${formatRs(adjMonth.unreviewedDownValue)} at cost` +
+              (adjMonth.unreviewedUpUnits > 0 ? ` (${adjMonth.unreviewedUpUnits} up)` : ''),
+        cta: 'See', tab: 'stocktake',
+        done: (role === 'owner' || role === 'manager') ? { label: 'Reviewed ✓', run: reviewAdjustments, busy: reviewing } : undefined,
       })
     }
     if (lowStock.length > 0) {
@@ -469,21 +492,34 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
           </h3>
           <div className="flex flex-col gap-2">
             {attention.map((a, i) => (
-              <button
+              <div
                 key={i}
-                onClick={() => onNavigate(a.tab, a.sub)}
-                className={`flex items-center gap-3 text-left px-3 py-2.5 rounded-lg border-l-4 border transition-colors ${
+                className={`flex items-center gap-2 rounded-lg border-l-4 border transition-colors ${
                   a.tone === 'red'
-                    ? 'bg-red-50 border-red-200 border-l-red-500 hover:bg-red-100'
-                    : 'bg-amber-50 border-amber-200 border-l-amber-400 hover:bg-amber-100'
+                    ? 'bg-red-50 border-red-200 border-l-red-500'
+                    : 'bg-amber-50 border-amber-200 border-l-amber-400'
                 }`}
               >
-                <span className="text-base leading-none shrink-0">{a.icon}</span>
-                <span className="flex-1 text-sm font-semibold text-slate-800">{a.text}</span>
-                <span className={`text-xs font-black shrink-0 ${a.tone === 'red' ? 'text-red-600' : 'text-amber-700'}`}>
-                  {a.cta} →
-                </span>
-              </button>
+                <button
+                  onClick={() => onNavigate(a.tab, a.sub)}
+                  className={`flex-1 min-w-0 flex items-center gap-3 text-left px-3 py-2.5 rounded-r-lg transition-colors ${a.tone === 'red' ? 'hover:bg-red-100' : 'hover:bg-amber-100'}`}
+                >
+                  <span className="text-base leading-none shrink-0">{a.icon}</span>
+                  <span className="flex-1 text-sm font-semibold text-slate-800">{a.text}</span>
+                  <span className={`text-xs font-black shrink-0 ${a.tone === 'red' ? 'text-red-600' : 'text-amber-700'}`}>
+                    {a.cta} →
+                  </span>
+                </button>
+                {a.done && (
+                  <button
+                    onClick={a.done.run} disabled={a.done.busy}
+                    title="I have looked at this — clear it until the next correction"
+                    className="shrink-0 mr-2 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50 px-2.5 py-1.5 rounded-lg"
+                  >
+                    {a.done.busy ? '…' : a.done.label}
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         </div>

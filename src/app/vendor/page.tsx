@@ -1888,7 +1888,8 @@ ${(stockAdjustments || []).length > 0 ? (() => {
           (Number(m.quantity_change) > 0 ? '+' : '') + Number(m.quantity_change).toLocaleString() +
           ' (' + Number(m.quantity_before).toLocaleString() + ' \u2192 ' + Number(m.quantity_after).toLocaleString() + ')' +
           (m.notes ? ' \u00b7 ' + escapeHtml(m.notes) : '') +
-          (m.by_name ? ' \u00b7 by ' + escapeHtml(m.by_name) : '') + '</div>').join('') +
+          (m.by_name ? ' \u00b7 by ' + escapeHtml(m.by_name) : '') +
+          (m.reviewed_by_name ? ' \u00b7 <span style="color:#15803d">reviewed by ' + escapeHtml(m.reviewed_by_name) + '</span>' : '') + '</div>').join('') +
         '<div style="font-size:10px;color:#0369a1;margin-top:4px">Counts changed by hand \u2014 recounts, initial stock and corrections. Not sales, not GRNs.</div>' +
         '</div>'
     })() : ''}
@@ -2168,7 +2169,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
           '<td><strong>' + escapeHtml(m.product?.name || m.product_sku || '?') + '</strong></td>' +
           '<td class="text-right" style="color:' + (Number(m.quantity_change) < 0 ? '#b45309' : '#16a34a') + '">' + (Number(m.quantity_change) > 0 ? '+' : '') + Number(m.quantity_change) + ' (' + Number(m.quantity_before) + ' → ' + Number(m.quantity_after) + ')</td>' +
           '<td style="font-size:11px">' + escapeHtml(m.notes || '') + '</td>' +
-          '<td style="font-size:11px;color:#64748b">' + escapeHtml(m.by_name || '') + '</td>' +
+          '<td style="font-size:11px;color:#64748b">' + escapeHtml(m.by_name || '') + (m.reviewed_by_name ? '<div style="color:#15803d">reviewed by ' + escapeHtml(m.reviewed_by_name) + ' ' + new Date(m.reviewed_at).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', timeZone: 'Asia/Colombo' }) + '</div>' : '') + '</td>' +
           '<td class="text-right">' + (Number(m.value) > 0 ? 'Rs.' + Number(m.value).toLocaleString() : '—') + '</td></tr>').join('') +
         '</tbody></table>' +
         '<p style="font-size:10px;color:#94a3b8;margin:-8px 0 12px">Counts changed by hand — not sales, GRNs or write-offs. Damaged, lost or stolen stock belongs in Write-offs.</p>'

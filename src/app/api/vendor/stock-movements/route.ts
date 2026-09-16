@@ -9,9 +9,9 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { vendor, userId: user.id }
+  if (vendor) return { vendor, userId: user.id, role: 'owner' as string }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id }
+  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id, role: (staffLink.role || 'cashier') as string }
   return null
 }
 
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     if (adjErr) return NextResponse.json({ error: adjErr.message }, { status: 500 })
     // Name who did it: the report is read by the owner, and "3 → 1" means
     // little without a name beside it.
-    const ids = Array.from(new Set((adj || []).map((m: any) => m.created_by).filter(Boolean)))
+    const ids = Array.from(new Set((adj || []).flatMap((m: any) => [m.created_by, m.reviewed_by]).filter(Boolean)))
     const names = new Map<string, string>()
     if (ids.length > 0) {
       const { data: staff } = await admin.from('vendor_staff').select('user_id, name').eq('vendor_id', vendor.id).in('user_id', ids)
@@ -59,13 +59,18 @@ export async function GET(req: NextRequest) {
     const movements = (adj || []).map((m: any) => ({
       ...m,
       by_name: m.created_by ? (names.get(m.created_by) || 'Unknown') : null,
+      reviewed_by_name: m.reviewed_by ? (names.get(m.reviewed_by) || 'Unknown') : null,
       value: Math.abs(Number(m.quantity_change) || 0) * netStockCost(m.product?.cost, m.product),
     }))
+    // The dashboard nags on the UNREVIEWED figures only: once the owner has
+    // looked, the line has done its job. A new correction reopens it.
     const summary = movements.reduce((s: any, m: any) => {
       const q = Number(m.quantity_change) || 0
-      if (q < 0) { s.downCount++; s.downUnits += -q; s.downValue += m.value } else if (q > 0) { s.upCount++; s.upUnits += q; s.upValue += m.value }
+      const fresh = !m.reviewed_at
+      if (q < 0) { s.downCount++; s.downUnits += -q; s.downValue += m.value; if (fresh) { s.unreviewedDownCount++; s.unreviewedDownUnits += -q; s.unreviewedDownValue += m.value } }
+      else if (q > 0) { s.upCount++; s.upUnits += q; s.upValue += m.value; if (fresh) s.unreviewedUpUnits += q }
       return s
-    }, { downCount: 0, downUnits: 0, downValue: 0, upCount: 0, upUnits: 0, upValue: 0 })
+    }, { downCount: 0, downUnits: 0, downValue: 0, upCount: 0, upUnits: 0, upValue: 0, unreviewedDownCount: 0, unreviewedDownUnits: 0, unreviewedDownValue: 0, unreviewedUpUnits: 0 })
     return NextResponse.json({ movements, summary })
   }
 
@@ -92,10 +97,33 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await getVendor()
   if (!auth) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
-  const { vendor, userId } = auth
+  const { vendor, userId, role } = auth
   const admin = createAdminClient()
   const body = await req.json()
   const { action } = body
+
+  // ── REVIEW COUNT CORRECTIONS (owner / manager) ────────────────────────────
+  // POST { action: 'review', from, to } — stamps every unreviewed adjustment
+  // in the window as looked at by the caller. Nothing is deleted or hidden
+  // from reports; only the dashboard nag clears. A cashier cannot clear a
+  // line about their own corrections.
+  if (action === 'review') {
+    if (role !== 'owner' && role !== 'manager') {
+      return NextResponse.json({ error: 'Only the owner or a manager can mark corrections reviewed' }, { status: 403 })
+    }
+    const { from, to } = body
+    const ok = (s: any) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s)
+    if (!ok(from) || !ok(to)) return NextResponse.json({ error: 'from and to (YYYY-MM-DD) are required' }, { status: 400 })
+    const fromTs = new Date(from + 'T00:00:00+05:30').toISOString()
+    const toTs = new Date(to + 'T23:59:59.999+05:30').toISOString()
+    const { data: done, error } = await admin.from('stock_movements')
+      .update({ reviewed_at: new Date().toISOString(), reviewed_by: userId })
+      .eq('vendor_id', vendor.id).eq('movement_type', 'adjustment')
+      .is('reviewed_at', null).gte('created_at', fromTs).lte('created_at', toTs)
+      .select('id')
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true, reviewed: (done || []).length })
+  }
 
   // ── LOG SINGLE MOVEMENT ───────────────────────────────────────────────────
   if (action === 'log') {

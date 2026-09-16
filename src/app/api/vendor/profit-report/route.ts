@@ -224,7 +224,7 @@ export async function GET(req: NextRequest) {
   // net cost, NOT charged to profit: a count correction says the goods were
   // never there, a write-off says they were and are gone.
   const { data: adjRows } = await admin.from('stock_movements')
-    .select('product_sku, quantity_change, quantity_before, quantity_after, notes, created_at, created_by, product:products(name)')
+    .select('product_sku, quantity_change, quantity_before, quantity_after, notes, created_at, created_by, reviewed_at, product:products(name)')
     .eq('vendor_id', caller.vendor.id).eq('movement_type', 'adjustment')
     .gte('created_at', fromTs).lte('created_at', toTs).order('created_at')
   const adjustments = { downCount: 0, downUnits: 0, downValue: 0, upCount: 0, upUnits: 0, upValue: 0 }
@@ -239,6 +239,7 @@ export async function GET(req: NextRequest) {
       sku: m.product_sku, name: m.product?.name || m.product_sku || '?',
       change: q, before: Number(m.quantity_before) || 0, after: Number(m.quantity_after) || 0,
       note: m.notes || '', value: r0(value),
+      reviewed: !!m.reviewed_at,
     }
   })
 

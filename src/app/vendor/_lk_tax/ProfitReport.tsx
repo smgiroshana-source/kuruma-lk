@@ -163,7 +163,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       <table>
         <thead><tr><th>Date</th><th>Product</th><th class="num">Change</th><th>Reason</th><th class="num">Value</th></tr></thead>
         <tbody>
-          ${adj.list.map((m: any) => `<tr><td>${escapeHtml(m.date)}</td><td>${escapeHtml(m.name)}</td><td class="num" style="color:${m.change < 0 ? '#b45309' : '#15803d'}">${m.change > 0 ? '+' : ''}${m.change} (${m.before} → ${m.after})</td><td>${escapeHtml(m.note)}</td><td class="num">${money(m.value)}</td></tr>`).join('')}
+          ${adj.list.map((m: any) => `<tr><td>${escapeHtml(m.date)}</td><td>${escapeHtml(m.name)}</td><td class="num" style="color:${m.change < 0 ? '#b45309' : '#15803d'}">${m.change > 0 ? '+' : ''}${m.change} (${m.before} → ${m.after})</td><td>${escapeHtml(m.note)}${m.reviewed ? ' <span style="color:#15803d;font-size:11px">· reviewed</span>' : ''}</td><td class="num">${money(m.value)}</td></tr>`).join('')}
         </tbody>
       </table>
       <p class="note">Counts changed by hand — not sales, GRNs or write-offs. Not charged to profit: a correction says the goods were never there. Damaged, lost or stolen stock belongs in Write-offs, where the loss does reach profit.</p>` : ''
