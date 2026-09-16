@@ -134,6 +134,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   // Count corrections this month — seen here without opening a report
   // (owner, 2026-09-15: "fraud can happen right?").
   const [adjMonth, setAdjMonth] = useState<{ downCount: number; downUnits: number; downValue: number; upUnits: number; unreviewedDownCount: number; unreviewedDownUnits: number; unreviewedDownValue: number; unreviewedUpUnits: number } | null>(null)
+  const [adjList, setAdjList] = useState<any[]>([])
   const [reviewing, setReviewing] = useState(false)
   // Owner/manager has looked at this month's corrections: stamp them reviewed
   // so the line clears. A new correction reopens it with only the fresh ones.
@@ -149,13 +150,14 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       if (!r.ok) throw new Error(j.error || 'Failed')
       showToast(`${j.reviewed} correction${j.reviewed !== 1 ? 's' : ''} marked reviewed`)
       const rr = await fetch(`/api/vendor/stock-movements?from=${today.slice(0, 7)}-01&to=${today}`)
-      if (rr.ok) { const jj = await rr.json(); setAdjMonth(jj.summary || null) }
+      if (rr.ok) { const jj = await rr.json(); setAdjMonth(jj.summary || null); setAdjList(jj.movements || []) }
     } catch (e: any) { showToast('⚠️ ' + e.message) }
     setReviewing(false)
   }
   type Popup =
     | { kind: 'open' } | { kind: 'close' } | { kind: 'att' }
     | { kind: 'chooser'; dir: 'in' | 'out'; amount: number }
+    | { kind: 'adjustments' }
     | { kind: 'income'; amount?: number }
     | { kind: 'movement'; dir: 'in' | 'out'; type: string; amount?: number }
     | { kind: 'advance'; amount?: number }
@@ -186,7 +188,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       try {
         const today = colomboToday()
         const r = await fetch(`/api/vendor/stock-movements?from=${today.slice(0, 7)}-01&to=${today}`)
-        if (r.ok) { const j = await r.json(); setAdjMonth(j.summary || null) }
+        if (r.ok) { const j = await r.json(); setAdjMonth(j.summary || null); setAdjList(j.movements || []) }
       } catch {}
     }
   }, [role])
@@ -302,7 +304,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const flowDone = flow.every(s => s.state === 'done')
 
   // ── Needs-attention queue (red = money leaking now, amber = drifting) ──
-  type Attn = { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string; done?: { label: string; run: () => void; busy?: boolean } }
+  type Attn = { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string; open?: () => void; done?: { label: string; run: () => void; busy?: boolean } }
   const attention: Attn[] = []
   if (!isCashier) {
     if (d.staleOpenSessionDate) {
@@ -341,7 +343,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         icon: '🧮', tone: 'amber',
         text: `Stock counts corrected down ${n} time${n !== 1 ? 's' : ''} this month — ${u} unit${u !== 1 ? 's' : ''}, ${formatRs(adjMonth.unreviewedDownValue)} at cost` +
               (adjMonth.unreviewedUpUnits > 0 ? ` (${adjMonth.unreviewedUpUnits} up)` : ''),
-        cta: 'See', tab: 'stocktake',
+        cta: 'See', tab: 'stocktake', open: () => setPopup({ kind: 'adjustments' }),
         done: (role === 'owner' || role === 'manager') ? { label: 'Reviewed ✓', run: reviewAdjustments, busy: reviewing } : undefined,
       })
     }
@@ -501,7 +503,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
                 }`}
               >
                 <button
-                  onClick={() => onNavigate(a.tab, a.sub)}
+                  onClick={() => a.open ? a.open() : onNavigate(a.tab, a.sub)}
                   className={`flex-1 min-w-0 flex items-center gap-3 text-left px-3 py-2.5 rounded-r-lg transition-colors ${a.tone === 'red' ? 'hover:bg-red-100' : 'hover:bg-amber-100'}`}
                 >
                   <span className="text-base leading-none shrink-0">{a.icon}</span>
@@ -718,6 +720,45 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
       {popup?.kind === 'att' && (
         <AttendanceModal onClose={closePopup} showToast={showToast}
           onSaved={(marked, total) => { setAttToday({ marked, total }); setPopup(null) }} />
+      )}
+      {popup?.kind === 'adjustments' && (
+        <Modal title="Stock count corrections this month" onClose={closePopup}>
+          {adjList.length === 0 ? (
+            <p className="text-sm text-slate-400 py-4 text-center">No count corrections this month.</p>
+          ) : (
+            <div className="divide-y divide-slate-100 -mx-1">
+              {adjList.slice().reverse().map((m: any) => {
+                const q = Number(m.quantity_change) || 0
+                return (
+                  <div key={m.id} className="px-1 py-2.5 flex items-start gap-3">
+                    <span className={`shrink-0 mt-0.5 text-sm font-black tabular-nums w-12 text-right ${q < 0 ? 'text-amber-700' : 'text-emerald-700'}`}>{q > 0 ? '+' : ''}{q}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-800 truncate">{m.product?.name || m.product_sku}</p>
+                      <p className="text-xs text-slate-500">{Number(m.quantity_before)} → {Number(m.quantity_after)}{m.notes ? ` · ${m.notes}` : ''}</p>
+                      <p className="text-[11px] text-slate-400">
+                        {new Date(m.created_at).toLocaleString('en-LK', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Colombo' })}
+                        {m.by_name ? ` · by ${m.by_name}` : ''}
+                        {m.reviewed_by_name ? <span className="text-emerald-700"> · reviewed by {m.reviewed_by_name}</span> : <span className="text-amber-700"> · not yet reviewed</span>}
+                      </p>
+                    </div>
+                    {Number(m.value) > 0 && <span className="shrink-0 text-xs font-bold text-slate-600 tabular-nums">{formatRs(m.value)}</span>}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400 mt-3">Counts changed by hand this month, valued at net cost. Not sales, GRNs or write-offs. Reviewed marks stay on every report.</p>
+          <div className="flex gap-2 mt-4">
+            {(role === 'owner' || role === 'manager') && adjList.some((m: any) => !m.reviewed_at) && (
+              <button onClick={async () => { await reviewAdjustments(); }} disabled={reviewing}
+                className="flex-1 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white font-bold text-sm py-2.5 rounded-xl">
+                {reviewing ? '…' : 'Mark all reviewed ✓'}
+              </button>
+            )}
+            <button onClick={() => { closePopup(); onNavigate('stocktake') }} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50">Stock tab</button>
+            <button onClick={closePopup} className="px-4 py-2.5 rounded-xl border-2 border-slate-200 text-slate-600 font-bold text-sm hover:bg-slate-50">Close</button>
+          </div>
+        </Modal>
       )}
       {popup?.kind === 'chooser' && (
         <Modal
