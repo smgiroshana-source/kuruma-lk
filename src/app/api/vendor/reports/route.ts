@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { netStockCost } from '@/lib/netCost'
+import { netOfVat } from '@/lib/margin'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -177,13 +178,23 @@ export async function GET(req: NextRequest) {
     const rangeStart = lkStartOfDay(rangeFromStr)
     const rangeEnd = lkEndOfDay(rangeToStr)
 
+    // A gazette tax invoice's unit_price is what the customer paid — VAT
+    // included. Product/FIFO cost is always net. Comparing the two straight
+    // overstated GP by the VAT on every WHEEL MART tax invoice (owner,
+    // 2026-09-22 — same bug found and fixed on the Sales & Invoices page;
+    // this report had it too). Same rule as profit-report/route.ts: strip VAT
+    // only when document_type === 'tax_invoice'.
+    const { data: cfgGp } = await admin.from('tax_config')
+      .select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').maybeSingle()
+    const gpVatRate = cfgGp?.value != null ? parseFloat(cfgGp.value) : 18
+
     // Step 1: Fetch non-voided sales in range (paginated — a busy period can
     // exceed the 1000-row cap, which would silently understate the totals)
     let saleList: any[]
     try {
       saleList = await fetchAllRows((from, to) => admin
         .from('sales')
-        .select('id, total, payment_method, created_at')
+        .select('id, total, payment_method, document_type, created_at')
         .eq('vendor_id', vendor.id)
         .is('voided_at', null)
         .gte('created_at', rangeStart)
@@ -199,6 +210,7 @@ export async function GET(req: NextRequest) {
 
     if (saleList.length > 0) {
       const saleIds = saleList.map((s: any) => s.id)
+      const docTypeBySale = new Map(saleList.map((s: any) => [s.id, s.document_type]))
 
       // Step 2: Fetch sale_items for those sales (chunked over the id list and
       // paginated — the combined line items easily exceed 1000, which would
@@ -212,9 +224,10 @@ export async function GET(req: NextRequest) {
 
       for (const si of (saleItems || [])) {
         const qty = parseInt(si.quantity ?? 0)
-        const price = parseInt(si.unit_price ?? 0)
         const cost = parseInt(si.unit_cost ?? 0)
-        revenue += qty * price
+        const gross = qty * parseInt(si.unit_price ?? 0)
+        const isTaxInvoice = docTypeBySale.get(si.sale_id) === 'tax_invoice'
+        revenue += isTaxInvoice ? netOfVat(gross, gpVatRate) : gross
         cogs += qty * cost
       }
     }
@@ -267,6 +280,14 @@ export async function GET(req: NextRequest) {
     const { data: cfg } = await admin.from('tax_config')
       .select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').maybeSingle()
     const vatRate = cfg?.value != null ? parseFloat(cfg.value) : 18
+    // products.price is the customer-facing shelf price — VAT-inclusive for a
+    // VAT-registered (lk_tax) vendor, same convention as marginBase() on the
+    // Products list and POS. "Potential Gross Profit" compared that gross
+    // price straight to net cost, overstating it by the VAT (owner,
+    // 2026-09-22 — same class of bug as the Sales & Invoices and GP-report fixes).
+    const { data: settingsSV } = await admin.from('vendor_settings')
+      .select('invoice_mode').eq('vendor_id', vendor.id).maybeSingle()
+    const isVatEntitySV = settingsSV?.invoice_mode === 'lk_tax'
     // Summary — paginated: a vendor with >1000 products would otherwise have its
     // stock valuation computed over only the first 1000 (badly undercounted).
     let rows: any[]
@@ -284,20 +305,23 @@ export async function GET(req: NextRequest) {
     let total_products = rows.length
     let total_units = 0
     let total_cost_value = 0
-    let total_retail_value = 0
+    let total_retail_value = 0        // gross shelf price — what the till would take
+    let total_retail_value_net = 0    // ex-VAT — the figure profit math compares to cost
 
     for (const p of rows) {
       const qty = parseInt(p.quantity ?? 0)
       const cost = netStockCost(p.cost, p, vatRate)
-      const price = parseInt(p.price ?? 0)
+      const grossPrice = parseInt(p.price ?? 0)
+      const netPrice = isVatEntitySV ? netOfVat(grossPrice, vatRate) : grossPrice
       total_units += qty
       total_cost_value += qty * cost
-      total_retail_value += qty * price
+      total_retail_value += qty * grossPrice
+      total_retail_value_net += qty * netPrice
     }
 
-    const potential_gp = total_retail_value - total_cost_value
-    const potential_gp_percent = total_retail_value > 0
-      ? Math.round((potential_gp / total_retail_value) * 100 * 10) / 10
+    const potential_gp = total_retail_value_net - total_cost_value
+    const potential_gp_percent = total_retail_value_net > 0
+      ? Math.round((potential_gp / total_retail_value_net) * 100 * 10) / 10
       : 0
 
     // Top 5 categories by cost value (only products with stock > 0) — paginated
