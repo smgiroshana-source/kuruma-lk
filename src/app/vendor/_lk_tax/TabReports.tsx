@@ -33,9 +33,13 @@ interface ReorderProduct {
 
 interface GPSummary {
   revenue: number
+  known_revenue: number
   cogs: number
   gross_profit: number
   gp_percent: number
+  coverage_percent: number
+  no_cost_revenue: number
+  no_cost_qty: number
   sale_count: number
   avg_sale: number
   cash_revenue: number
@@ -473,11 +477,14 @@ export default function TabReports({ vendor, showToast, reportTools }: Props) {
             </div>
           ) : (
             <>
-              {/* 4 summary cards */}
+              {/* 4 summary cards — Revenue is revenue WITH a known cost, so it
+                  lines up with Gross Profit below it (Revenue − COGS = Gross
+                  Profit). Sales with no cost recorded sit in their own box
+                  further down, same split the Profit Report uses. */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                 <KpiCard
-                  label="Revenue"
-                  value={formatRs(gpData.revenue)}
+                  label="Revenue (with cost)"
+                  value={formatRs(gpData.known_revenue)}
                   valueClass="text-green-600"
                 />
                 <KpiCard
@@ -497,6 +504,19 @@ export default function TabReports({ vendor, showToast, reportTools }: Props) {
                   valueClass={gpPercentColor(gpData.gp_percent ?? 0)}
                 />
               </div>
+
+              {/* Sold with no cost recorded — excluded from GP above, not an
+                  invented margin. Matches the Profit Report's own rule. */}
+              {gpData.no_cost_revenue > 0 && (
+                <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 mb-4">
+                  <p className="text-xs font-black text-amber-800">
+                    {formatRs(gpData.no_cost_revenue)} sold with no cost recorded ({gpData.no_cost_qty} unit{gpData.no_cost_qty !== 1 ? 's' : ''})
+                  </p>
+                  <p className="text-[11px] text-amber-700 mt-0.5">
+                    No profit is claimed on these — the figures above speak for {(gpData.coverage_percent ?? 0).toFixed(1)}% of the period&apos;s {formatRs(gpData.revenue)} revenue.
+                  </p>
+                </div>
+              )}
 
               {/* Sales breakdown — two columns */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -548,7 +568,7 @@ export default function TabReports({ vendor, showToast, reportTools }: Props) {
               {/* Disclaimer */}
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
                 <p className="text-xs text-amber-700 font-semibold">
-                  ⚠️ COGS calculated using current product cost prices, not historical cost at time of sale. GP figures are estimates.
+                  ⚠️ Cost uses the price at the time of sale where recorded, otherwise the product&apos;s current cost — so GP is an estimate, not the exact figure. Lines with no cost anywhere are excluded, not counted as profit — see above.
                 </p>
               </div>
             </>

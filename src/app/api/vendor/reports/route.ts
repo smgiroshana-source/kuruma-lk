@@ -187,6 +187,16 @@ export async function GET(req: NextRequest) {
     const { data: cfgGp } = await admin.from('tax_config')
       .select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').maybeSingle()
     const gpVatRate = cfgGp?.value != null ? parseFloat(cfgGp.value) : 18
+    // A line with no cost anywhere — no sale-time snapshot AND no product cost
+    // set today — was still counting its FULL revenue as profit (cost fell
+    // back to parseInt(undefined) = 0). The Profit Report has always excluded
+    // these from GP and reported them separately instead of inventing a
+    // margin; this report gets the same treatment (owner, 2026-09-22). A
+    // typed service/labour line (no product_sku at all) has no cost concept
+    // and stays fully in profit, same as the Profit Report.
+    const { data: gpProducts } = await admin.from('products')
+      .select('sku, cost, cost_includes_vat, cost_vat_rate').eq('vendor_id', vendor.id)
+    const gpProdBySku = new Map((gpProducts || []).filter((p: any) => p.sku).map((p: any) => [p.sku, p]))
 
     // Step 1: Fetch non-voided sales in range (paginated — a busy period can
     // exceed the 1000-row cap, which would silently understate the totals)
@@ -205,8 +215,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: e?.message || 'Failed to load sales' }, { status: 500 })
     }
 
-    let revenue = 0
+    let revenue = 0       // every sale in the window — the coverage denominator
+    let known_revenue = 0 // revenue on lines that DO have a cost — what GP is measured against
     let cogs = 0
+    let no_cost_revenue = 0
+    let no_cost_qty = 0
 
     if (saleList.length > 0) {
       const saleIds = saleList.map((s: any) => s.id)
@@ -217,25 +230,38 @@ export async function GET(req: NextRequest) {
       // undercount COGS and overstate gross profit)
       const saleItems = await fetchAllByIds(saleIds, (ids, from, to) => admin
         .from('sale_items')
-        .select('sale_id, product_id, quantity, unit_price, unit_cost')
+        .select('sale_id, product_sku, quantity, unit_price, unit_cost')
         .in('sale_id', ids)
         .order('id')
         .range(from, to))
 
       for (const si of (saleItems || [])) {
         const qty = parseInt(si.quantity ?? 0)
-        const cost = parseInt(si.unit_cost ?? 0)
         const gross = qty * parseInt(si.unit_price ?? 0)
         const isTaxInvoice = docTypeBySale.get(si.sale_id) === 'tax_invoice'
-        revenue += isTaxInvoice ? netOfVat(gross, gpVatRate) : gross
-        cogs += qty * cost
+        const lineRevenue = isTaxInvoice ? netOfVat(gross, gpVatRate) : gross
+        revenue += lineRevenue
+
+        const prod = si.product_sku ? gpProdBySku.get(si.product_sku) : null
+        const snap = si.unit_cost != null && parseInt(si.unit_cost) > 0 ? netStockCost(parseInt(si.unit_cost), prod, gpVatRate) : null
+        if (!si.product_sku) {
+          // Typed service/labour line — no cost concept, whole net amount is margin.
+          known_revenue += lineRevenue
+        } else if (snap != null) {
+          known_revenue += lineRevenue; cogs += qty * snap
+        } else if (prod && parseInt(prod.cost) > 0) {
+          known_revenue += lineRevenue; cogs += qty * netStockCost(parseInt(prod.cost), prod, gpVatRate)
+        } else {
+          no_cost_revenue += lineRevenue; no_cost_qty += qty
+        }
       }
     }
 
-    const gross_profit = revenue - cogs
+    const gross_profit = known_revenue - cogs
     const sale_count = saleList.length
     const avg_sale = sale_count > 0 ? Math.round(revenue / sale_count) : 0
-    const gp_percent = revenue > 0 ? Math.round((gross_profit / revenue) * 100 * 10) / 10 : 0
+    const gp_percent = known_revenue > 0 ? Math.round((gross_profit / known_revenue) * 100 * 10) / 10 : 0
+    const coverage_percent = revenue > 0 ? Math.round((known_revenue / revenue) * 100 * 10) / 10 : 0
 
     // Payment method breakdown from sales rows
     let cash_revenue = 0
@@ -257,9 +283,13 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       revenue,
+      known_revenue,
       cogs,
       gross_profit,
       gp_percent,
+      coverage_percent,
+      no_cost_revenue,
+      no_cost_qty,
       sale_count,
       avg_sale,
       cash_revenue,
