@@ -22,10 +22,16 @@ export async function POST(req: NextRequest) {
   const vendor = await getVendor()
   if (!vendor) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { saleId, returnedItems, reason, refundMethod, return_kind: returnKind, rebill_invoice_no: rebillInvoiceNo } = await req.json()
+  const reqBody = await req.json()
+  const { saleId, returnedItems, reason, refundMethod, return_kind: returnKind, rebill_invoice_no: rebillInvoiceNo } = reqBody
   if (!['rebill', 'goods_back', 'faulty'].includes(returnKind)) return NextResponse.json({ error: 'Say why: wrong invoice (re-billing), goods came back, or faulty' }, { status: 400 })
   // returnedItems: [{ saleItemId: string, quantity: number }]
   // refundMethod: 'advance' | 'cash' | undefined
+  // paid_received: false ONLY on a 'rebill' credit note where the mistake was
+  // caught before the customer paid — see src/app/api/vendor/sales/route.ts,
+  // same 2026-09-22 incident. No refund row, no advance credit, when nothing
+  // was ever received. Missing/absent => true.
+  const paidReceived = reqBody.paid_received !== false
 
   if (!saleId || !Array.isArray(returnedItems) || returnedItems.length === 0)
     return NextResponse.json({ error: 'saleId and returnedItems required' }, { status: 400 })
@@ -212,7 +218,8 @@ export async function POST(req: NextRequest) {
   } catch (e) { console.error('sale_returns insert failed', sale.id, e) }
 
   // 6. Record refund payment entries (for cash reconciliation visibility)
-  if (paidReduction > 0) {
+  // Nothing here if the customer never actually paid — see paidReceived above.
+  if (paidReceived && paidReduction > 0) {
     // Paid portion: money must physically move back to customer
     if (refundMethod === 'advance' && sale.customer_id) {
       const { data: customer } = await admin.from('customers')

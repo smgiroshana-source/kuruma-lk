@@ -1528,6 +1528,17 @@ export async function POST(req: NextRequest) {
     if (!['rebill', 'goods_back', 'faulty'].includes(returnKind)) return NextResponse.json({ error: 'Say why: wrong invoice (re-billing), goods came back, or faulty' }, { status: 400 })
     // returnItems: [{ saleItemId, quantity }]
     // refundMethod: 'advance' | 'cash'
+    // paid_received: false ONLY on a 'rebill' return where the mistake was caught
+    // before the customer ever paid — a bill can be marked 'paid' the moment
+    // staff pick a method, with no separate confirmation that money moved. When
+    // false, no cash/advance refund row is written and the customer's advance
+    // balance is untouched: there is nothing to give back, because nothing was
+    // ever received. Owner, 2026-09-22: a wrong bill was marked paid by bank
+    // before the customer paid, "refunded" to advance, and that fictitious
+    // credit paid for the real corrected bill — a real Rs.7,700 bank transfer
+    // never got recorded as a payment at all. Missing/absent => true (every
+    // other return kind, and older callers).
+    const paidReceived = body.paid_received !== false
     if (!saleId || !returnItems || !Array.isArray(returnItems) || returnItems.length === 0)
       return NextResponse.json({ error: 'No items to return' }, { status: 400 })
 
@@ -1644,7 +1655,7 @@ export async function POST(req: NextRequest) {
       // the period the goods came back. Voiding it removed it from its own
       // month, which is the same retroactive rewrite by another name.
       payment_status: newBalanceDue > 0 ? 'partial' : 'paid',
-      notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (refundMethod === 'advance' ? ' to advance' : ' cash refund') + (returnReason ? ' | Reason: ' + String(returnReason).slice(0, 200) : ''),
+      notes: (sale.notes || '') + '\nRETURN: ' + returnedAt + ' | ' + returnedDetails.join(', ') + ' | Rs.' + totalRefund.toLocaleString() + (!paidReceived ? ' — never paid, nothing to refund' : refundMethod === 'advance' ? ' to advance' : ' cash refund') + (returnReason ? ' | Reason: ' + String(returnReason).slice(0, 200) : ''),
     }
     // total and subtotal are deliberately absent from this update.
 
@@ -1654,7 +1665,12 @@ export async function POST(req: NextRequest) {
     // Always record payment entries for reporting — even if customer_id is null.
     // Advance balance update still requires a linked customer.
     if (totalRefund > 0) {
-      if (sale.customer_id && refundMethod === 'advance') {
+      // The paid portion only actually needs refunding if it was actually
+      // collected. A 'rebill' answered "never paid" skips both the advance
+      // credit and the refund row — sale.paid_amount still drops above, which
+      // corrects the mistaken 'paid' status, but no money is shown moving
+      // because none did.
+      if (paidReceived && sale.customer_id && refundMethod === 'advance') {
         const { data: customer } = await admin.from('customers').select('advance_balance').eq('id', sale.customer_id).eq('vendor_id', vendor.id).single()
         if (customer) {
           // Only add the portion that was actually paid (not the portion that just cancels outstanding debt)
@@ -1665,7 +1681,7 @@ export async function POST(req: NextRequest) {
       }
       // Record refund payments for ALL portions (always, for audit + report visibility)
       // Cash/advance portion (money that needs to move back)
-      if (paidReduction > 0) {
+      if (paidReceived && paidReduction > 0) {
         await admin.from('payments').insert({
           created_by: vendor.callerUserId || null, sale_id: saleId, vendor_id: vendor.id, customer_id: sale.customer_id || null,
           amount: -paidReduction,
@@ -1702,7 +1718,7 @@ export async function POST(req: NextRequest) {
       // The caller used this to know the sale had been voided. It no longer is:
       // a full return leaves the sale standing and reversed in its own period.
       fullyReturned: (await admin.from('sale_items').select('quantity, returned_quantity').eq('sale_id', saleId)).data?.every((i: any) => (i.returned_quantity || 0) >= i.quantity) ?? false,
-      message: 'Returned: ' + returnedDetails.join(', ') + '. Total value: Rs.' + totalRefund.toLocaleString() + (paidReduction > 0 ? (refundMethod === 'advance' ? ` | Rs.${paidReduction.toLocaleString()} added to advance` : ` | Rs.${paidReduction.toLocaleString()} cash back`) : '') + sellThroughReturnNote
+      message: 'Returned: ' + returnedDetails.join(', ') + '. Total value: Rs.' + totalRefund.toLocaleString() + (!paidReceived ? ' | never paid — nothing to refund' : paidReduction > 0 ? (refundMethod === 'advance' ? ` | Rs.${paidReduction.toLocaleString()} added to advance` : ` | Rs.${paidReduction.toLocaleString()} cash back`) : '') + sellThroughReturnNote
     })
   }
 

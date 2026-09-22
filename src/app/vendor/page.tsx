@@ -746,6 +746,13 @@ export default function VendorDashboard() {
   // counter. Reported separately so returns don't read as lost sales.
   const [returnKind, setReturnKind] = useState<'rebill' | 'goods_back' | 'faulty' | ''>('')
   const [rebillInvoiceNo, setRebillInvoiceNo] = useState('')
+  // A "wrong invoice" return needs one more fact: did the customer actually
+  // pay before the mistake was caught? A bill is marked paid the moment staff
+  // pick a method, with no separate confirmation money moved. Owner,
+  // 2026-09-22: a wrong bill was marked paid by bank before payment, then
+  // "refunded" to advance — a real bank transfer for the correct bill never
+  // got recorded at all. '' = not answered yet, only asked for 'rebill'.
+  const [rebillPaid, setRebillPaid] = useState<'' | 'yes' | 'no'>('')
   const [returnLoading, setReturnLoading] = useState(false)
 
   // Feature 1,2: Bulk upload duplicate detection + progress
@@ -1423,6 +1430,9 @@ export default function VendorDashboard() {
     const items = Object.entries(returnItems).filter(([, qty]) => qty > 0).map(([saleItemId, quantity]) => ({ saleItemId, quantity }))
     if (items.length === 0) { showToast('Select items to return'); return }
     if (!returnKind) { showToast('Say why — wrong invoice, goods came back, or faulty'); return }
+    if (returnKind === 'rebill' && !rebillPaid) { showToast('Had the customer already paid? Answer that first'); return }
+    // Only a 'rebill' can be unpaid — the goods already left for the other two kinds.
+    const paidReceived = !(returnKind === 'rebill' && rebillPaid === 'no')
     setReturnLoading(true)
     try {
       if (returnModal.tax_serial) {
@@ -1437,27 +1447,28 @@ export default function VendorDashboard() {
             refundMethod,
             return_kind: returnKind,
             rebill_invoice_no: rebillInvoiceNo.trim() || null,
+            paid_received: paidReceived,
           }),
         })
         const j = await r.json()
         if (r.ok) {
           showToast('✅ Credit Note ' + j.creditNoteNo + ' issued')
           setIssuedCreditNote(j.creditNote)
-          setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo('')
+          setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo(''); setRebillPaid('')
           fetchSales(); fetchData()
         } else {
           showToast('⚠️ ' + (j.error || 'Failed to issue credit note'))
         }
       } else {
         // ── Receipt: direct return (no credit note required) ──
-        const payload: Record<string, unknown> = { action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod, return_kind: returnKind, rebill_invoice_no: rebillInvoiceNo.trim() || null }
+        const payload: Record<string, unknown> = { action: 'return_items', saleId: returnModal.id, returnItems: items, refundMethod, return_kind: returnKind, rebill_invoice_no: rebillInvoiceNo.trim() || null, paid_received: paidReceived }
         if (returnReason.trim()) payload.return_reason = returnReason.trim()
         const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
         const j = await r.json()
         if (j.success) {
           showToast(j.message)
           fetchSales(); fetchData()
-          setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo('')
+          setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo(''); setRebillPaid('')
         } else showToast('Error: ' + j.error)
       }
     } catch { showToast('Network error') }
@@ -4644,7 +4655,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                       { v: 'goods_back', l: 'Goods came back', d: 'Back on the shelf, can be sold again' },
                       { v: 'faulty', l: 'Faulty / not sellable', d: 'Came back but cannot be sold as it is' },
                     ] as const).map(k => (
-                      <button key={k.v} type="button" onClick={() => setReturnKind(k.v)}
+                      <button key={k.v} type="button" onClick={() => { setReturnKind(k.v); setRebillPaid('') }}
                         className={'text-left px-3 py-2.5 rounded-xl border-2 transition ' + (returnKind === k.v ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white hover:border-slate-300')}>
                         <div className={'text-sm font-bold ' + (returnKind === k.v ? 'text-amber-800' : 'text-slate-700')}>{k.l}</div>
                         <div className="text-[11px] text-slate-500 mt-0.5">{k.d}</div>
@@ -4652,9 +4663,28 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                     ))}
                   </div>
                   {returnKind === 'rebill' && (
-                    <input type="text" value={rebillInvoiceNo} onChange={e => setRebillInvoiceNo(e.target.value)}
-                      placeholder="New invoice number, if already issued (optional)"
-                      className="mt-2 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                    <>
+                      <input type="text" value={rebillInvoiceNo} onChange={e => setRebillInvoiceNo(e.target.value)}
+                        placeholder="New invoice number, if already issued (optional)"
+                        className="mt-2 w-full border border-slate-200 rounded-xl px-3 py-2 text-sm font-mono text-slate-800 placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                      {/* A bill is marked paid the moment staff pick a method — this is
+                          the only place that checks whether money actually moved before
+                          the mistake was caught (owner, 2026-09-22). */}
+                      <div className="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                        <p className="text-xs font-bold text-amber-800">Had the customer already paid this bill?</p>
+                        <div className="flex gap-2 mt-2">
+                          <button type="button" onClick={() => setRebillPaid('yes')}
+                            className={'flex-1 text-sm font-bold py-2 rounded-lg border-2 transition ' + (rebillPaid === 'yes' ? 'border-amber-500 bg-amber-100 text-amber-900' : 'border-amber-200 bg-white text-amber-700 hover:border-amber-300')}>
+                            Yes — paid
+                          </button>
+                          <button type="button" onClick={() => setRebillPaid('no')}
+                            className={'flex-1 text-sm font-bold py-2 rounded-lg border-2 transition ' + (rebillPaid === 'no' ? 'border-emerald-500 bg-emerald-100 text-emerald-900' : 'border-emerald-200 bg-white text-emerald-700 hover:border-emerald-300')}>
+                            No — caught it first
+                          </button>
+                        </div>
+                        {rebillPaid === 'no' && <p className="text-[11px] text-emerald-700 mt-2">Good — nothing to refund. This just corrects the wrong bill; no cash or advance entry is made.</p>}
+                      </div>
+                    </>
                   )}
                   <input
                     type="text"
@@ -4670,6 +4700,23 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                     return sum + (item ? qty * parseFloat(item.unit_price) : 0)
                   }, 0)
                   if (totalRefund <= 0) return null
+                  // Nothing was ever paid — one plain void, no refund method to pick.
+                  if (returnKind === 'rebill' && rebillPaid === 'no') {
+                    return (
+                      <div className="mt-4 pt-4 border-t border-slate-100">
+                        <div className="flex justify-between items-center mb-4">
+                          <span className="text-sm font-bold text-slate-700">Bill value (never paid)</span>
+                          <span className="text-xl font-black text-slate-500">Rs.{totalRefund.toLocaleString()}</span>
+                        </div>
+                        <button onClick={() => handleReturn('cash')} disabled={returnLoading}
+                          className="w-full text-left px-4 py-3 rounded-xl border-2 border-slate-300 bg-slate-50 active:bg-slate-100 transition disabled:opacity-50">
+                          <div className="font-bold text-sm text-slate-800">Void the wrong bill — no money moves</div>
+                          <p className="text-xs text-slate-500 mt-0.5">Stock comes back; nothing goes to cash or advance</p>
+                        </button>
+                      </div>
+                    )
+                  }
+                  if (returnKind === 'rebill' && !rebillPaid) return null
                   return (
                     <div className="mt-4 pt-4 border-t border-slate-100">
                       <div className="flex justify-between items-center mb-4">
@@ -4696,7 +4743,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                 })()}
               </div>
               <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex-shrink-0">
-                <button onClick={() => { setReturnModal(null); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo('') }} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
+                <button onClick={() => { setReturnModal(null); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo(''); setRebillPaid('') }} className="w-full text-sm font-semibold text-slate-500 py-2 active:text-slate-700">Cancel</button>
               </div>
             </div>
           </div>
