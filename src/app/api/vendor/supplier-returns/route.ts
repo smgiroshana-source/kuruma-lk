@@ -6,6 +6,7 @@ import { adjustProductQuantity } from '@/lib/stock'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { recomputeSupplierInvoice } from '@/lib/supplierInvoice'
 import { round2 } from '@/lib/money2'
+import { consumeFifoCost } from '@/lib/fifoCost'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -240,9 +241,7 @@ export async function POST(req: NextRequest) {
       // but the layers kept the returned units, so a later sale drew its COGS
       // from stock that had physically gone back to the supplier — and the
       // layers drifted further from the shelf with every return.
-      const { data: consumed } = await admin.rpc('consume_fifo_cost', {
-        p_vendor_id: vendor.id, p_product_id: item.product_id, p_quantity: item.quantity,
-      })
+      const consumed = await consumeFifoCost(admin, vendor.id, item.product_id, item.quantity)
       // What the goods were really carried at. Falls back to the typed cost
       // when a product has no layers (stock loaded before GRNs existed).
       costOfGoods += (consumed && consumed > 0) ? Number(consumed) : Number(item.total_cost || 0)

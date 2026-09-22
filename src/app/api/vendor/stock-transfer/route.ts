@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { generateProductSlug } from '@/lib/slug'
 import { uniqueProductSlug } from '@/lib/uniqueSlug'
+import { consumeFifoCost, restoreFifoCost } from '@/lib/fifoCost'
 
 // A shipment is processed line by line, so a container-sized batch needs more
 // than the platform default. Each line is written as it goes, so overrunning
@@ -144,11 +145,7 @@ async function landAtDestination(
 async function returnToSender(admin: ReturnType<typeof createAdminClient>, row: any) {
   await adjustProductQuantity(admin, row.from_product_id, row.from_vendor_id, row.quantity)
   if (row.moved_unit_cost != null && row.moved_unit_cost > 0) {
-    await admin.rpc('restore_fifo_cost', {
-      p_vendor_id: row.from_vendor_id, p_product_id: row.from_product_id,
-      p_quantity: row.quantity, p_unit_cost: row.moved_unit_cost,
-      p_received_at: new Date().toISOString().slice(0, 10),
-    })
+    await restoreFifoCost(admin, row.from_vendor_id, row.from_product_id, row.quantity, row.moved_unit_cost, new Date().toISOString().slice(0, 10))
   }
 }
 
@@ -387,9 +384,7 @@ export async function POST(req: NextRequest) {
 
       // Move FIFO cost out of the source so costing stays truthful on both sides
       let movedUnitCost: number | null = item.transferCost != null ? Math.round(item.transferCost) : null
-      const { data: consumedCost } = await admin.rpc('consume_fifo_cost', {
-        p_vendor_id: vendor.id, p_product_id: src.id, p_quantity: item.quantity,
-      })
+      const consumedCost = await consumeFifoCost(admin, vendor.id, src.id, item.quantity)
       if (movedUnitCost == null && consumedCost && consumedCost > 0) {
         movedUnitCost = Math.round(consumedCost / item.quantity)
       }
@@ -517,11 +512,7 @@ export async function POST(req: NextRequest) {
       }
       // Seed the destination's FIFO layer with the cost that left the sender
       if (row.moved_unit_cost != null && row.moved_unit_cost > 0) {
-        await admin.rpc('restore_fifo_cost', {
-          p_vendor_id: vendor.id, p_product_id: landed.productId,
-          p_quantity: row.quantity, p_unit_cost: row.moved_unit_cost,
-          p_received_at: new Date().toISOString().slice(0, 10),
-        })
+        await restoreFifoCost(admin, vendor.id, landed.productId!, row.quantity, row.moved_unit_cost, new Date().toISOString().slice(0, 10))
       }
       // ONE statement marks it accepted AND records where it landed, so those
       // two facts can never disagree — the split between them is precisely the
@@ -616,9 +607,7 @@ export async function POST(req: NextRequest) {
         if (!claimed || claimed.length === 0) {
           return NextResponse.json({ success: false, error: `${row.from_product_name}: their stock changed just now — please try again.` }, { status: 409 })
         }
-        await admin.rpc('consume_fifo_cost', {
-          p_vendor_id: row.to_vendor_id, p_product_id: row.to_product_id, p_quantity: row.quantity,
-        })
+        await consumeFifoCost(admin, row.to_vendor_id, row.to_product_id, row.quantity)
         // A product that only ever existed because of this transfer should not
         // survive its reversal — but only if it is empty and untouched.
         if (row.created_dest_product && claimed[0].quantity === 0) {

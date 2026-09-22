@@ -111,6 +111,25 @@ export async function GET(req: NextRequest) {
     if (r.to_product_id)   inHistory.add(r.to_product_id)
   }
 
+  // products.cost is one number; the shelf can hold more than one at once
+  // (2 left at Rs.5,000, 4 just received at Rs.6,000). Flag every product
+  // whose remaining stock actually spans more than one cost, with the
+  // range, so the list can show "Rs.5,000–6,000" instead of a single figure
+  // that can only ever be right for part of what's on the shelf (owner,
+  // 2026-09-22). Full per-layer detail is fetched on demand when opened.
+  const layerRows = await fetchAllRows((from, to) => admin
+    .from('cost_layers')
+    .select('product_id, unit_cost')
+    .eq('vendor_id', vendor.id).gt('quantity_remaining', 0)
+    .range(from, to))
+  const costRange = new Map<string, { min: number; max: number; n: number }>()
+  for (const l of layerRows) {
+    const c = Math.round(Number(l.unit_cost) || 0)
+    const e = costRange.get(l.product_id)
+    if (!e) costRange.set(l.product_id, { min: c, max: c, n: 1 })
+    else { e.min = Math.min(e.min, c); e.max = Math.max(e.max, c); e.n++ }
+  }
+
   // First photo only. The list is drawn 50 rows at a time and every picker
   // shows one thumbnail; the full set is fetched from /api/vendor/images for
   // the rows someone actually opens (Edit, the sheet, Change Primary Images).
@@ -126,6 +145,7 @@ export async function GET(req: NextRequest) {
   }
   products = products.map((p: any) => {
     const sorted = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+    const range = costRange.get(p.id)
     return {
       ...compact(p),
       // One flag rather than a separate id list — the products array is already
@@ -133,6 +153,9 @@ export async function GET(req: NextRequest) {
       in_history: inHistory.has(p.id),
       images: sorted.slice(0, 1),
       image_count: sorted.length,
+      // Only present when the shelf genuinely spans more than one cost —
+      // most products have exactly one layer and need nothing extra here.
+      ...(range && range.min !== range.max ? { cost_min: range.min, cost_max: range.max, cost_layer_count: range.n } : {}),
     }
   })
 

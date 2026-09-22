@@ -10,6 +10,7 @@ import { linkSaleToClaim } from '@/lib/claims'
 import { recordSellThrough, voidSellThrough, returnSellThrough } from '@/lib/sellThrough'
 import { creditOnAccountProblem } from '@/lib/creditOnAccount'
 import { resolveAdvanceSource } from '@/lib/advanceSource'
+import { consumeFifoCost, restoreFifoCost } from '@/lib/fifoCost'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -1048,9 +1049,7 @@ export async function POST(req: NextRequest) {
         .from('sale_items').select('id, product_id, quantity').eq('sale_id', sale.id)
       for (const si of (insertedSaleItems || [])) {
         if (!si.product_id) continue
-        const { data: totalCost } = await admin.rpc('consume_fifo_cost', {
-          p_vendor_id: vendor.id, p_product_id: si.product_id, p_quantity: si.quantity,
-        })
+        const totalCost = await consumeFifoCost(admin, vendor.id, si.product_id, si.quantity)
         if (totalCost && totalCost > 0) {
           await admin.from('sale_items')
             .update({ unit_cost: Math.round(totalCost / si.quantity) })
@@ -1328,11 +1327,7 @@ export async function POST(req: NextRequest) {
         await adjustProductQuantity(admin, item.product_id, vendor.id, item.quantity)
         // Restore FIFO layer at original unit_cost (puts stock back for future sales)
         if (parseInt(item.unit_cost || 0) > 0) {
-          await admin.rpc('restore_fifo_cost', {
-            p_vendor_id: vendor.id, p_product_id: item.product_id,
-            p_quantity: item.quantity, p_unit_cost: parseInt(item.unit_cost),
-            p_received_at: voidDate,
-          })
+          await restoreFifoCost(admin, vendor.id, item.product_id, item.quantity, parseInt(item.unit_cost), voidDate)
         }
       }
     }
@@ -1475,18 +1470,12 @@ export async function POST(req: NextRequest) {
     if (line.product_id) {
       await adjustProductQuantity(admin, line.product_id, vendor.id, qty)
       if (parseInt(String(line.unit_cost || 0)) > 0) {
-        await admin.rpc('restore_fifo_cost', {
-          p_vendor_id: vendor.id, p_product_id: line.product_id,
-          p_quantity: qty, p_unit_cost: parseInt(String(line.unit_cost)),
-          p_received_at: new Date().toISOString().slice(0, 10),
-        })
+        await restoreFifoCost(admin, vendor.id, line.product_id, qty, parseInt(String(line.unit_cost)), new Date().toISOString().slice(0, 10))
       }
     }
 
     await adjustProductQuantity(admin, newProduct.id, vendor.id, -qty)
-    const { data: consumed } = await admin.rpc('consume_fifo_cost', {
-      p_vendor_id: vendor.id, p_product_id: newProduct.id, p_quantity: qty,
-    })
+    const consumed = await consumeFifoCost(admin, vendor.id, newProduct.id, qty)
     const newUnitCost = consumed && consumed > 0 ? Math.round(consumed / qty) : null
 
     // unit_price, quantity and total are deliberately untouched: the customer
@@ -1595,11 +1584,7 @@ export async function POST(req: NextRequest) {
 
       // Restore FIFO cost layer for returned quantity
       if (saleItem.product_id && parseInt(saleItem.unit_cost || 0) > 0) {
-        await admin.rpc('restore_fifo_cost', {
-          p_vendor_id: vendor.id, p_product_id: saleItem.product_id,
-          p_quantity: returnQty, p_unit_cost: parseInt(saleItem.unit_cost),
-          p_received_at: new Date().toISOString().slice(0, 10),
-        })
+        await restoreFifoCost(admin, vendor.id, saleItem.product_id, returnQty, parseInt(saleItem.unit_cost), new Date().toISOString().slice(0, 10))
       }
 
       returnedDetails.push(saleItem.product_name + ' x' + returnQty)
@@ -2129,9 +2114,7 @@ export async function POST(req: NextRequest) {
         .from('sale_items').select('id, product_id, quantity').eq('sale_id', newSale.id)
       for (const si of (confirmedSaleItems || [])) {
         if (!si.product_id) continue
-        const { data: totalCost } = await admin.rpc('consume_fifo_cost', {
-          p_vendor_id: vendor.id, p_product_id: si.product_id, p_quantity: si.quantity,
-        })
+        const totalCost = await consumeFifoCost(admin, vendor.id, si.product_id, si.quantity)
         if (totalCost && totalCost > 0) {
           await admin.from('sale_items')
             .update({ unit_cost: Math.round(totalCost / si.quantity) })
@@ -2290,9 +2273,7 @@ export async function POST(req: NextRequest) {
         .from('sale_items').select('id, product_id, quantity').eq('sale_id', saleId)
       for (const si of (finalizedItems || [])) {
         if (!si.product_id) continue
-        const { data: totalCost } = await admin.rpc('consume_fifo_cost', {
-          p_vendor_id: vendor.id, p_product_id: si.product_id, p_quantity: si.quantity,
-        })
+        const totalCost = await consumeFifoCost(admin, vendor.id, si.product_id, si.quantity)
         if (totalCost && totalCost > 0) {
           await admin.from('sale_items')
             .update({ unit_cost: Math.round(totalCost / si.quantity) })

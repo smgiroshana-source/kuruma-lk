@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { lockedNowMessage } from '@/lib/taxRates'
 import { returnSellThrough } from '@/lib/sellThrough'
+import { restoreFifoCost } from '@/lib/fifoCost'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -163,13 +164,7 @@ export async function POST(req: NextRequest) {
       await adjustProductQuantity(admin, item.product_id, vendor.id, qty)
       // Restore FIFO cost layer
       if (parseInt(item.unit_cost || 0) > 0) {
-        await admin.rpc('restore_fifo_cost', {
-          p_vendor_id: vendor.id,
-          p_product_id: item.product_id,
-          p_quantity: qty,
-          p_unit_cost: parseInt(item.unit_cost),
-          p_received_at: returnedAt.slice(0, 10),
-        })
+        await restoreFifoCost(admin, vendor.id, item.product_id, qty, parseInt(item.unit_cost), returnedAt.slice(0, 10))
       }
     }
 

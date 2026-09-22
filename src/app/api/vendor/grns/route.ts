@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { applySupplierAdvance } from '@/lib/supplierAdvance'
 import { round2 } from '@/lib/money2'
+import { refreshProductCost } from '@/lib/fifoCost'
 
 /**
  * Hand a GRN number back to its series counter — only while it is still the
@@ -278,6 +279,12 @@ export async function POST(req: NextRequest) {
         await admin.from('grns').update({ status: 'draft', posted_at: null }).eq('id', grnId)
         return NextResponse.json({ error: 'Cost layer error: ' + layerErr.message }, { status: 500 })
       }
+      // The reference cost tracks the OLDEST remaining layer — usually still an
+      // older, cheaper purchase even after this GRN, not automatically this
+      // one's price (owner, 2026-09-22: "2 at 5,000, 4 at 6,000" should read
+      // 5,000, the cost of the next unit that actually sells).
+      const touched = [...new Set(costLayerRows.map((r: any) => r.product_id))]
+      for (const productId of touched) await refreshProductCost(admin, vendor.id, productId as string)
     }
 
     // 3. The goods now exist in stock, so the debt for them must exist too.

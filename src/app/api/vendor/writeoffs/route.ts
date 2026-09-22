@@ -3,6 +3,7 @@ import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/s
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
+import { consumeFifoCost } from '@/lib/fifoCost'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -244,9 +245,7 @@ export async function POST(req: NextRequest) {
       // the shelf but their cost stays in stock valuation, and the next sale
       // draws cost from a layer that should already have been used up — the
       // loss silently becomes some future sale's COGS.
-      await admin.rpc('consume_fifo_cost', {
-        p_vendor_id: vendor.id, p_product_id: item.product_id, p_quantity: item.quantity,
-      })
+      await consumeFifoCost(admin, vendor.id, item.product_id, item.quantity)
 
       // Log stock movement
       const { error: movErr } = await admin.from('stock_movements').insert({

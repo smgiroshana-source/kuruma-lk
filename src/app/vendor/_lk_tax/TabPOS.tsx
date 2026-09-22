@@ -6,6 +6,7 @@ import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { gpPercent, isBelowCost, netOfVat, costIncVat, productCostIncVat } from '@/lib/margin'
 import { useState, useEffect, useMemo } from 'react'
 import { isLooseCount } from '@/lib/looseCount'
+import { previewFifoCost, type CostLayer } from '@/lib/fifoCost'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
 const PAY_LABELS: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', bank: 'Bank Transfer', card: 'Card', advance: 'Advance', credit: 'Credit' }
@@ -604,9 +605,24 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
       const loose = isLooseCount(product)
       const ex = prev.find(i => i.productId === product.id)
       if (ex) return prev.map(i => i.productId === product.id ? { ...i, quantity: loose ? i.quantity + 1 : Math.min(i.quantity + 1, product.quantity) } : i)
-      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: loose ? null : product.quantity, cost: product.cost ?? null, cost_vat_rate: product.cost_vat_rate ?? 0, cost_includes_vat: product.cost_includes_vat ?? false }]
+      return [...prev, { productId: product.id, productName: product.name, productSku: product.sku, unitPrice: product.price || 0, quantity: 1, maxStock: loose ? null : product.quantity, cost: product.cost ?? null, cost_vat_rate: product.cost_vat_rate ?? 0, cost_includes_vat: product.cost_includes_vat ?? false, costLayers: null }]
     })
     setPosSearch('')
+    // The reference cost is one number; the shelf can hold more than one at
+    // once. Fetched once per product, oldest-first, so the below-cost check
+    // and the line's cost note reflect exactly what THIS quantity would
+    // really cost (owner, 2026-09-22). Fire-and-forget: the line already
+    // works off the single reference cost until this lands, and still does
+    // if a product simply has no layers.
+    if (product.id) {
+      fetch('/api/vendor/products', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cost_layers', productId: product.id }),
+      }).then(r => r.json()).then(j => {
+        if (!j.success) return
+        setPosCart(prev => prev.map(i => i.productId === product.id ? { ...i, costLayers: j.layers } : i))
+      }).catch(() => {})
+    }
   }
   function updateCartQty(i: number, q: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, quantity: Math.max(1, item.maxStock == null ? q : Math.min(q, item.maxStock)) } : item)) }
   function updateCartPrice(i: number, price: number) { setPosCart(p => p.map((item, x) => x === i ? { ...item, unitPrice: price } : item)) }
@@ -709,15 +725,47 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
   // would let a tube go out Rs.184 light and call it profit.
   // Takes the CART ITEM, not a bare cost: the VAT that applies is the one that
   // applied when the goods were bought, and it travels on the product.
-  const posCostBasis = (it: any) =>
-    isLkTax && !posIsVatEntity ? productCostIncVat(it) : (Number(it?.cost) || 0)
+  //
+  // The shelf can hold more than one cost at once — 2 left at Rs.5,000, 4 just
+  // received at Rs.6,000 (owner, 2026-09-22). it.costLayers, fetched once when
+  // the item is added to the cart, holds exactly what a real sale would draw
+  // from; previewFifoCost walks it the same oldest-first way for THIS line's
+  // quantity, without touching stock. Falls back to the single reference cost
+  // when the layers haven't loaded yet or the product has none.
+  const posNetCostBasis = (it: any): number => {
+    const preview: CostLayer[] = it?.costLayers
+    const p = preview && preview.length > 0 ? previewFifoCost(preview, it.quantity) : null
+    return p ? p.avgCost : (Number(it?.cost) || 0)
+  }
+  // Same VAT-grossing productCostIncVat applies to a bare product.cost, applied
+  // instead to whatever net figure is actually in play for this line.
+  const grossCost = (netAmt: number, it: any): number => {
+    if (netAmt <= 0) return 0
+    if (it?.cost_includes_vat) return Math.round(netAmt)
+    return Math.round(netAmt * (100 + (Number(it?.cost_vat_rate) || 0)) / 100)
+  }
+  const posCostBasis = (it: any) => {
+    const net = posNetCostBasis(it)
+    return isLkTax && !posIsVatEntity ? grossCost(net, it) : net
+  }
 
   // The floor comes out the SAME on both entities, which is the point: Rs.1,207
   // either way for a tube that cost Rs.1,207. On the VAT entity the price is
   // taken net and compared to the net cost; on the proprietorship both sides
   // stay gross. One number for the operator to remember.
-  const posCostFloor = (it: any) =>
-    isLkTax ? productCostIncVat(it) : (Number(it?.cost) || 0)
+  const posCostFloor = (it: any) => {
+    const net = posNetCostBasis(it)
+    return isLkTax ? grossCost(net, it) : net
+  }
+  // "2 @ Rs.5,000 + 2 @ Rs.6,000" — only shown when this line's quantity
+  // genuinely spans more than one purchase, in the currency the operator is
+  // already looking at (gross on the entities that show gross).
+  const posCostBreakdown = (it: any): string | null => {
+    const preview: CostLayer[] = it?.costLayers
+    const p = preview && preview.length > 0 ? previewFifoCost(preview, it.quantity) : null
+    if (!p || p.breakdown.length < 2) return null
+    return p.breakdown.map(b => `${b.qty}@Rs.${(isLkTax ? grossCost(b.unit_cost, it) : b.unit_cost).toLocaleString()}`).join(' + ')
+  }
   // Ex-VAT price entry (insurance quotes): only meaningful on the VAT entity.
   const posEntryExcl = posIsVatEntity && posPriceMode === 'excl'
   const grossOfNet = (p: number) => Math.round((Number(p) || 0) * (100 + posVatRate) / 100)
@@ -1229,18 +1277,21 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             </div>
                           </td>
                           <td className="px-2 sm:px-4 py-2">
-                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), posCostBasis(item.cost))  /* base price: the 3.5% is the bank's, not margin */ ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
+                            <input type="text" inputMode="numeric" value={(posEntryExcl ? netOfVat(item.unitPrice, posVatRate) : item.unitPrice) || ''} onChange={e => { const v = e.target.value.replace(/[^0-9]/g, ''); const n = v ? parseInt(v) : 0; updateCartPrice(i, posEntryExcl ? grossOfNet(n) : n) }} onFocus={e => { if (e.target.value === '0') e.target.value = '' }} className={'w-20 sm:w-24 px-1 sm:px-2 py-1 border rounded text-sm ' + (isBelowCost(posMarginBase(item.unitPrice), posCostBasis(item))  /* base price: the 3.5% is the bank's, not margin */ ? 'border-red-400 bg-red-50' : posEntryExcl ? 'border-amber-400 bg-amber-50' : 'border-slate-200')} />
                             {posEntryExcl && Number(item.unitPrice) > 0 && <p className="text-[9px] font-bold text-amber-700 mt-0.5 leading-none">= Rs.{Number(item.unitPrice).toLocaleString()} with VAT</p>}
                             {posCardPricing && Number(item.unitPrice) > 0 && (
                               <p className="text-[9px] font-bold text-purple-700 mt-0.5 leading-none">
                                 card Rs.{cardPrice(item.unitPrice).toLocaleString()}
                               </p>
                             )}
-                            {Number(item.cost) > 0 && (isBelowCost(posMarginBase(item.unitPrice), item.cost)
-                              ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{posCostFloor(item.cost).toLocaleString()} or more{posIsVatEntity ? ` (cost Rs.${Number(item.cost).toLocaleString()} excl VAT)` : ''}</p>
-                              : Number(item.unitPrice) > 0
-                                ? <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), posCostBasis(item.cost))}%{posIsVatEntity ? ' net' : ''}</p>
-                                : <p className="text-[9px] text-slate-400 mt-0.5 leading-none">min Rs.{posCostFloor(item.cost).toLocaleString()}</p>)}
+                            {Number(item.cost) > 0 && (() => {
+                              const basis = posCostBasis(item), floor = posCostFloor(item), mixed = posCostBreakdown(item)
+                              return isBelowCost(posMarginBase(item.unitPrice), basis)
+                                ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{floor.toLocaleString()} or more{posIsVatEntity ? ` (cost Rs.${basis.toLocaleString()} excl VAT)` : ''}{mixed ? ` · ${mixed}` : ''}</p>
+                                : Number(item.unitPrice) > 0
+                                  ? <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), basis)}%{posIsVatEntity ? ' net' : ''}{mixed ? ` · avg cost: ${mixed}` : ''}</p>
+                                  : <p className="text-[9px] text-slate-400 mt-0.5 leading-none">min Rs.{floor.toLocaleString()}{mixed ? ` · ${mixed}` : ''}</p>
+                            })()}
                           </td>
                           <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * cardPrice(item.unitPrice)).toLocaleString()}</td>
                           <td className="px-1 sm:px-2"><button onClick={() => removeFromCart(i)} className="text-red-400 hover:text-red-600">✕</button></td>

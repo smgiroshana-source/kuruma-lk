@@ -11,6 +11,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { generateProductSlug } from '@/lib/slug'
 import { isLooseCount } from '@/lib/looseCount'
+import { getRemainingLayers, refreshProductCost } from '@/lib/fifoCost'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -141,6 +142,21 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { action } = body
   const admin = createAdminClient()
+
+  // ─── COST LAYERS — the full breakdown behind a "Rs.X–Y" range ───
+  // Read-only, oldest first: exactly the order a real sale would draw from,
+  // so what's shown here matches what the next sale will actually cost.
+  if (action === 'cost_layers') {
+    const { productId } = body
+    if (!productId) return NextResponse.json({ success: false, error: 'productId required' }, { status: 400 })
+    const { data: product } = await admin.from('products').select('vendor_id').eq('id', productId).single()
+    if (!product || product.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
+    const layers = await getRemainingLayers(admin, vendor.id, productId)
+    return NextResponse.json({
+      success: true,
+      layers: layers.map(l => ({ unit_cost: Math.round(l.unit_cost), quantity_remaining: l.quantity_remaining, received_at: l.received_at })),
+    })
+  }
 
   // ─── CREATE SINGLE PRODUCT ───
   if (action === 'create') {
@@ -357,7 +373,7 @@ export async function POST(req: NextRequest) {
         notes: 'edited on the product form — no reason asked',
         created_by: (vendor as any).callerUserId || null,
       })
-      if (qtyAfter < qtyBefore) await trimCostLayers(admin, productId, qtyBefore - qtyAfter)
+      if (qtyAfter < qtyBefore) { await trimCostLayers(admin, productId, qtyBefore - qtyAfter); await refreshProductCost(admin, vendor.id, productId) }
     }
 
     // "Add the cost later" workflow: products often get listed without a cost
@@ -595,11 +611,10 @@ export async function POST(req: NextRequest) {
           quantity_received: delta, quantity_remaining: delta,
           unit_cost: cost, received_at: now.slice(0, 10),
         })
-        // Reference cost too, when the product has none — see seed_cost_layer.
-        if (!(parseInt((p as any).cost) > 0)) {
-          await admin.from('products').update({ cost }).eq('id', productId)
-        }
       }
+      // The reference cost tracks the oldest remaining layer either way — a
+      // trim can exhaust one, a found-stock entry adds one (owner, 2026-09-22).
+      if (delta !== 0) await refreshProductCost(admin, vendor.id, productId)
     }
     return NextResponse.json({ success: true, quantity: target, delta })
   }
