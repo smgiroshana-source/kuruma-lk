@@ -3588,17 +3588,25 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                     const prodBySku = new Map((data?.products || []).filter((p: any) => p.sku).map((p: any) => [p.sku, p]))
                     let realRev = 0, realCogs = 0, roughRev = 0, roughCogs = 0, noCostRev = 0
                     const noCost = new Map<string, { name: string; sku: string; qty: number; rev: number; productId: string | null }>()
+                    // unit_price on a gazette tax invoice is the customer's VAT-INCLUSIVE
+                    // price; product cost is always net. Comparing gross revenue against
+                    // net cost overstated this panel's Gross Profit by the VAT on every
+                    // tax invoice — owner, 2026-09-22, caught on 26SEP_PART_00014 (shown
+                    // as Rs.36,440/22%; the true figure is Rs.11,728/9%). Same rule the
+                    // Profit Report already applies (src/app/api/vendor/profit-report).
+                    const panelVatRate = Number(vendorSettings?.vat_rate) || 18
                     for (const s of validSales) {
+                      const stripVat = s.document_type === 'tax_invoice'
                       for (const i of (s.items || [])) {
                         if (i.product_sku === 'OPENING-BAL') continue
                         const qty = i.quantity - (i.returned_quantity || 0)
                         if (qty <= 0) continue
-                        const rev = qty * parseFloat(i.unit_price || 0)
+                        const grossRev = qty * parseFloat(i.unit_price || 0)
+                        const rev = stripVat ? netOfVat(grossRev, panelVatRate) : grossRev
                         const prod: any = i.product_sku ? prodBySku.get(i.product_sku) : null
                         // Costs are stored net; only a product flagged cost_includes_vat
                         // (none today) has VAT stripped here. See src/lib/netCost.ts.
-                        const panelVat = Number(vendorSettings?.vat_rate) || 18
-                        const netC = (c: number) => (isLkTax && prod?.cost_includes_vat) ? Math.round(c * 100 / (100 + panelVat)) : c
+                        const netC = (c: number) => (isLkTax && prod?.cost_includes_vat) ? Math.round(c * 100 / (100 + panelVatRate)) : c
                         const snap = i.unit_cost != null && parseInt(i.unit_cost) > 0 ? netC(parseInt(i.unit_cost)) : null
                         if (snap != null) { realRev += rev; realCogs += snap * qty }
                         else if (!i.product_sku) { realRev += rev } // typed service line — no COGS
@@ -4080,8 +4088,17 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                               const hasReturns = (sale.items || []).some((i: any) => (i.returned_quantity || 0) > 0)
                               const totalReturned = (sale.items || []).reduce((s: number, i: any) => s + ((i.returned_quantity || 0) * parseFloat(i.unit_price || 0)), 0)
                               const saleCogs = (sale.items || []).reduce((s: number, i: any) => s + (parseInt(i.unit_cost || 0) * i.quantity), 0)
-                              const saleGp = parseFloat(sale.total) - saleCogs
-                              const saleGpPct = saleCogs > 0 && parseFloat(sale.total) > 0 ? Math.round(saleGp / parseFloat(sale.total) * 100) : null
+                              // sale.total on a gazette tax invoice is VAT-INCLUSIVE (the
+                              // customer's price); item unit_cost is always net (FIFO/GRN
+                              // cost never carries VAT). Subtracting net cost from a gross
+                              // total overstated GP by the VAT on every WHEEL MART tax
+                              // invoice — owner, 2026-09-22, caught on 26SEP_PART_00014
+                              // (Rs.162,000 gross showed as Rs.36,440/22% GP; the true net
+                              // revenue is Rs.137,288, true GP Rs.11,728/9%). Same rule the
+                              // Profit Report already uses (src/app/api/vendor/profit-report).
+                              const saleRevenue = sale.document_type === 'tax_invoice' ? netOfVat(parseFloat(sale.total), Number(vendorSettings?.vat_rate) || 18) : parseFloat(sale.total)
+                              const saleGp = saleRevenue - saleCogs
+                              const saleGpPct = saleCogs > 0 && saleRevenue > 0 ? Math.round(saleGp / saleRevenue * 100) : null
                               return (<Fragment key={sale.id}>
                                 <tr key={sale.id} onClick={() => setExpandedSale(isExpanded ? null : sale.id)} className={'border-t border-slate-100 cursor-pointer hover:bg-slate-50 transition ' + (sale.payment_status === 'voided' ? 'opacity-50' : '') + (hasReturns && sale.payment_status !== 'voided' ? ' bg-red-50/30' : '') + (isExpanded ? ' bg-orange-50/50' : '')}>
                                   <td className="px-2 sm:px-3 py-2.5 text-xs text-slate-500 whitespace-nowrap">{formatDateShort(sale.created_at)}</td>
@@ -4108,9 +4125,10 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                                     {parseFloat(sale.balance_due) > 0 && <p className="text-xs font-bold text-red-600 mt-2">Balance Due: Rs.{parseFloat(sale.balance_due).toLocaleString()}</p>}
                                     {saleCogs > 0 && sale.payment_status !== 'voided' && (
                                       <div className="flex gap-4 mt-2 text-xs">
+                                        {sale.document_type === 'tax_invoice' && <span className="text-slate-400">Revenue (ex VAT): Rs.{Math.round(saleRevenue).toLocaleString()}</span>}
                                         <span className="text-slate-400">COGS: Rs.{saleCogs.toLocaleString()}</span>
                                         <span className={`font-bold ${saleGp >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                                          GP: Rs.{saleGp.toLocaleString()} {saleGpPct !== null ? `(${saleGpPct}%)` : ''}
+                                          GP: Rs.{Math.round(saleGp).toLocaleString()} {saleGpPct !== null ? `(${saleGpPct}%)` : ''}
                                         </span>
                                       </div>
                                     )}
