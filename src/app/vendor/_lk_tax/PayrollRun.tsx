@@ -17,7 +17,7 @@ const r0 = (n: any) => Math.round(Number(n) || 0)
 
 const KIND_LABEL: Record<string, string> = {
   base: 'Base', allowance: 'Allowance', commission_rate: 'Commission',
-  profit_rate: 'Profit share', epf: 'EPF', other: 'Other',
+  profit_rate: 'Profit share', epf: 'EPF', other: 'Other', loan: 'Loan',
 }
 
 type Line = any
@@ -316,6 +316,13 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
                                     {' '}· {c.proratedFrom.payableDays}/{c.proratedFrom.marked} days
                                   </span>
                                 )}
+                                {c.kind === 'loan' && (
+                                  r0(c.amount) > r0(c.balance)
+                                    ? <span className="text-[10px] font-bold text-red-600"> · only {rs(c.balance)} left on the loan</span>
+                                    : <span className="text-[10px] font-normal text-slate-400">
+                                        {' '}· {rs(r0(c.balance) - r0(c.amount))} left after{r0(c.amount) === 0 ? ' · skipped this month' : ''}
+                                      </span>
+                                )}
                               </span>
 
                               {/* per-event and daily rates are quantity × rate */}
@@ -369,10 +376,15 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
                           </div>
 
                           {r0(l.net_pay) < 0 && (
-                            <p className="text-[11px] font-bold text-red-600">
-                              Advances exceed this month&apos;s pay by {rs(Math.abs(r0(l.net_pay)))} — nothing is handed over,
-                              and the balance stays owing. Adjust an amount above if that isn&apos;t right.
-                            </p>
+                            (l.components || []).some((c: any) => c.kind === 'loan' && r0(c.amount) > 0)
+                              ? <p className="text-[11px] font-bold text-red-600">
+                                  This month&apos;s pay doesn&apos;t cover the loan repayment — lower it or type 0 to skip the month.
+                                </p>
+                              : <p className="text-[11px] font-bold text-red-600">
+                                  Advances exceed this month&apos;s pay by {rs(Math.abs(r0(l.net_pay)))} — nothing is handed over.
+                                  When you mark it paid, that {rs(Math.abs(r0(l.net_pay)))} is carried into next month as an advance
+                                  and comes off that pay.
+                                </p>
                           )}
                         </div>
                       )}

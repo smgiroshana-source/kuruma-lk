@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { PAYROLL_FIRST_CYCLE_START } from '@/lib/payrollStart'
+import { loansWithBalance, type LoanWithBalance } from '@/lib/staffLoans'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Monthly payroll run — WHEEL MART, owner only.
@@ -30,6 +31,7 @@ async function getOwner() {
 }
 
 const r0 = (n: number) => Math.round(Number(n) || 0)
+const rsText = (n: number) => 'Rs.' + r0(n).toLocaleString('en-US')
 
 // WHEEL MART pays salary for a 25th → 24th cycle (owner, 2026-08-24): period
 // "2026-08" means 25 Jul – 24 Aug, paid ~25 Aug. The period key is the month
@@ -60,7 +62,7 @@ const halfFactor = (policy: string) => (policy === 'full' ? 1 : policy === 'none
 // Everything here is a starting point the owner can edit before saving: the
 // system knows attendance and rates, it cannot know how many tyre repairs
 // someone did or what the workshop's profit was.
-function proposeLine(emp: any, items: any[], att: any[], advances: any[]) {
+function proposeLine(emp: any, items: any[], att: any[], advances: any[], loans: LoanWithBalance[] = []) {
   const present = att.filter(a => a.status === 'present').length
   const half = att.filter(a => a.status === 'half').length
   const absent = att.filter(a => a.status === 'absent').length
@@ -121,6 +123,18 @@ function proposeLine(emp: any, items: any[], att: any[], advances: any[]) {
     components.push({
       kind: 'other', label: 'Leave / other deduction', unit: 'cash', period: 'monthly',
       qty: 1, rate: 0, amount: 0, isDeduction: true,
+    })
+  }
+
+  // Loan repayments: the instalment, or what's left if that's less. The owner
+  // can lower it or type 0 to skip a month — the balance just waits. On
+  // payday what's on this line is what comes off the loan.
+  for (const loan of loans) {
+    if (loan.balance <= 0) continue
+    components.push({
+      kind: 'loan', label: 'Loan repayment', unit: 'cash', period: 'monthly',
+      qty: 1, rate: loan.instalment, amount: Math.min(loan.instalment, loan.balance), isDeduction: true,
+      loan_id: loan.id, balance: loan.balance,
     })
   }
 
@@ -214,6 +228,9 @@ export async function GET(req: NextRequest) {
   const { data: att } = empIds.length
     ? await admin.from('staff_attendance').select('*').in('employee_id', empIds).gte('date', from).lte('date', to)
     : { data: [] as any[] }
+  // Repayment starts with the first payroll AFTER the loan: one handed over
+  // during this cycle is repaid from next month, not taken straight back.
+  const loans = (await loansWithBalance(admin, caller.vendor.id, empIds)).filter(l => l.date < from && l.balance > 0)
 
   const lines = (employees || [])
     // Someone who joined after the cycle ended has nothing to be paid for it
@@ -223,6 +240,7 @@ export async function GET(req: NextRequest) {
       (items || []).filter((i: any) => i.employee_id === e.id),
       (att || []).filter((a: any) => a.employee_id === e.id),
       (advances || []).filter((a: any) => a.employee_id === e.id),
+      loans.filter(l => l.employee_id === e.id),
     ))
 
   const detail = wantDetail ? await slipDetail(lines.map((l: any) => l.employee_id), null) : undefined
@@ -311,6 +329,28 @@ export async function POST(req: NextRequest) {
     const { data: lines } = await admin.from('payroll_lines').select('*').eq('run_id', runId)
     if (!lines || lines.length === 0) return NextResponse.json({ error: 'This run has no lines' }, { status: 400 })
 
+    // ── Loan repayments: check before anything moves ────────────────────────
+    // The draft holds what the owner left on each loan line; the balance may
+    // have changed since it was saved, so it's checked against the real one.
+    const loanParts = lines.flatMap((l: any) => (l.components || [])
+      .filter((c: any) => c.kind === 'loan' && c.loan_id && r0(c.amount) > 0)
+      .map((c: any) => ({ line: l, loan_id: c.loan_id as string, amount: r0(c.amount) })))
+    if (loanParts.length > 0) {
+      const balances = await loansWithBalance(admin, caller.vendor.id, [...new Set(loanParts.map(p => p.line.employee_id as string))])
+      for (const p of loanParts) {
+        const loan = balances.find(b => b.id === p.loan_id)
+        if (!loan) return NextResponse.json({ error: `${p.line.employee_name}: that loan is no longer on record — reload payroll and save again` }, { status: 400 })
+        if (p.amount > loan.balance) return NextResponse.json({ error: `${p.line.employee_name}: loan repayment ${rsText(p.amount)} is more than the ${rsText(loan.balance)} left — lower it` }, { status: 400 })
+      }
+      // A repayment can't come out of pay that isn't there — otherwise the
+      // loan would quietly turn into a carried advance
+      for (const l of lines) {
+        if (r0(l.net_pay) < 0 && loanParts.some(p => p.line.id === l.id)) {
+          return NextResponse.json({ error: `${l.employee_name}'s pay doesn't cover the loan repayment this month — lower it or type 0 to skip` }, { status: 400 })
+        }
+      }
+    }
+
     // A cash payday belongs to that day's drawer
     let sessionId: string | null = null
     if (method === 'cash') {
@@ -350,6 +390,39 @@ export async function POST(req: NextRequest) {
         .lte('date', to).is('settled_in_run', null)
     }
 
+    // If either write below fails, everything this payday did is put back —
+    // a half-recorded payday is worse than none.
+    const undo = async () => {
+      if (posted.length) await admin.from('expenses').delete().in('id', posted)
+      await admin.from('payroll_lines').update({ expense_id: null }).eq('run_id', runId)
+      await admin.from('staff_advances').update({ settled_in_run: null }).eq('vendor_id', caller.vendor.id).eq('settled_in_run', runId)
+      await admin.from('staff_loan_repayments').delete().eq('run_id', runId)
+      await admin.from('staff_advances').delete().eq('vendor_id', caller.vendor.id).eq('carried_from_run', runId)
+    }
+
+    // What came off each loan
+    if (loanParts.length > 0) {
+      const { error: repErr } = await admin.from('staff_loan_repayments').insert(loanParts.map(p => ({
+        vendor_id: caller.vendor.id, loan_id: p.loan_id, employee_id: p.line.employee_id, run_id: runId, amount: p.amount,
+      })))
+      if (repErr) { await undo(); return NextResponse.json({ error: 'Could not record the loan repayments: ' + repErr.message }, { status: 500 }) }
+    }
+
+    // Advances bigger than the pay: every advance above was just settled, so
+    // the part the pay didn't cover is carried into the next cycle as a new
+    // advance dated its first day. It used to be written off here while the
+    // screen said "the balance stays owing" (owner, 2026-09-23).
+    const short = lines.filter((l: any) => r0(l.net_pay) < 0)
+    if (short.length > 0) {
+      const { error: carryErr } = await admin.from('staff_advances').insert(short.map((l: any) => ({
+        vendor_id: caller.vendor.id, employee_id: l.employee_id,
+        amount: -r0(l.net_pay), date: `${run.period}-25`, source: 'carried',
+        note: `Carried from salary ${cycleLabel(run.period)} — advances were more than the pay`,
+        carried_from_run: runId, entered_by: caller.email,
+      })))
+      if (carryErr) { await undo(); return NextResponse.json({ error: 'Could not carry the unpaid balance forward: ' + carryErr.message }, { status: 500 }) }
+    }
+
     await admin.from('payroll_runs').update({
       status: 'paid', paid_date: date, payment_method: method, updated_at: new Date().toISOString(),
     }).eq('id', runId).eq('vendor_id', caller.vendor.id)
@@ -371,6 +444,17 @@ export async function POST(req: NextRequest) {
       .select('*').eq('id', runId).eq('vendor_id', caller.vendor.id).single()
     if (!run) return NextResponse.json({ error: 'Run not found' }, { status: 404 })
     if (run.status !== 'paid') return NextResponse.json({ error: 'This run is already a draft' }, { status: 400 })
+
+    // A balance this payday carried forward that a later payroll has already
+    // deducted can't be pulled back from under it
+    const { data: carried } = await admin.from('staff_advances')
+      .select('id, settled_in_run').eq('vendor_id', caller.vendor.id).eq('carried_from_run', runId)
+    if ((carried || []).some((c: any) => c.settled_in_run)) {
+      return NextResponse.json({ error: 'A balance carried from this month has already come off a later payroll — reopen that one first' }, { status: 400 })
+    }
+    await admin.from('staff_advances').delete().eq('vendor_id', caller.vendor.id).eq('carried_from_run', runId)
+    // Put the loan balances back as they were before this payday
+    await admin.from('staff_loan_repayments').delete().eq('run_id', runId)
 
     const { data: lines } = await admin.from('payroll_lines').select('id, expense_id').eq('run_id', runId)
     const expenseIds = (lines || []).map((l: any) => l.expense_id).filter(Boolean)

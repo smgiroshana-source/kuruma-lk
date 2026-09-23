@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { advanceSettledOutsideSystem } from '@/lib/payrollStart'
+import { loansWithBalance } from '@/lib/staffLoans'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WHEEL MART Staff/HR — stage 1: registry, pay items, attendance, advances.
@@ -96,12 +97,18 @@ export async function GET(req: NextRequest) {
   const { data: advancesRaw } = await admin.from('staff_advances')
     .select('*').eq('vendor_id', vendor.id).order('date', { ascending: false }).limit(300)
 
+  // Loans are the owner's decision and the owner's to see
+  const loans = role === 'owner'
+    ? (await loansWithBalance(admin, vendor.id)).filter(l => empIds.has(l.employee_id))
+    : []
+
   return NextResponse.json({
     role,
     scope,
     employees: (employees || []).map((e: any) => ({ ...e, pay_items: itemsByEmp[e.id] || [] })),
     attendance,
     advances: advancesRaw || [],
+    loans,
     caller: email,
   })
 }
@@ -345,6 +352,69 @@ export async function POST(req: NextRequest) {
     if (src === 'drawer') await recomputeSessionForDate(admin, vendor.id, d)
     audit(admin, vendor.id, email, 'advance_added', employee_id, { amount: amt, source: src })
     return NextResponse.json({ advance: adv })
+  }
+
+  // ── Loans (owner only) ──────────────────────────────────────────────────
+  // Money lent and taken back a fixed instalment a month through payroll
+  // (src/lib/staffLoans.ts). The payout enters the cash book exactly like an
+  // advance — a 'salaries' expense on the drawer/bank — so the till reconciles
+  // and profit, which charges salary by days worked, is not touched by it.
+  if (action === 'add_loan') {
+    if (role !== 'owner') return NextResponse.json({ error: 'Loans are owner-only' }, { status: 403 })
+    const { employee_id, amount, instalment, date, source, note } = body
+    const amt = Math.round(Number(amount))
+    const inst = Math.round(Number(instalment))
+    if (!employee_id || !isFinite(amt) || amt <= 0) return NextResponse.json({ error: 'Valid person and amount required' }, { status: 400 })
+    if (!isFinite(inst) || inst <= 0) return NextResponse.json({ error: 'Monthly instalment required' }, { status: 400 })
+    if (inst > amt) return NextResponse.json({ error: 'The instalment is more than the loan' }, { status: 400 })
+    const d = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+    const src = ['drawer', 'bank', 'owner'].includes(source) ? source : 'drawer'
+    const { data: emp } = await admin.from('employees').select('id, name').eq('id', employee_id).eq('vendor_id', vendor.id).single()
+    if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+
+    let expenseId: string | null = null
+    if (src !== 'owner') {
+      let sessionId: string | null = null
+      if (src === 'drawer') {
+        const { data: daySession } = await admin.from('cash_sessions')
+          .select('id').eq('vendor_id', vendor.id).eq('session_date', d).maybeSingle()
+        sessionId = daySession?.id || null
+      }
+      const { data: exp, error: expErr } = await admin.from('expenses').insert({
+        vendor_id: vendor.id, expense_date: d, category: 'salaries',
+        description: `Staff loan — ${emp.name}`,
+        amount: amt, payment_method: src === 'drawer' ? 'cash' : 'online',
+        cash_session_id: sessionId, created_by: userId,
+      }).select('id').single()
+      if (expErr || !exp) return NextResponse.json({ error: 'Could not record the payment: ' + (expErr?.message || 'unknown error') }, { status: 500 })
+      expenseId = exp.id
+    }
+
+    const { data: loan, error } = await admin.from('staff_loans').insert({
+      vendor_id: vendor.id, employee_id, amount: amt, instalment: inst, date: d, source: src,
+      note: note?.trim() || null, expense_id: expenseId, entered_by: email,
+    }).select().single()
+    if (error) {
+      if (expenseId) await admin.from('expenses').delete().eq('id', expenseId).eq('vendor_id', vendor.id)
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
+    if (src === 'drawer') await recomputeSessionForDate(admin, vendor.id, d)
+    audit(admin, vendor.id, email, 'loan_added', employee_id, { amount: amt, instalment: inst, source: src })
+    return NextResponse.json({ loan })
+  }
+
+  if (action === 'delete_loan') {
+    if (role !== 'owner') return NextResponse.json({ error: 'Loans are owner-only' }, { status: 403 })
+    const { id } = body
+    const [loan] = (await loansWithBalance(admin, vendor.id)).filter(l => l.id === id)
+    if (!loan) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    // Once any of it has come off someone's pay, the loan is history
+    if (loan.repayment_count > 0) return NextResponse.json({ error: 'Repayments have already come off pay — it stays on record' }, { status: 400 })
+    if (loan.expense_id) await admin.from('expenses').delete().eq('id', loan.expense_id).eq('vendor_id', vendor.id)
+    await admin.from('staff_loans').delete().eq('id', id).eq('vendor_id', vendor.id)
+    if (loan.source === 'drawer') await recomputeSessionForDate(admin, vendor.id, loan.date)
+    audit(admin, vendor.id, email, 'loan_deleted', loan.employee_id, { amount: loan.amount })
+    return NextResponse.json({ ok: true })
   }
 
   if (action === 'delete_advance') {

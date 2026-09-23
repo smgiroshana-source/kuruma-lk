@@ -86,7 +86,9 @@ export function slipHtml(company: string, cycle: { from: string; to: string }, l
   const earningRows = [
     daily && base ? `<tr><td>No of working days</td><td class="c">${fmtDays(Number(base.qty) || 0)}</td><td class="r">${rs(base.amount)}</td></tr>` : '',
     ...otherEarnings.map(c => `<tr><td>${escapeHtml(c.label)}</td><td class="c">${c.qty && Number(c.qty) !== 1 ? `${fmtDays(Number(c.qty))} × ${r0(c.rate).toLocaleString('en-US')}` : ''}</td><td class="r">${rs(c.amount)}</td></tr>`),
-    ...deductions.map(c => `<tr><td>${escapeHtml(c.label)}</td><td class="c"></td><td class="r">${bracket(c.amount)}</td></tr>`),
+    ...deductions.map(c => c.kind === 'loan'
+      ? `<tr><td>Loan<div class="bal">balance after this: ${rs(r0(c.balance) - r0(c.amount))}</div></td><td class="c"></td><td class="r">${bracket(c.amount)}</td></tr>`
+      : `<tr><td>${escapeHtml(c.label)}</td><td class="c"></td><td class="r">${bracket(c.amount)}</td></tr>`),
   ].join('')
 
   return `
@@ -133,7 +135,7 @@ export function printSlips(company: string, cycle: { from: string; to: string },
     .grid td{padding:1.6px 6px;border-bottom:1px solid #eee;height:15px}
     .grid tfoot td{border-top:1.5px solid #333;border-bottom:none;font-weight:700;padding-top:4px}
     .c{text-align:center} .r{text-align:right;font-variant-numeric:tabular-nums}
-    .bf{font-size:9px;color:#888}
+    .bf{font-size:9px;color:#888} .bal{font-size:10px;color:#666}
     .sum{margin-top:10px;font-size:12.5px} .sum td{padding:3px 6px}
     .sum .due td{border-top:2px solid #111;font-weight:800;font-size:14px;padding-top:6px}
     .note{font-size:11px;color:#444;margin:8px 0 0}

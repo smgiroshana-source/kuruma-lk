@@ -13,6 +13,7 @@ import { compressImage } from '@/lib/compressImage'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { advanceSettledOutsideSystem } from '@/lib/payrollStart'
 import PayrollRun from './PayrollRun'
+import StaffLoans from './StaffLoans'
 import StaffLogins from '../_shared/StaffLogins'
 
 type PayItem = {
@@ -46,6 +47,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
   const [employees, setEmployees] = useState<Employee[]>([])
   const [scope, setScope] = useState<string>('both')
   const [advances, setAdvances] = useState<any[]>([])
+  const [loans, setLoans] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState('')
   const tt = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3500) }
@@ -121,6 +123,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
       setEmployees(j.employees || [])
       setScope(j.scope || 'both')
       setAdvances(j.advances || [])
+      setLoans(j.loans || [])
       const marks: Record<string, string> = {}
       for (const a of (j.attendance || [])) marks[a.employee_id] = a.status
       setAttMarks(marks)
@@ -447,6 +450,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
 
       {view === 'advances' && (
         <>
+          {isOwner && <StaffLoans employees={employees} loans={loans} post={post} reload={load} toast={tt} />}
           <div className="bg-white rounded-xl border border-slate-200 p-4 mb-3">
             <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Give Staff Advance</p>
             <div className="grid sm:grid-cols-4 gap-2">
@@ -472,7 +476,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
               <div key={a.id} className="flex items-center justify-between px-4 py-2.5">
                 <div>
                   <span className="text-sm font-bold text-slate-700">{empName(a.employee_id)}</span>
-                  <span className="text-xs text-slate-400 ml-2">{a.date} · {a.source === 'drawer' ? '💵 drawer' : a.source === 'bank' ? '🏦 bank' : '👤 owner'}{a.note ? ` · ${a.note}` : ''}{a.settled_in_run ? ' · ✓ settled' : advanceSettledOutsideSystem(a.date) ? ' · ✓ settled on paper' : ''}</span>
+                  <span className="text-xs text-slate-400 ml-2">{a.date} · {a.source === 'drawer' ? '💵 drawer' : a.source === 'bank' ? '🏦 bank' : a.source === 'carried' ? '↪ carried from last salary' : '👤 owner'}{a.note ? ` · ${a.note}` : ''}{a.settled_in_run ? ' · ✓ settled' : advanceSettledOutsideSystem(a.date) ? ' · ✓ settled on paper' : ''}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono font-bold text-sm text-slate-800">Rs.{Number(a.amount).toLocaleString()}</span>
