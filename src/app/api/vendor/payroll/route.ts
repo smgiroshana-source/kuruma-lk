@@ -168,10 +168,40 @@ export async function GET(req: NextRequest) {
         .lte('date', to).is('settled_in_run', null).order('date')
     : { data: [] as any[] }
 
+  // ── Salary slip detail (?detail=1) ─────────────────────────────────────────
+  // The slips the shop hands out (owner, 2026-09-23) list every day of the
+  // cycle: working days for daily-paid staff, and each advance on the date it
+  // was taken. Once a run is paid its advances are settled, so they're read
+  // back by run; before that, the unsettled ones this run would deduct.
+  async function slipDetail(ids: string[], paidRunId: string | null) {
+    if (ids.length === 0) return {}
+    const [{ data: emps }, { data: attAll }, { data: advAll }, { data: raises }] = await Promise.all([
+      admin.from('employees').select('id, pay_type').in('id', ids),
+      admin.from('staff_attendance').select('employee_id, date, status').in('employee_id', ids).gte('date', from).lte('date', to),
+      paidRunId
+        ? admin.from('staff_advances').select('employee_id, date, amount, note').eq('vendor_id', caller!.vendor.id).eq('settled_in_run', paidRunId).order('date')
+        : Promise.resolve({ data: (advances || []).filter((a: any) => ids.includes(a.employee_id)) }),
+      admin.from('salary_increments').select('employee_id, item_label, effective_from, new_amount')
+        .eq('vendor_id', caller!.vendor.id).eq('status', 'scheduled').gt('effective_from', to).order('effective_from'),
+    ])
+    const out: Record<string, any> = {}
+    for (const id of ids) {
+      out[id] = {
+        pay_type: (emps || []).find((e: any) => e.id === id)?.pay_type || 'monthly',
+        attendance: (attAll || []).filter((a: any) => a.employee_id === id).map((a: any) => ({ date: a.date, status: a.status })),
+        advances: (advAll || []).filter((a: any) => a.employee_id === id).map((a: any) => ({ date: a.date, amount: r0(a.amount), note: a.note || null })),
+        next_raise: (raises || []).find((r: any) => r.employee_id === id) || null,
+      }
+    }
+    return out
+  }
+  const wantDetail = url.searchParams.get('detail') === '1'
+
   if (run) {
     const { data: lines } = await admin.from('payroll_lines')
       .select('*').eq('run_id', run.id).order('employee_name')
-    return NextResponse.json({ period, run, lines: lines || [], saved: true, advances: advances || [] })
+    const detail = wantDetail ? await slipDetail((lines || []).map((l: any) => l.employee_id), run.status === 'paid' ? run.id : null) : undefined
+    return NextResponse.json({ period, run, lines: lines || [], saved: true, advances: advances || [], cycle: { from, to }, detail })
   }
 
   // No run yet — build the proposal
@@ -192,7 +222,8 @@ export async function GET(req: NextRequest) {
       (advances || []).filter((a: any) => a.employee_id === e.id),
     ))
 
-  return NextResponse.json({ period, run: null, lines, saved: false, advances: advances || [] })
+  const detail = wantDetail ? await slipDetail(lines.map((l: any) => l.employee_id), null) : undefined
+  return NextResponse.json({ period, run: null, lines, saved: false, advances: advances || [], cycle: { from, to }, detail })
 }
 
 export async function POST(req: NextRequest) {

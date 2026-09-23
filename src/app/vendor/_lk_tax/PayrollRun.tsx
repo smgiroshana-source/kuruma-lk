@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { printSlips } from './salarySlip'
 
 const rs = (n: number) => 'Rs.' + Math.round(Number(n) || 0).toLocaleString()
 const r0 = (n: any) => Math.round(Number(n) || 0)
@@ -132,45 +133,26 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
       `✅ Paid — ${rs(totals.net)} recorded as salaries`)
   }
 
-  // ── Payslip ──────────────────────────────────────────────────────────────
-  function printPayslip(l: Line) {
-    const comps = (l.components || [])
-    const earn = comps.filter((c: any) => !c.isDeduction && r0(c.amount) !== 0)
-    const ded = comps.filter((c: any) => c.isDeduction && r0(c.amount) !== 0)
-    const rows = (list: any[]) => list.map((c: any) =>
-      `<tr><td>${escapeHtml(c.label)}${c.qty && Number(c.qty) !== 1
-        ? `<span style="color:#888;font-size:10px"> — ${Number(c.qty)} × Rs.${Number(c.rate).toLocaleString()}</span>` : ''}</td>
-        <td style="text-align:right">Rs.${r0(c.amount).toLocaleString()}</td></tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payslip ${escapeHtml(l.employee_name)} ${period}</title>
-      <style>
-        body{font-family:Arial,sans-serif;margin:24px;color:#111}
-        h2{font-size:16px;margin:0} .sub{font-size:11px;color:#666}
-        table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
-        td,th{padding:5px 6px;border-bottom:1px solid #eee}
-        .sec{font-size:11px;font-weight:800;text-transform:uppercase;color:#666;padding-top:12px}
-        .net{font-size:15px;font-weight:800;background:#f4f4f4}
-        @media print{@page{size:A5;margin:10mm}}
-      </style></head><body>
-      <h2>${escapeHtml(vendorName || 'MacForce Auto Engineering (Pvt) Ltd')}</h2>
-      <div class="sub">PAYSLIP — salary cycle ${cycleLabel(period)}</div>
-      <table>
-        <tr><td><strong>${escapeHtml(l.employee_name)}</strong><div class="sub">${escapeHtml(l.branch || '')}</div></td>
-            <td style="text-align:right" class="sub">Days worked: ${Number(l.payable_days)}${
-              Number(l.days_half) ? ` (${Number(l.days_present)} full, ${Number(l.days_half)} half)` : ''}</td></tr>
-      </table>
-      <div class="sec">Earnings</div>
-      <table>${rows(earn)}<tr><td><strong>Gross</strong></td><td style="text-align:right"><strong>Rs.${r0(l.gross).toLocaleString()}</strong></td></tr></table>
-      ${ded.length || r0(l.advances) ? `<div class="sec">Deductions</div><table>${rows(ded)}${
-        r0(l.advances) ? `<tr><td>Advances taken during the cycle</td><td style="text-align:right">Rs.${r0(l.advances).toLocaleString()}</td></tr>` : ''
-      }</table>` : ''}
-      <table><tr class="net"><td>NET PAID</td><td style="text-align:right">Rs.${r0(l.net_pay).toLocaleString()}</td></tr></table>
-      ${l.note ? `<p class="sub">${escapeHtml(String(l.note))}</p>` : ''}
-      <p class="sub" style="margin-top:22px">Received by: ______________________ &nbsp;&nbsp; Date: ____________</p>
-      <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),800)}</script>
-      </body></html>`
-    const w = window.open('', '_blank', 'width=760,height=800')
-    if (w) { w.document.write(html); w.document.close() }
+  // ── Salary slips ─────────────────────────────────────────────────────────
+  // The shop's own slip layout (salarySlip.ts): every day of the cycle, the
+  // advance on the date it was taken, working days for daily staff. Amounts
+  // come from the lines on screen, so an unsaved edit prints as shown; the
+  // day-by-day detail is fetched fresh.
+  async function printSlipsFor(which: Line[]) {
+    if (which.length === 0) return
+    // The pop-up must open inside the click, before any await, or the
+    // browser blocks it as unrequested.
+    const pending = window.open('', '_blank', 'width=820,height=900')
+    pending?.document.write('<p style="font-family:Arial;padding:20px;color:#666">Preparing salary slips…</p>')
+    try {
+      const r = await fetch(`/api/vendor/payroll?period=${period}&detail=1`)
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'Could not load the slip detail')
+      printSlips(vendorName || 'Macforce Auto Engineering', j.cycle,
+        which.map(l => ({ line: l, detail: j.detail?.[l.employee_id] })), pending)
+    } catch (e: any) { pending?.close(); showToast('⚠️ ' + e.message) }
   }
+  const printPayslip = (l: Line) => printSlipsFor([l])
 
   function printRun() {
     const rows = lines.map((l: Line) =>
@@ -227,6 +209,11 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
           {lines.length > 0 && (
             <button onClick={printRun} className="px-3 py-2 rounded-xl border-2 border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">
               🖨️ Payroll sheet
+            </button>
+          )}
+          {lines.length > 0 && (
+            <button onClick={() => printSlipsFor(lines)} className="px-3 py-2 rounded-xl border-2 border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50">
+              🧾 All salary slips
             </button>
           )}
           {!isPaid && lines.length > 0 && (
@@ -377,7 +364,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
                               className="flex-1 mr-3 px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs outline-none focus:border-orange-400 disabled:bg-slate-100"
                             />
                             <button onClick={() => printPayslip(l)} className="text-[11px] font-bold text-slate-500 hover:text-orange-600 shrink-0">
-                              🧾 Payslip
+                              🧾 Salary slip
                             </button>
                           </div>
 
