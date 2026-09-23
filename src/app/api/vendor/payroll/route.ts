@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
+import { PAYROLL_FIRST_CYCLE_START } from '@/lib/payrollStart'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Monthly payroll run — WHEEL MART, owner only.
@@ -163,8 +164,10 @@ export async function GET(req: NextRequest) {
   // ones taken during it. An advance from a past cycle that no run deducted
   // has to come off this pay, or it sits against the person for ever. One
   // taken on the 26th belongs to the NEXT cycle and is excluded by the cutoff.
+  // Nothing before the first in-system cycle: those were deducted on paper.
   const { data: advances } = empIds.length
     ? await admin.from('staff_advances').select('*').eq('vendor_id', caller.vendor.id)
+        .gte('date', PAYROLL_FIRST_CYCLE_START)
         .lte('date', to).is('settled_in_run', null).order('date')
     : { data: [] as any[] }
 
@@ -343,6 +346,7 @@ export async function POST(req: NextRequest) {
     if (deductedFrom.length > 0) {
       await admin.from('staff_advances').update({ settled_in_run: runId })
         .eq('vendor_id', caller.vendor.id).in('employee_id', deductedFrom)
+        .gte('date', PAYROLL_FIRST_CYCLE_START)
         .lte('date', to).is('settled_in_run', null)
     }
 

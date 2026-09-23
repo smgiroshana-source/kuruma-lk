@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
+import { advanceSettledOutsideSystem } from '@/lib/payrollStart'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WHEEL MART Staff/HR — stage 1: registry, pay items, attendance, advances.
@@ -352,6 +353,7 @@ export async function POST(req: NextRequest) {
     const { data: adv } = await admin.from('staff_advances').select('*').eq('id', id).eq('vendor_id', vendor.id).single()
     if (!adv) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (adv.settled_in_run) return NextResponse.json({ error: 'Already settled in a payroll run' }, { status: 400 })
+    if (advanceSettledOutsideSystem(adv.date)) return NextResponse.json({ error: 'Already deducted from a salary paid before the system — it stays on record' }, { status: 400 })
     if (adv.expense_id) await admin.from('expenses').delete().eq('id', adv.expense_id).eq('vendor_id', vendor.id)
     await admin.from('staff_advances').delete().eq('id', id)
     // Putting the money back must put the drawer back too

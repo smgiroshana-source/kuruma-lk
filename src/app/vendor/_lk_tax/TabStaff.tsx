@@ -11,6 +11,7 @@ import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { createClient } from '@/lib/supabase/client'
 import { compressImage } from '@/lib/compressImage'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { advanceSettledOutsideSystem } from '@/lib/payrollStart'
 import PayrollRun from './PayrollRun'
 import StaffLogins from '../_shared/StaffLogins'
 
@@ -471,11 +472,11 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
               <div key={a.id} className="flex items-center justify-between px-4 py-2.5">
                 <div>
                   <span className="text-sm font-bold text-slate-700">{empName(a.employee_id)}</span>
-                  <span className="text-xs text-slate-400 ml-2">{a.date} · {a.source === 'drawer' ? '💵 drawer' : a.source === 'bank' ? '🏦 bank' : '👤 owner'}{a.note ? ` · ${a.note}` : ''}{a.settled_in_run ? ' · ✓ settled' : ''}</span>
+                  <span className="text-xs text-slate-400 ml-2">{a.date} · {a.source === 'drawer' ? '💵 drawer' : a.source === 'bank' ? '🏦 bank' : '👤 owner'}{a.note ? ` · ${a.note}` : ''}{a.settled_in_run ? ' · ✓ settled' : advanceSettledOutsideSystem(a.date) ? ' · ✓ settled on paper' : ''}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="font-mono font-bold text-sm text-slate-800">Rs.{Number(a.amount).toLocaleString()}</span>
-                  {isOwner && !a.settled_in_run && (
+                  {isOwner && !a.settled_in_run && !advanceSettledOutsideSystem(a.date) && (
                     <button onClick={async () => { if (confirmDel !== a.id) { setConfirmDel(a.id); setTimeout(() => setConfirmDel(c => c === a.id ? null : c), 3000); return } try { await post({ action: 'delete_advance', id: a.id }); setConfirmDel(null); tt('Advance removed'); load() } catch (e: any) { tt('❌ ' + e.message) } }}
                       className={`text-xs font-bold ${confirmDel === a.id ? 'text-red-600 bg-red-50 px-2 py-1 rounded' : 'text-red-400'}`}>{confirmDel === a.id ? 'Delete?' : '✕'}</button>
                   )}
