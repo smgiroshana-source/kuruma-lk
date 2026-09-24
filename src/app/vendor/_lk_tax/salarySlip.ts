@@ -8,6 +8,8 @@
 // Restyled 2026-09-24 ("more well structured, nice looking"): a header band,
 // the staff details, the days in two side-by-side columns so the month reads
 // at a glance, and a pay summary that builds up to the amount due.
+// 2026-09-24 again: fills the A4 page, and Amount Due is an outline rather
+// than a black bar (laser printer — no heavy toner blocks).
 //
 // Figures come from the payroll line exactly as the owner left it, so the
 // slip always agrees with what is actually paid.
@@ -39,46 +41,47 @@ function daysOfCycle(from: string, to: string): string[] {
 
 export const SLIP_CSS = `
   *{box-sizing:border-box}
-  body{font-family:Arial,Helvetica,sans-serif;color:#1f2328;margin:0;font-size:11.5px}
-  .slip{padding:11mm 13mm 9mm;page-break-after:always;max-width:210mm;margin:0 auto}
+  body{font-family:Arial,Helvetica,sans-serif;color:#1f2328;margin:0;font-size:12.5px}
+  /* One slip = one A4 page: the column fills the sheet and the signatures sit at its foot */
+  .slip{height:296mm;display:flex;flex-direction:column;padding:14mm 15mm 11mm;page-break-after:always;max-width:210mm;margin:0 auto;overflow:hidden}
   .slip:last-child{page-break-after:auto}
   .band{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2.5px solid #1f2328;padding-bottom:7px}
-  .co{font-size:18px;font-weight:800}
-  .kind{font-size:11px;font-weight:700;letter-spacing:2.5px;color:#c2410c;margin-top:3px}
-  .cyc{text-align:right;font-size:11px;color:#4b5563;line-height:1.5}
-  .cyc strong{display:block;font-size:14px;color:#1f2328;letter-spacing:1px}
-  .who{display:grid;grid-template-columns:2.2fr 1fr 1.3fr;gap:0;margin:10px 0 12px;border:1px solid #d9dde3;border-radius:6px}
-  .who>div{padding:7px 10px;border-right:1px solid #e5e7eb}
+  .co{font-size:21px;font-weight:800}
+  .kind{font-size:12px;font-weight:700;letter-spacing:2.5px;color:#c2410c;margin-top:4px}
+  .cyc{text-align:right;font-size:12px;color:#4b5563;line-height:1.5}
+  .cyc strong{display:block;font-size:16px;color:#1f2328;letter-spacing:1px}
+  .who{display:grid;grid-template-columns:2.2fr 1fr 1.3fr;gap:0;margin:14px 0 16px;border:1px solid #d9dde3;border-radius:6px}
+  .who>div{padding:9px 12px;border-right:1px solid #e5e7eb}
   .who>div:last-child{border-right:none}
   .lbl{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:#6b7280}
-  .val{font-size:13px;font-weight:700;margin-top:2px}
+  .val{font-size:15px;font-weight:700;margin-top:3px}
   .raise{font-size:9.5px;color:#15803d;font-weight:700;margin-top:2px}
   .sec{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#4b5563;margin:0 0 5px}
   .days{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   table{width:100%;border-collapse:collapse}
-  .days th{font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:#6b7280;text-align:left;padding:3px 5px;border-bottom:1.5px solid #1f2328}
-  .days td{padding:2.6px 5px;border-bottom:1px solid #eef0f2;font-variant-numeric:tabular-nums;height:18px}
+  .days th{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:#6b7280;text-align:left;padding:3px 5px;border-bottom:1.5px solid #1f2328}
+  .days td{padding:0 6px;border-bottom:1px solid #e5e7eb;font-variant-numeric:tabular-nums;height:7.6mm;font-size:13px}
   .days th.c,.days td.c{text-align:center} .days th.r,.days td.r{text-align:right}
-  .wd{color:#9ca3af;font-size:9.5px;margin-left:3px}
+  .wd{color:#9ca3af;font-size:10.5px;margin-left:4px}
   tr.sun td{background:#fafafa}
   tr.adv td{font-weight:700} tr.adv td.r{color:#b45309}
   .abs{color:#b91c1c}
   .bf td{font-size:10px;color:#6b7280;font-style:italic}
-  .key{font-size:9px;color:#9ca3af;margin-top:4px}
-  .pay{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;align-items:start}
-  .box{border:1px solid #d9dde3;border-radius:6px;padding:8px 10px}
-  .box td{padding:3.5px 0;font-variant-numeric:tabular-nums} .box td.r{text-align:right}
-  .box .sub{font-size:9.5px;color:#6b7280}
+  .key{font-size:10px;color:#6b7280;margin-top:6px}
+  .pay{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;align-items:start}
+  .box{border:1px solid #cfd4da;border-radius:6px;padding:10px 12px}
+  .box td{padding:5px 0;font-size:13.5px;font-variant-numeric:tabular-nums} .box td.r{text-align:right}
+  .box .sub{font-size:10.5px;color:#6b7280}
   .box tr.tot td{border-top:1px solid #d1d5db;font-weight:800;padding-top:5px}
   .minus{color:#b45309}
-  .due{margin-top:10px;background:#1f2328;color:#fff;border-radius:6px;padding:9px 12px;display:flex;justify-content:space-between;align-items:center}
-  .due .l{font-size:10px;letter-spacing:2px;text-transform:uppercase}
-  .due .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
-  .due.neg{background:#b91c1c}
+  .due{margin-top:14px;border:2.5px solid #1f2328;border-radius:6px;padding:11px 14px;display:flex;justify-content:space-between;align-items:center}
+  .due .l{font-size:12px;font-weight:800;letter-spacing:2px;text-transform:uppercase}
+  .due .v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+  .due.neg{border-color:#b91c1c;color:#b91c1c}
   .note{font-size:10.5px;color:#374151;margin-top:8px;padding:6px 9px;background:#f9fafb;border-left:3px solid #d1d5db}
-  .sign{display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:30px;font-size:10.5px;color:#374151}
-  .sign div{border-top:1px solid #6b7280;padding-top:4px}
-  .foot{font-size:8.5px;color:#9ca3af;margin-top:10px}
+  .sign{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:auto;padding-top:24px;font-size:12px;color:#374151}
+  .sign div{border-top:1px solid #6b7280;padding-top:5px}
+  .foot{font-size:9.5px;color:#9ca3af;margin-top:8px}
   @media print{@page{size:A4;margin:0}}
 `
 
