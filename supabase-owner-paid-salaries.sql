@@ -8,12 +8,13 @@
 -- money the business itself paid out.
 --
 -- Adds 'owner' to the two payment-method checks. Nothing existing changes.
+-- 'none' stays: supplier-return losses use it (supabase-supplier-return-credit.sql).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 alter table public.expenses drop constraint if exists expenses_payment_method_check;
 
 alter table public.expenses add constraint expenses_payment_method_check check (
-  payment_method in ('cash', 'online', 'cheque', 'bank', 'card', 'owner')
+  payment_method in ('cash', 'online', 'cheque', 'bank', 'card', 'none', 'owner')
 );
 
 alter table public.payroll_runs drop constraint if exists payroll_runs_payment_method_check;

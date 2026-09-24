@@ -439,6 +439,8 @@ export async function GET(req: NextRequest) {
       // Paid from the owner's own pocket (salaries): a cost, but no business
       // money left — shown apart, not in Money Out
       if (e.payment_method === 'owner') { ownerPaidOut += amt; continue }
+      // 'none' = a loss booked with no money moving (supplier-return shortfall)
+      if (e.payment_method === 'none') continue
       expensesOut += amt; expensesByCategory[e.category] = (expensesByCategory[e.category] || 0) + amt
       if ((e.payment_method || 'cash') === 'cash') cashExpensesOut += amt
       ledger.push({ date: e.expense_date, type: 'Expense', ref: e.category + (e.description ? ': ' + e.description : ''), method: e.payment_method || 'cash', in: 0, out: amt })
