@@ -34,6 +34,7 @@ type Dashboard = {
   grnDrafts: number
   salaryRaisesDue?: number
   salaryRaiseName?: string
+  payrollUnpaid?: { period: string; endDate: string; draft: boolean }[]
   recentActivity: { time: string; customer: string; amount: number; method: string }[]
 }
 
@@ -363,6 +364,20 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
           : `${d.salaryRaisesDue} salary increases are due — not applied yet`,
         cta: 'Apply', tab: 'staff',
       })
+    }
+    // Owner only — payroll is the owner's screen. Amber when the cycle has just
+    // ended (salaries often go out a few days later), red after a week.
+    if (role === 'owner') {
+      for (const u of d.payrollUnpaid || []) {
+        const month = new Date(u.period + '-01T00:00:00').toLocaleString('en-GB', { month: 'long' })
+        const endLabel = new Date(u.endDate + 'T00:00:00').toLocaleString('en-GB', { day: 'numeric', month: 'short' })
+        const daysPast = Math.floor((new Date(colomboToday() + 'T00:00:00').getTime() - new Date(u.endDate + 'T00:00:00').getTime()) / 86400000)
+        attention.push({
+          icon: '🧾', tone: daysPast > 7 ? 'red' : 'amber',
+          text: `${month} salaries not marked paid — cycle ended ${endLabel}` + (u.draft ? ' (draft saved)' : ' (payroll not started)'),
+          cta: 'Payroll', tab: 'staff', sub: `payroll:${u.period}`,
+        })
+      }
     }
     if (d.grnDrafts > 0) {
       attention.push({

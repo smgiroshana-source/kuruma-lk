@@ -41,8 +41,12 @@ const PAY_PRESETS: Omit<PayItem, 'visible_to_office'>[] = [
 export default function TabStaff({ staffRole, vendorName, initialView, onInitialViewConsumed }: { staffRole: string; vendorName?: string; initialView?: string | null; onInitialViewConsumed?: () => void }) {
   const isOwner = staffRole === 'owner'
   const [view, setView] = useState<'people' | 'attendance' | 'advances' | 'payroll' | 'logins'>(
-    initialView === 'attendance' || initialView === 'advances' || initialView === 'payroll' || initialView === 'logins' ? initialView : 'people'
+    initialView === 'attendance' || initialView === 'advances' || initialView === 'payroll' || initialView === 'logins' ? initialView
+      : initialView?.startsWith('payroll:') ? 'payroll' : 'people'
   )
+  // "payroll:2026-09" from the dashboard opens that month — read once, since
+  // the parent clears initialView right after mount
+  const [payrollPeriod] = useState(() => initialView?.startsWith('payroll:') ? initialView.slice(8) : undefined)
   useEffect(() => { if (initialView && onInitialViewConsumed) onInitialViewConsumed() }, [initialView, onInitialViewConsumed])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [scope, setScope] = useState<string>('both')
@@ -443,7 +447,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
       )}
 
       {/* ── ADVANCES ── */}
-      {view === 'payroll' && isOwner && <PayrollRun showToast={tt} vendorName={vendorName} />}
+      {view === 'payroll' && isOwner && <PayrollRun showToast={tt} vendorName={vendorName} initialPeriod={payrollPeriod} />}
 
       {/* Logins: who can sign in, and what they may touch. Owner only. */}
       {view === 'logins' && isOwner && <StaffLogins showToast={tt} isLkTax />}

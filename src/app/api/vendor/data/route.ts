@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows } from '@/lib/fetchAll'
+import { PAYROLL_FIRST_CYCLE_START } from '@/lib/payrollStart'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -183,6 +184,7 @@ export async function GET(req: NextRequest) {
     const [
       { data: todaySalesRows }, { data: cashSess }, { data: staleOpen }, { data: empRows },
       { data: creditRowsAll }, { data: payRows }, { data: dueRaises }, { count: grnDrafts },
+      { data: payrollRuns },
     ] = await Promise.all([
       admin.from('sales')
         .select('total, customer_name, payment_method, created_at')
@@ -204,6 +206,7 @@ export async function GET(req: NextRequest) {
         .eq('vendor_id', vendor.id).eq('status', 'scheduled').lte('effective_from', colToday)
         .order('effective_from'),
       admin.from('grns').select('id', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'draft'),
+      admin.from('payroll_runs').select('period, status').eq('vendor_id', vendor.id),
     ])
     const todaySales = (todaySalesRows || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
     const recentActivity = (todaySalesRows || []).slice(0, 5).map((s: any) => ({
@@ -262,6 +265,26 @@ export async function GET(req: NextRequest) {
     const salaryRaisesDue = (dueRaises || []).length
     const salaryRaiseName = ((dueRaises || [])[0] as any)?.employee?.name || ''
 
+    // Salary cycles that have ended (25th → 24th, keyed by the month they end
+    // in) without being marked paid. Starts with the first cycle the system
+    // pays — earlier months were paid on paper. One entry per month, so a
+    // skipped month can't be hidden by the next one ending.
+    const payrollUnpaid: { period: string; endDate: string; draft: boolean }[] = []
+    if (empIds.length > 0) {
+      const addMonth = (ym: string, n: number) => {
+        const [yy, mm] = ym.split('-').map(Number)
+        const t = new Date(Date.UTC(yy, mm - 1 + n, 1))
+        return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}`
+      }
+      const firstPeriod = addMonth(PAYROLL_FIRST_CYCLE_START.slice(0, 7), 1)
+      const lastEnded = Number(colToday.slice(8, 10)) >= 25 ? colToday.slice(0, 7) : addMonth(colToday.slice(0, 7), -1)
+      const runStatus = new Map((payrollRuns || []).map((r: any) => [r.period, r.status]))
+      for (let p = firstPeriod; p <= lastEnded; p = addMonth(p, 1)) {
+        const st = runStatus.get(p)
+        if (st !== 'paid') payrollUnpaid.push({ period: p, endDate: `${p}-24`, draft: st === 'draft' })
+      }
+    }
+
     dashboard = {
       todaySales, todayCount: (todaySalesRows || []).length,
       cashSession: cashSess ? { status: cashSess.status, expected: parseInt(cashSess.expected_cash ?? cashSess.opening_balance ?? 0), openedAt: cashSess.opened_at || null } : null,
@@ -269,7 +292,7 @@ export async function GET(req: NextRequest) {
       attendance: { marked: attMarked, total: empIds.length },
       creditOwed, creditCustomers, creditOldestDays, creditOldestName, creditInternalOwed,
       payables: { due: payablesDue, overdueCount: payOverdueCount, oldestDays: payOldestDays },
-      salaryRaisesDue, salaryRaiseName,
+      salaryRaisesDue, salaryRaiseName, payrollUnpaid,
       grnDrafts: grnDrafts || 0,
       recentActivity,
     }

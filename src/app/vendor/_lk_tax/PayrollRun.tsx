@@ -33,8 +33,10 @@ function cycleLabel(p: string): string {
   return fmt(f, f.getFullYear() !== t.getFullYear()) + ' – ' + fmt(t, true)
 }
 
-export default function PayrollRun({ showToast, vendorName }: { showToast: (m: string) => void; vendorName?: string }) {
+export default function PayrollRun({ showToast, vendorName, initialPeriod }: { showToast: (m: string) => void; vendorName?: string; initialPeriod?: string }) {
   const [period, setPeriod] = useState(() => {
+    // Opened from the dashboard's "salaries not marked paid" line
+    if (initialPeriod && /^\d{4}-\d{2}$/.test(initialPeriod)) return initialPeriod
     // Default to the cycle that most recently ENDED: from the 25th that is the
     // current month (cycle ended on the 24th just past); before it, last month.
     const today = colomboToday()
