@@ -9,8 +9,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
-import { escapeHtml } from '@/lib/escapeHtml'
 import { printSlips } from './salarySlip'
+import { printPayrollSheet } from './payrollSheet'
 
 const rs = (n: number) => 'Rs.' + Math.round(Number(n) || 0).toLocaleString()
 const r0 = (n: any) => Math.round(Number(n) || 0)
@@ -154,35 +154,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
   }
   const printPayslip = (l: Line) => printSlipsFor([l])
 
-  function printRun() {
-    const rows = lines.map((l: Line) =>
-      `<tr><td>${escapeHtml(l.employee_name)}<div style="font-size:10px;color:#888">${escapeHtml(l.branch || '')}</div></td>
-       <td style="text-align:center">${Number(l.payable_days)}</td>
-       <td style="text-align:right">Rs.${r0(l.gross).toLocaleString()}</td>
-       <td style="text-align:right">Rs.${r0(l.deductions).toLocaleString()}</td>
-       <td style="text-align:right">Rs.${r0(l.advances).toLocaleString()}</td>
-       <td style="text-align:right;font-weight:700">Rs.${r0(l.net_pay).toLocaleString()}</td>
-       <td style="width:110px"></td></tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Payroll ${period}</title>
-      <style>body{font-family:Arial,sans-serif;margin:20px}table{width:100%;border-collapse:collapse;font-size:12px}
-      th,td{border:1px solid #ddd;padding:5px 7px}th{background:#f2f2f2;font-size:11px;text-transform:uppercase}
-      @media print{@page{size:A4;margin:10mm}}</style></head><body>
-      <h2 style="font-size:15px;margin:0">${escapeHtml(vendorName || 'MacForce Auto Engineering (Pvt) Ltd')}</h2>
-      <div style="font-size:12px;color:#666;margin-bottom:10px">Payroll — cycle ${cycleLabel(period)}${
-        run?.status === 'paid' ? ` · paid ${escapeHtml(String(run.paid_date))} by ${escapeHtml(String(run.payment_method))}` : ' · DRAFT'}</div>
-      <table><thead><tr><th>Employee</th><th>Days</th><th>Gross</th><th>Deductions</th><th>Advances</th><th>Net</th><th>Signature</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot><tr style="font-weight:800;background:#fafafa"><td>TOTAL (${lines.length})</td><td></td>
-        <td style="text-align:right">Rs.${totals.gross.toLocaleString()}</td>
-        <td style="text-align:right">Rs.${totals.deductions.toLocaleString()}</td>
-        <td style="text-align:right">Rs.${totals.advances.toLocaleString()}</td>
-        <td style="text-align:right">Rs.${totals.net.toLocaleString()}</td><td></td></tr></tfoot></table>
-      <p style="font-size:10px;color:#999;margin-top:14px">Generated ${new Date().toLocaleString('en-LK')}</p>
-      <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),800)}</script>
-      </body></html>`
-    const w = window.open('', '_blank', 'width=1000,height=700')
-    if (w) { w.document.write(html); w.document.close() }
-  }
+  const printRun = () => printPayrollSheet(vendorName || 'Macforce Auto Engineering', cycleLabel(period), run, lines)
 
   if (loading) return <div className="p-8 text-center text-slate-400 text-sm">Loading {period}…</div>
 
