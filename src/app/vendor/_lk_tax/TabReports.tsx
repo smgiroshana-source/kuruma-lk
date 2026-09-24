@@ -316,6 +316,11 @@ export default function TabReports({ vendor, showToast, reportTools }: Props) {
                 <div className="flex justify-between text-sm py-0.5"><span className="text-slate-500">Expenses</span><span className="font-semibold">{formatRs(cfData.expensesOut)}</span></div>
                 <div className="flex justify-between text-sm py-0.5"><span className="text-slate-500">Supplier payments</span><span className="font-semibold">{formatRs(cfData.supplierOut)}</span></div>
                 <div className="flex justify-between text-sm py-0.5"><span className="text-slate-500">Refunds</span><span className="font-semibold">{formatRs(cfData.refundsOut)}</span></div>
+                {cfData.ownerPaidOut > 0 && (
+                  <p className="text-[11px] text-slate-400 mt-2 pt-2 border-t border-slate-100">
+                    Not included: {formatRs(cfData.ownerPaidOut)} of salaries paid from the owner&apos;s own money.
+                  </p>
+                )}
               </div>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">

@@ -319,7 +319,9 @@ export async function POST(req: NextRequest) {
     if (!runId) return NextResponse.json({ error: 'runId required' }, { status: 400 })
     const date = /^\d{4}-\d{2}-\d{2}$/.test(String(paid_date || ''))
       ? paid_date : new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
-    const method = payment_method === 'online' ? 'online' : 'cash'
+    // 'owner' = paid from the owner's own pocket: still the company's salary
+    // cost, but it leaves neither the drawer nor the bank
+    const method = payment_method === 'online' || payment_method === 'owner' ? payment_method : 'cash'
 
     const { data: run } = await admin.from('payroll_runs')
       .select('*').eq('id', runId).eq('vendor_id', caller.vendor.id).single()
@@ -364,7 +366,7 @@ export async function POST(req: NextRequest) {
       if (r0(l.net_pay) <= 0) continue   // fully covered by advances — no cash moves
       const { data: exp, error } = await admin.from('expenses').insert({
         vendor_id: caller.vendor.id, expense_date: date, category: 'salaries',
-        description: `Salary cycle ${cycleLabel(run.period)} — ${l.employee_name}`,
+        description: `Salary cycle ${cycleLabel(run.period)} — ${l.employee_name}${method === 'owner' ? ' (paid by owner)' : ''}`,
         amount: r0(l.net_pay), payment_method: method,
         cash_session_id: sessionId, created_by: caller.userId,
       }).select('id').single()

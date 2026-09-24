@@ -433,9 +433,12 @@ export async function GET(req: NextRequest) {
       if (amt > 0) { inflowByMethod[m] += amt; ledger.push({ date: p.created_at, type: 'Collection', ref: inv, method: m, in: amt, out: 0 }) }
       else if (amt < 0) { const out = -amt; refundsOut += out; if (m === 'cash') cashRefundsOut += out; ledger.push({ date: p.created_at, type: 'Refund', ref: inv, method: m, in: 0, out }) }
     }
-    let expensesOut = 0, cashExpensesOut = 0
+    let expensesOut = 0, cashExpensesOut = 0, ownerPaidOut = 0
     for (const e of expenses) {
       const amt = Math.round(Number(e.amount) || 0)
+      // Paid from the owner's own pocket (salaries): a cost, but no business
+      // money left — shown apart, not in Money Out
+      if (e.payment_method === 'owner') { ownerPaidOut += amt; continue }
       expensesOut += amt; expensesByCategory[e.category] = (expensesByCategory[e.category] || 0) + amt
       if ((e.payment_method || 'cash') === 'cash') cashExpensesOut += amt
       ledger.push({ date: e.expense_date, type: 'Expense', ref: e.category + (e.description ? ': ' + e.description : ''), method: e.payment_method || 'cash', in: 0, out: amt })
@@ -459,7 +462,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       from: fromStr, to: toStr,
       inflowByMethod, totalIn,
-      expensesByCategory, expensesOut, supplierOut, refundsOut, totalOut,
+      expensesByCategory, expensesOut, supplierOut, refundsOut, totalOut, ownerPaidOut,
       net: totalIn - totalOut,
       cashDrawer: { in: cashIn, out: cashOut, net: cashIn - cashOut },
       ledger,

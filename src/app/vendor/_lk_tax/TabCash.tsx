@@ -119,11 +119,12 @@ const METHOD_BADGE: Record<string, string> = {
   cheque: 'bg-purple-100 text-purple-700',
   bank: 'bg-blue-100 text-blue-700',
   card: 'bg-blue-100 text-blue-700',
+  owner: 'bg-slate-100 text-slate-600',
 }
 
 // Legacy rows stored 'bank'/'card'; both were online bank movements
 const METHOD_LABEL: Record<string, string> = {
-  cash: 'Cash', online: 'Online', cheque: 'Cheque', bank: 'Online', card: 'Online',
+  cash: 'Cash', online: 'Online', cheque: 'Cheque', bank: 'Online', card: 'Online', owner: 'Owner paid',
 }
 
 

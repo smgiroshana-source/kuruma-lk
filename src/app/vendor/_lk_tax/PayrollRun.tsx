@@ -15,6 +15,8 @@ import { printPayrollSheet } from './payrollSheet'
 const rs = (n: number) => 'Rs.' + Math.round(Number(n) || 0).toLocaleString()
 const r0 = (n: any) => Math.round(Number(n) || 0)
 
+const PAID_FROM: Record<string, string> = { cash: 'drawer', online: 'online', owner: "owner's money" }
+
 const KIND_LABEL: Record<string, string> = {
   base: 'Base', allowance: 'Allowance', commission_rate: 'Commission',
   profit_rate: 'Profit share', epf: 'EPF', other: 'Other', loan: 'Loan',
@@ -51,7 +53,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
   const [payDate, setPayDate] = useState(colomboToday())
-  const [payMethod, setPayMethod] = useState<'cash' | 'online'>('cash')
+  const [payMethod, setPayMethod] = useState<'cash' | 'online' | 'owner'>('cash')
   const [showPay, setShowPay] = useState(false)
   const [dirty, setDirty] = useState(false)
 
@@ -169,7 +171,7 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">Cycle {cycleLabel(period)}</span>
           {isPaid
             ? <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
-                PAID {run.paid_date} · {run.payment_method}
+                PAID {run.paid_date} · {PAID_FROM[run.payment_method] || run.payment_method}
               </span>
             : saved
               ? <span className="text-[11px] font-black px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">DRAFT SAVED</span>
@@ -388,8 +390,8 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
               className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 mb-3" />
 
             <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Paid from</label>
-            <div className="grid grid-cols-2 gap-1.5 mb-2">
-              {([{ v: 'cash', l: '💵 Cash / drawer' }, { v: 'online', l: '🏦 Online' }] as const).map(m => (
+            <div className="grid grid-cols-3 gap-1.5 mb-2">
+              {([{ v: 'cash', l: '💵 Drawer' }, { v: 'online', l: '🏦 Online' }, { v: 'owner', l: '👤 My own money' }] as const).map(m => (
                 <button key={m.v} onClick={() => setPayMethod(m.v)}
                   className={`py-2.5 rounded-xl border-2 text-sm font-bold ${payMethod === m.v ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'}`}>
                   {m.l}
@@ -399,6 +401,11 @@ export default function PayrollRun({ showToast, vendorName }: { showToast: (m: s
             {payMethod === 'cash' && (
               <p className="text-[11px] text-amber-700 mb-2">
                 {rs(totals.net)} will come off the drawer for {payDate}. Make sure that day&apos;s cash is counted after this.
+              </p>
+            )}
+            {payMethod === 'owner' && (
+              <p className="text-[11px] text-slate-500 mb-2">
+                {rs(totals.net)} is booked as the shop&apos;s salary cost, paid by you personally. The drawer and bank are not touched, and Cash Flow shows it separately.
               </p>
             )}
 
