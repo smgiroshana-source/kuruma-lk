@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows } from '@/lib/fetchAll'
 import { netOfVat } from '@/lib/margin'
 import { netStockCost } from '@/lib/netCost'
+import { salaryCost, SALARY_WORKING_DAYS } from '@/lib/salaryCost'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Profit report — the numbers behind the PDF.
@@ -257,54 +258,14 @@ export async function GET(req: NextRequest) {
     .order('credit_note_date')
   const supplierCreditTotal = (supCredits || []).reduce((t: number, c: any) => t + r0(c.net_amount), 0)
 
-  // ── Salary on the accrual basis ──────────────────────────────────────────
-  // Salary is paid ~the 25th for the 25th→24th cycle, so a window that ends
-  // before payday carries almost no salary cost and profit reads a full
-  // payroll better than it is. Owner, 2026-09-06: the cost is knowable —
-  // daily-paid staff have a rate and attendance; monthly staff cost
-  // (monthly pay ÷ 25 working days) × days worked in the window. Charge that,
-  // and treat salary cash that went out inside the window (advances, a
-  // payroll run) as the same cost paid early, not a second cost.
+  // ── Salary: what paid payroll actually cost, else pay for days worked ──
+  // (src/lib/salaryCost.ts). Salary cash that went out inside the window —
+  // advances, a payroll run, loans — is that same cost paid early, or not a
+  // cost at all, so it is never charged a second time.
   const salaryPaidInWindow = r0(expenseByCat.get('salaries') || 0)
-  const WORKING_DAYS_PER_MONTH = 25
+  const WORKING_DAYS_PER_MONTH = SALARY_WORKING_DAYS
   const calendarDays = Math.max(1, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 86400000) + 1)
-  let salaryAccrual = 0
-  let salaryBasis: 'attendance' | 'estimated' | 'none' = 'none'
-  const salaryLines: { name: string; payType: string; daysWorked: number; amount: number }[] = []
-  {
-    const { data: emps } = await admin.from('employees')
-      .select('id, name, pay_type').eq('vendor_id', caller.vendor.id).eq('active', true)
-    const ids = (emps || []).map((e: any) => e.id)
-    const { data: items } = ids.length
-      ? await admin.from('employee_pay_items').select('employee_id, kind, unit, period, amount, half_day_policy')
-          .in('employee_id', ids).eq('active', true).eq('unit', 'rs').in('kind', ['base', 'allowance', 'other'])
-      : { data: [] as any[] }
-    const { data: att } = ids.length
-      ? await admin.from('staff_attendance').select('employee_id, status')
-          .in('employee_id', ids).gte('date', from).lte('date', to)
-      : { data: [] as any[] }
-    const anyAttendance = (att || []).length > 0
-    // No attendance marked at all in the window (an old period, or a shop not
-    // using the register): assume the calendar days at 25/30, and say so.
-    const fallbackDays = Math.round(calendarDays * WORKING_DAYS_PER_MONTH / 30 * 2) / 2
-    for (const e of (emps || [])) {
-      const mine = (att || []).filter((a: any) => a.employee_id === e.id)
-      const present = anyAttendance ? mine.filter((a: any) => a.status === 'present').length : fallbackDays
-      const half = anyAttendance ? mine.filter((a: any) => a.status === 'half').length : 0
-      let amount = 0
-      for (const it of (items || []).filter((i: any) => i.employee_id === e.id)) {
-        const perDay = it.period === 'monthly' ? Number(it.amount) / WORKING_DAYS_PER_MONTH
-                     : it.period === 'daily' ? Number(it.amount) : 0
-        const halfFactor = it.half_day_policy === 'none' ? 0 : it.half_day_policy === 'full' ? 1 : 0.5
-        amount += perDay * (present + halfFactor * half)
-      }
-      const daysWorked = present + 0.5 * half
-      if (amount > 0 || daysWorked > 0) salaryLines.push({ name: e.name, payType: e.pay_type, daysWorked, amount: r0(amount) })
-      salaryAccrual += amount
-    }
-    salaryAccrual = r0(salaryAccrual)
-    if (salaryAccrual > 0) salaryBasis = anyAttendance ? 'attendance' : 'estimated'
-  }
+  const { total: salaryAccrual, basis: salaryBasis, lines: salaryLines } = await salaryCost(admin, caller.vendor.id, from, to)
   const expenseExclSalary = r0(expenseTotal - salaryPaidInWindow)
 
   const realGp = realRev - realCogs

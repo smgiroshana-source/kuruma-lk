@@ -55,7 +55,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
           ${row('Cost of goods sold', '− ' + money(s.realCogs + s.roughCogs), { bold: true })}
           ${row('GROSS PROFIT' + (s.grossMarginPct != null ? ` (${s.grossMarginPct}% margin)` : ''), money(s.grossProfit), { bold: true, color: s.grossProfit >= 0 ? '#15803d' : '#dc2626' })}
           ${row('Operating expenses' + (s.salaryPaidInWindow > 0 ? ' (excl. salary)' : ''), '− ' + money(s.expenseExclSalary), { bold: true })}
-          ${s.salaryAccrual > 0 ? row('Salary for days worked' + (data.salary?.basis === 'estimated' ? ' (estimated)' : ''), '− ' + money(s.salaryAccrual), { bold: true }) : ''}
+          ${s.salaryAccrual > 0 ? row(({ payroll: 'Salary (from paid payroll)', mixed: 'Salary (paid payroll + days worked)', estimated: 'Salary for days worked (estimated)' } as Record<string, string>)[data.salary?.basis] || 'Salary for days worked', '− ' + money(s.salaryAccrual), { bold: true }) : ''}
           ${s.writeoffTotal > 0 ? row('Stock written off', '− ' + money(s.writeoffTotal), { bold: true, color: '#b45309' }) : ''}
           ${(data.adjustments?.downValue || 0) > 0 ? row(`Stock count corrections down (${data.adjustments.downUnits} units, not charged)`, money(data.adjustments.downValue), { indent: true, color: '#b45309' }) : ''}
           ${s.supplierCreditTotal > 0 ? row('Supplier discounts received', '+ ' + money(s.supplierCreditTotal), { bold: true, color: '#15803d' }) : ''}
@@ -64,8 +64,12 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       </table>
       ${s.salaryAccrual > 0 ? `
       <p class="note" style="border-left:3px solid #64748b;padding-left:10px;color:#475569">
-        Salary is charged for the days worked in this period, not for when it is paid:
-        monthly pay ÷ ${data.salary.workingDaysPerMonth} working days × days worked, and daily rates × days worked
+        Salary is charged for the days worked in this period, not for when it is paid.
+        ${data.salary.basis === 'payroll'
+          ? 'Every salary month in this period is paid, so the cost is what payroll actually paid — earnings less leave deductions (advances, loan repayments and EPF only change how the pay was handed over).'
+          : data.salary.basis === 'mixed'
+          ? `Months whose payroll is paid use what was actually paid; the rest is estimated as monthly pay ÷ ${data.salary.workingDaysPerMonth} working days × days worked, and daily rates × days worked.`
+          : `Until a month's payroll is marked paid it is estimated: monthly pay ÷ ${data.salary.workingDaysPerMonth} working days × days worked, and daily rates × days worked.`}
         (${data.salary.staffCount} staff, ${data.salary.daysWorked} staff-days${data.salary.basis === 'estimated' ? ', estimated at 25 working days a month because no attendance is marked for these dates' : ', from the attendance register'}).
         ${s.salaryPaidInWindow > 0 ? `The <strong>${money(s.salaryPaidInWindow)}</strong> of salary and advances actually paid out in this period is that same cost, so it is not charged again.` : 'Nothing has been paid out for it yet.'}
       </p>` : ''}`
@@ -118,9 +122,13 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
     const salaryBlock = (data.salary?.lines || []).length > 0 ? `
       <h3>Salary for days worked</h3>
       <table>
-        <thead><tr><th>Staff</th><th>Pay basis</th><th class="num">Days worked</th><th class="num">Accrued</th></tr></thead>
+        <thead><tr><th>Staff</th><th>Pay basis</th><th class="num">Days worked</th><th class="num">Charged</th></tr></thead>
         <tbody>
-          ${data.salary.lines.map((l: any) => `<tr><td>${escapeHtml(l.name)}</td><td>${l.payType === 'daily' ? 'Daily rate × days' : 'Monthly ÷ ' + data.salary.workingDaysPerMonth + ' × days'}</td><td class="num">${l.daysWorked}</td><td class="num">${money(l.amount)}</td></tr>`).join('')}
+          ${data.salary.lines.map((l: any) => {
+            const est = l.payType === 'daily' ? 'Daily rate × days' : 'Monthly ÷ ' + data.salary.workingDaysPerMonth + ' × days'
+            const basis = l.source === 'payroll' ? 'Paid payroll' : l.source === 'both' ? 'Paid payroll + ' + est.toLowerCase() : est
+            return `<tr><td>${escapeHtml(l.name)}</td><td>${basis}</td><td class="num">${l.daysWorked}</td><td class="num">${money(l.amount)}</td></tr>`
+          }).join('')}
           <tr class="tot"><td colspan="3">Total</td><td class="num">${money(s.salaryAccrual)}</td></tr>
         </tbody>
       </table>` : ''
