@@ -36,6 +36,15 @@ export default function StaffLoans({ employees, loans, post, reload, toast }: Pr
   const inst = Math.round(Number(instalment) || 0)
   const months = amt > 0 && inst > 0 ? Math.ceil(amt / inst) : 0
   const empName = (id: string) => employees.find(e => e.id === id)?.name || '—'
+  // Payroll repays a loan from the cycle AFTER the one it was given in
+  // (cycles run 25th → 24th). A loan dated on or after the 25th sits in the
+  // cycle ending next month, so its first repayment is the month after that.
+  const firstRepayLabel = (() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return ''
+    const [y, m, d] = date.split('-').map(Number)
+    const t = new Date(y, m - 1 + (d >= 25 ? 2 : 1), 24)
+    return t.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) + ' payroll'
+  })()
 
   async function add() {
     if (inst > amt) { toast('⚠️ The instalment is more than the loan'); return }
@@ -86,10 +95,10 @@ export default function StaffLoans({ employees, loans, post, reload, toast }: Pr
             className="sm:col-span-4 px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
         </div>
         <p className="text-[11px] text-slate-400 mt-2">
-          {months > 0
-            ? <>Repaid over about <strong className="text-slate-600">{months} month{months !== 1 ? 's' : ''}</strong>, starting with the first payroll after the loan date. </>
-            : 'Repayment starts with the first payroll after the loan date. '}
-          Each month you can lower the repayment or skip it in Payroll — the balance just waits.
+          First repayment: <strong className="text-slate-600">{firstRepayLabel}</strong>
+          {months > 0 && <> · about <strong className="text-slate-600">{months} month{months !== 1 ? 's' : ''}</strong> to clear</>}.
+          {' '}For a loan given before the system, enter what is still owed and date it on or before 24 Aug 2026 so repayment starts with September.
+          {' '}Each month you can lower the repayment or skip it in Payroll — the balance just waits.
         </p>
       </div>
 

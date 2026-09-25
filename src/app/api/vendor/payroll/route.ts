@@ -217,8 +217,45 @@ export async function GET(req: NextRequest) {
   if (run) {
     const { data: lines } = await admin.from('payroll_lines')
       .select('*').eq('run_id', run.id).order('employee_name')
+    // A draft keeps the figures it was saved with — but a loan entered (or
+    // deleted) after saving must still reach it, or it silently never comes
+    // off pay (Buddhini, Sep 2026). The change is proposed, not saved: the
+    // screen marks the draft unsaved and payday needs it saved first.
+    const loanChanges: { employee_name: string; change: 'added' | 'removed'; amount: number }[] = []
+    if (run.status !== 'paid' && (lines || []).length > 0) {
+      const all = await loansWithBalance(admin, caller.vendor.id, (lines || []).map((l: any) => l.employee_id))
+      const due = all.filter(l => l.date < from && l.balance > 0)
+      for (const l of lines || []) {
+        const comps = [...(l.components || [])]
+        let changed = false
+        // A loan that no longer exists can't be repaid
+        for (let i = comps.length - 1; i >= 0; i--) {
+          const c = comps[i]
+          if (c.kind === 'loan' && c.loan_id && !all.some(x => x.id === c.loan_id)) {
+            loanChanges.push({ employee_name: l.employee_name, change: 'removed', amount: r0(c.amount) })
+            comps.splice(i, 1); changed = true
+          }
+        }
+        for (const loan of due.filter(x => x.employee_id === l.employee_id)) {
+          if (comps.some((c: any) => c.kind === 'loan' && c.loan_id === loan.id)) continue
+          const amount = Math.min(loan.instalment, loan.balance)
+          comps.push({
+            kind: 'loan', label: 'Loan repayment', unit: 'cash', period: 'monthly',
+            qty: 1, rate: loan.instalment, amount, isDeduction: true,
+            loan_id: loan.id, balance: loan.balance,
+          })
+          loanChanges.push({ employee_name: l.employee_name, change: 'added', amount })
+          changed = true
+        }
+        if (changed) {
+          const gross = comps.filter((c: any) => !c.isDeduction).reduce((t: number, c: any) => t + r0(c.amount), 0)
+          const deductions = comps.filter((c: any) => c.isDeduction).reduce((t: number, c: any) => t + r0(c.amount), 0)
+          Object.assign(l, { components: comps, gross, deductions, net_pay: gross - deductions - r0(l.advances) })
+        }
+      }
+    }
     const detail = wantDetail ? await slipDetail((lines || []).map((l: any) => l.employee_id), run.status === 'paid' ? run.id : null) : undefined
-    return NextResponse.json({ period, run, lines: lines || [], saved: true, advances: advances || [], cycle: { from, to }, detail })
+    return NextResponse.json({ period, run, lines: lines || [], saved: true, loanChanges, advances: advances || [], cycle: { from, to }, detail })
   }
 
   // No run yet — build the proposal

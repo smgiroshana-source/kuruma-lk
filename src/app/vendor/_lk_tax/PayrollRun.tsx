@@ -58,6 +58,8 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
   const [payMethod, setPayMethod] = useState<'cash' | 'online' | 'owner'>('cash')
   const [showPay, setShowPay] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // Loans added to (or dropped from) a saved draft since it was saved
+  const [loanChanges, setLoanChanges] = useState<{ employee_name: string; change: 'added' | 'removed'; amount: number }[]>([])
 
   const load = useCallback(async (p: string) => {
     setLoading(true)
@@ -68,7 +70,10 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
       setLines(j.lines || [])
       setRun(j.run || null)
       setSaved(!!j.saved)
-      setDirty(false)
+      const lc = j.loanChanges || []
+      setLoanChanges(lc)
+      // The draft on screen now differs from the saved one: save before payday
+      setDirty(lc.length > 0)
       setOpen(null)
     } catch (e: any) { showToast('⚠️ ' + e.message); setLines([]); setRun(null) }
     setLoading(false)
@@ -233,6 +238,17 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
               </div>
             ))}
           </div>
+
+          {loanChanges.length > 0 && !isPaid && dirty && (
+            <div className="rounded-xl border-2 border-sky-300 bg-sky-50 px-4 py-3 mb-4">
+              <p className="text-xs font-black text-sky-800">Loan changes since this draft was saved — save the draft to keep them</p>
+              <ul className="text-[11px] text-sky-700 mt-1 space-y-0.5">
+                {loanChanges.map((c, i) => (
+                  <li key={i}>{c.change === 'added' ? `Loan repayment ${rs(c.amount)} added for ${c.employee_name}` : `Loan repayment ${rs(c.amount)} removed for ${c.employee_name} — that loan was deleted`}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {needsAttention.length > 0 && !isPaid && (
             <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 mb-4">
