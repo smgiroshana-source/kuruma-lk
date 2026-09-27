@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import ProfitReport from './ProfitReport'
+import SparePartsReport from './SparePartsReport'
 
 type Props = {
   vendor: any
@@ -59,7 +60,7 @@ interface StockValue {
   top_categories: Array<{ category: string; cost_value: number; units: number }>
 }
 
-type SubTab = 'daily' | 'profit' | 'reorder' | 'gp' | 'stock_value' | 'cashflow'
+type SubTab = 'daily' | 'profit' | 'spare_parts' | 'reorder' | 'gp' | 'stock_value' | 'cashflow'
 type GPPeriod = 'today' | 'week' | 'month'
 
 function lkToday(): string { return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }) }
@@ -224,6 +225,7 @@ export default function TabReports({ vendor, showToast, reportTools }: Props) {
           [
             ...(reportTools ? [{ key: 'daily' as SubTab, label: '📅 Daily Report' }] : []),
             { key: 'profit', label: '📈 Profit' },
+            { key: 'spare_parts', label: '🔩 Spare Parts' },
             { key: 'reorder', label: 'Reorder Alerts' },
             { key: 'cashflow', label: 'Cash Flow' },
             { key: 'gp', label: 'GP Report' },
@@ -337,6 +339,7 @@ export default function TabReports({ vendor, showToast, reportTools }: Props) {
 
       {/* ── Reorder Alerts ──────────────────────────────────────────────────── */}
       {activeTab === 'profit' && <ProfitReport showToast={showToast} />}
+      {activeTab === 'spare_parts' && <SparePartsReport showToast={showToast} />}
 
       {activeTab === 'reorder' && (
         <div>
