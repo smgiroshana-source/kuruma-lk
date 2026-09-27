@@ -133,12 +133,19 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
         </tbody>
       </table>` : ''
 
+    // Category codes read as words on paper ("bank_charges" → "Bank charges")
+    const CAT_LABEL: Record<string, string> = {
+      bank_charges: 'Bank charges (card machine fees)',
+      supplier_return_loss: 'Supplier return loss',
+      petty_cash: 'Petty cash',
+    }
+    const catLabel = (c: string) => CAT_LABEL[c] || (c ? c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, ' ') : 'Other')
     const expenseBlock = data.expenses.length > 0 ? `
       <h3>Operating expenses</h3>
       <table>
         <thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${data.expenses.map((e: any) => `<tr><td>${escapeHtml(e.category)}${e.category === 'salaries' ? ' <span style="color:#64748b;font-size:11px">— paid out in this period; profit charges the accrual above instead</span>' : ''}</td><td class="num">${money(e.amount)}</td></tr>`).join('')}
+          ${data.expenses.map((e: any) => `<tr><td>${escapeHtml(catLabel(e.category))}${e.category === 'salaries' ? ' <span style="color:#64748b;font-size:11px">— paid out in this period; profit charges the accrual above instead</span>' : ''}</td><td class="num">${money(e.amount)}</td></tr>`).join('')}
           <tr class="tot"><td>Total</td><td class="num">${money(s.expenseTotal)}</td></tr>
         </tbody>
       </table>
