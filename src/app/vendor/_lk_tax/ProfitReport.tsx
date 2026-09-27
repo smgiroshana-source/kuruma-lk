@@ -140,15 +140,21 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       petty_cash: 'Petty cash',
     }
     const catLabel = (c: string) => CAT_LABEL[c] || (c ? c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, ' ') : 'Other')
-    const expenseBlock = data.expenses.length > 0 ? `
+    // Salary cash paid in the window (advances, a payday) is not a cost on top
+    // of the salary charge above — listing it in this table, inside a total that
+    // then didn't match the summary, read as a second salary (owner, 2026-09-27).
+    const opEx = (data.expenses || []).filter((e: any) => e.category !== 'salaries')
+    const salaryCash = (data.expenses || []).find((e: any) => e.category === 'salaries')?.amount || 0
+    const expenseBlock = (opEx.length > 0 || salaryCash > 0) ? `
       <h3>Operating expenses</h3>
       <table>
         <thead><tr><th>Category</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${data.expenses.map((e: any) => `<tr><td>${escapeHtml(catLabel(e.category))}${e.category === 'salaries' ? ' <span style="color:#64748b;font-size:11px">— paid out in this period; profit charges the accrual above instead</span>' : ''}</td><td class="num">${money(e.amount)}</td></tr>`).join('')}
-          <tr class="tot"><td>Total</td><td class="num">${money(s.expenseTotal)}</td></tr>
+          ${opEx.map((e: any) => `<tr><td>${escapeHtml(catLabel(e.category))}</td><td class="num">${money(e.amount)}</td></tr>`).join('')}
+          <tr class="tot"><td>Total</td><td class="num">${money(s.expenseExclSalary)}</td></tr>
         </tbody>
       </table>
+      ${salaryCash > 0 ? `<p class="note">Not in this table: <strong>${money(salaryCash)}</strong> of salary paid out in this period (advances, or a payday). It is part of the salary charged above, not a cost on top of it.</p>` : ''}
       <p class="note">Shown net of any input VAT claimed back. Owner top-ups, banking and drawings are money moved, not expenses — they never appear here.</p>` : ''
 
     // Its own block, not folded into expenses: stock walking out unsold is a
