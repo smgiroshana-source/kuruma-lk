@@ -256,7 +256,14 @@ export async function GET(req: NextRequest) {
     .eq('vendor_id', caller.vendor.id)
     .gte('credit_note_date', from).lte('credit_note_date', to)
     .order('credit_note_date')
-  const supplierCreditTotal = (supCredits || []).reduce((t: number, c: any) => t + r0(c.net_amount), 0)
+  // A credit for goods RETURNED is not a discount: the goods left the shelf
+  // unsold, so their cost was never in COGS, and the credit only cancels what
+  // was owed for them. The part the supplier would not credit is already a
+  // 'supplier_return_loss' expense. Counting the credit too made SR-2609-0001
+  // read as Rs.44,400 of profit (owner, 2026-09-27).
+  const isReturnCredit = (c: any) => c.reason === 'goods_returned'
+  const supplierCreditTotal = (supCredits || []).filter((c: any) => !isReturnCredit(c)).reduce((t: number, c: any) => t + r0(c.net_amount), 0)
+  const returnCreditTotal = (supCredits || []).filter(isReturnCredit).reduce((t: number, c: any) => t + r0(c.net_amount), 0)
 
   // ── Salary: what paid payroll actually cost, else pay for days worked ──
   // (src/lib/salaryCost.ts). Salary cash that went out inside the window —
@@ -301,6 +308,7 @@ export async function GET(req: NextRequest) {
       expenseTotal: r0(expenseTotal),
       writeoffTotal: r0(writeoffTotal),
       supplierCreditTotal: r0(supplierCreditTotal),
+      returnCreditTotal: r0(returnCreditTotal),
       expenseExclSalary,
       salaryAccrual,
       salaryPaidInWindow,

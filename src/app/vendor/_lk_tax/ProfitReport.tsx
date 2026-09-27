@@ -189,16 +189,24 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       </table>
       <p class="note">Counts changed by hand — not sales, GRNs or write-offs. Not charged to profit: a correction says the goods were never there. Damaged, lost or stolen stock belongs in Write-offs, where the loss does reach profit.</p>` : ''
 
-    const creditBlock = (data.supplierCredits || []).length > 0 ? `
+    // Goods-return credits are listed apart: they cancel what was owed for
+    // goods sent back, and are not a discount (see profit-report/route.ts)
+    const discounts = (data.supplierCredits || []).filter((c: any) => c.reason !== 'goods_returned')
+    const returnCredits = (data.supplierCredits || []).filter((c: any) => c.reason === 'goods_returned')
+    const creditBlock = (discounts.length > 0 ? `
       <h3>Supplier discounts received</h3>
       <table>
         <thead><tr><th>Date</th><th>Credit note</th><th>Supplier</th><th>Reason</th><th class="num">Amount</th></tr></thead>
         <tbody>
-          ${data.supplierCredits.map((c: any) => `<tr><td>${escapeHtml(c.date)}</td><td>${escapeHtml(c.no)}</td><td>${escapeHtml(c.supplier)}</td><td>${escapeHtml(String(c.reason).replace(/_/g, ' '))}</td><td class="num">${money(c.amount)}</td></tr>`).join('')}
+          ${discounts.map((c: any) => `<tr><td>${escapeHtml(c.date)}</td><td>${escapeHtml(c.no)}</td><td>${escapeHtml(c.supplier)}</td><td>${escapeHtml(String(c.reason).replace(/_/g, ' '))}</td><td class="num">${money(c.amount)}</td></tr>`).join('')}
           <tr class="tot"><td colspan="4">Total</td><td class="num">${money(s.supplierCreditTotal)}</td></tr>
         </tbody>
       </table>
-      <p class="note">Net of VAT. The VAT on each note is recovered through the VAT return, not kept, so it is not profit.</p>` : ''
+      <p class="note">Net of VAT. The VAT on each note is recovered through the VAT return, not kept, so it is not profit.</p>` : '') +
+      (returnCredits.length > 0 ? `
+      <p class="note">Not profit: ${returnCredits.map((c: any) => `${escapeHtml(c.no)} (${escapeHtml(c.supplier)}, ${money(c.amount)})`).join(', ')} —
+        credit for goods sent back to the supplier. The goods were never sold, so their cost never reached profit, and the credit only cancels what was owed for them.
+        Any part the supplier did not credit is under "Supplier return loss" in operating expenses.</p>` : '')
 
     const productBlock = `
       <h3>Profit by item</h3>
