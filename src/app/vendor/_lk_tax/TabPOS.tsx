@@ -948,7 +948,11 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
               productName: i.productName,
               productSku: i.productSku || null,
               quantity: i.quantity,
-              unitPrice: i.unitPrice,
+              // The price on screen: card sales are priced +fee per line. Sending
+              // the plain price saved the bill below what the machine charged,
+              // and the gap became a fake advance on the customer (10 customers,
+              // Rs.1,473, Aug–Sep 2026). The draft path already did this.
+              unitPrice: cardPrice(i.unitPrice),
               ssclStream: i.ssclStream || (i.productId ? 'PART' : 'SVC'),
             })),
             discount: posDiscountAmt, payments: posPayments.filter(p => parseFloat(p.amount) > 0),
@@ -1050,9 +1054,9 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                     <div key={i} className="flex justify-between items-start text-sm">
                       <div className="flex-1 min-w-0 pr-3">
                         <p className="font-semibold text-slate-800 truncate">{item.productName}</p>
-                        <p className="text-xs text-slate-400">{item.productSku} · Rs.{item.unitPrice.toLocaleString()} × {item.quantity}</p>
+                        <p className="text-xs text-slate-400">{item.productSku} · Rs.{cardPrice(item.unitPrice).toLocaleString()} × {item.quantity}</p>
                       </div>
-                      <p className="font-bold text-slate-800 shrink-0">Rs.{(item.unitPrice * item.quantity).toLocaleString()}</p>
+                      <p className="font-bold text-slate-800 shrink-0">Rs.{(cardPrice(item.unitPrice) * item.quantity).toLocaleString()}</p>
                     </div>
                   ))}
                 </div>
