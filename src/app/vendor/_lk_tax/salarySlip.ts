@@ -68,6 +68,7 @@ export const SLIP_CSS = `
   .abs{color:#b91c1c}
   .bf td{font-size:10px;color:#6b7280;font-style:italic}
   .key{font-size:10px;color:#6b7280;margin-top:6px}
+  .warn{font-size:11px;font-weight:700;color:#b91c1c;border:1.5px solid #b91c1c;border-radius:5px;padding:5px 8px;margin-top:6px}
   .pay{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;align-items:start}
   .box{border:1px solid #cfd4da;border-radius:6px;padding:10px 12px}
   .box td{padding:5px 0;font-size:13.5px;font-variant-numeric:tabular-nums} .box td.r{text-align:right}
@@ -149,6 +150,10 @@ export function slipHtml(company: string, cycle: { from: string; to: string }, l
   ].join('')
 
   const neg = r0(line.net_pay) < 0
+  // The grid reads the register live; the pay is the saved payroll line. If
+  // they disagree the slip must say so, never print both silently (Sep 2026:
+  // three slips showed 24 Sep worked and paid for a day less).
+  const mismatch = daily && Math.abs(dayTotal - (Number(line.payable_days) || 0)) > 0.001
 
   return `
   <section class="slip">
@@ -169,6 +174,7 @@ export function slipHtml(company: string, cycle: { from: string; to: string }, l
       <table>${head}<tbody>${right}</tbody></table>
     </div>
     <p class="key">${daily ? `Worked: 1 full day · 0.5 half day · 0 absent · blank not marked. Total worked: <strong>${fmtDays(dayTotal)}</strong> days. ` : ''}Advances in rupees on the day they were taken.</p>
+    ${mismatch ? `<p class="warn">⚠ The register shows ${fmtDays(dayTotal)} days worked but this pay is for ${fmtDays(Number(line.payable_days) || 0)}. Attendance changed after the payroll was saved — correct the payroll before handing this slip over.</p>` : ''}
 
     <div class="pay">
       <div class="box"><p class="sec">Earned</p><table>${earnRows}</table></div>

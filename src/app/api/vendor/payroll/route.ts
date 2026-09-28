@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { PAYROLL_FIRST_CYCLE_START } from '@/lib/payrollStart'
 import { loansWithBalance, type LoanWithBalance } from '@/lib/staffLoans'
+import { refreshDraftLines } from '@/lib/payrollDraft'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Monthly payroll run — WHEEL MART, owner only.
@@ -254,8 +255,13 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+    // Attendance and advances marked since the draft was saved
+    const draftChanges: string[] = loanChanges.map(c => c.change === 'added'
+      ? `${c.employee_name}: loan repayment ${rsText(c.amount)} added`
+      : `${c.employee_name}: loan repayment ${rsText(c.amount)} removed — that loan was deleted`)
+    if (run.status !== 'paid') draftChanges.push(...await refreshDraftLines(admin, caller.vendor.id, lines || [], from, to))
     const detail = wantDetail ? await slipDetail((lines || []).map((l: any) => l.employee_id), run.status === 'paid' ? run.id : null) : undefined
-    return NextResponse.json({ period, run, lines: lines || [], saved: true, loanChanges, advances: advances || [], cycle: { from, to }, detail })
+    return NextResponse.json({ period, run, lines: lines || [], saved: true, draftChanges, advances: advances || [], cycle: { from, to }, detail })
   }
 
   // No run yet — build the proposal
@@ -367,6 +373,16 @@ export async function POST(req: NextRequest) {
 
     const { data: lines } = await admin.from('payroll_lines').select('*').eq('run_id', runId)
     if (!lines || lines.length === 0) return NextResponse.json({ error: 'This run has no lines' }, { status: 400 })
+
+    // Pay exactly what the register says: refuse a draft that attendance or
+    // advances have moved on from since it was saved (the Sep 2026 short pay)
+    {
+      const { from: cFrom, to: cTo } = cycleBounds(run.period)
+      const stale = await refreshDraftLines(admin, caller.vendor.id, JSON.parse(JSON.stringify(lines)), cFrom, cTo)
+      if (stale.length > 0) {
+        return NextResponse.json({ error: `Attendance or advances changed since this payroll was saved — reload payroll, check and save again. ${stale.join(' · ')}` }, { status: 409 })
+      }
+    }
 
     // ── Loan repayments: check before anything moves ────────────────────────
     // The draft holds what the owner left on each loan line; the balance may
