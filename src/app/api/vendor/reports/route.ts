@@ -5,6 +5,7 @@ import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { netStockCost } from '@/lib/netCost'
 import { netOfVat } from '@/lib/margin'
 import { sparePartsSales } from '@/lib/sparePartsSales'
+import { itemSales } from '@/lib/itemSales'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -396,6 +397,13 @@ export async function GET(req: NextRequest) {
     })
   }
 
+  // ── Item sales (owner, 2026-09-28) — src/lib/itemSales.ts ───────────────────
+  if (type === 'item_sales') {
+    const fromStr = url.searchParams.get('from') || lkFirstOfMonthStr()
+    const toStr   = url.searchParams.get('to')   || lkTodayStr()
+    return NextResponse.json(await itemSales(admin, vendor.id, fromStr, toStr))
+  }
+
   // ── Spare parts sales (owner, 2026-09-27) — src/lib/sparePartsSales.ts ──────
   if (type === 'spare_parts') {
     const fromStr = url.searchParams.get('from') || lkFirstOfMonthStr()
@@ -479,5 +487,5 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  return NextResponse.json({ error: 'Missing or unknown ?type= parameter. Use: reorder | gp | stock_value | spare_parts | cashflow' }, { status: 400 })
+  return NextResponse.json({ error: 'Missing or unknown ?type= parameter. Use: reorder | gp | stock_value | spare_parts | item_sales | cashflow' }, { status: 400 })
 }
