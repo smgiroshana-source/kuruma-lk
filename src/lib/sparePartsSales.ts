@@ -18,6 +18,11 @@ const lkEndOfDay = (d: string) => `${d}T23:59:59+05:30`
 
 export async function sparePartsSales(admin: any, vendorId: string, fromStr: string, toStr: string) {
   const vendor = { id: vendorId }
+  // Report heading — same source as the Profit Report
+  const [{ data: settings }, { data: vrow }] = await Promise.all([
+    admin.from('vendor_settings').select('invoice_title').eq('vendor_id', vendorId).maybeSingle(),
+    admin.from('vendors').select('name').eq('id', vendorId).maybeSingle(),
+  ])
   const { data: cfgSp } = await admin.from('tax_config')
     .select('value').eq('vendor_id', vendor.id).eq('key', 'vat_rate').maybeSingle()
   const spVatRate = cfgSp?.value != null ? parseFloat(cfgSp.value) : 18
@@ -85,6 +90,7 @@ export async function sparePartsSales(admin: any, vendorId: string, fromStr: str
 
   return {
     from: fromStr, to: toStr, vatRate: spVatRate,
+    entity: settings?.invoice_title || vrow?.name || '',
     rows,
     byCategory: [...byCat.values()].map(c => ({ ...c, marginPct: pct(c) })).sort((a, b) => b.revenue - a.revenue),
     totals: { ...totals, marginPct: pct(totals) },

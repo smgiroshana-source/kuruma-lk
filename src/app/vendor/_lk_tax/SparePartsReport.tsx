@@ -10,7 +10,7 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import { colomboToday } from '@/lib/dates'
-import { escapeHtml } from '@/lib/escapeHtml'
+import { sparePartsPdfHtml } from './sparePartsPdf'
 
 const rs = (n: any) => 'Rs.' + Math.round(Number(n) || 0).toLocaleString()
 
@@ -64,53 +64,8 @@ export default function SparePartsReport({ showToast }: { showToast: (m: string)
 
   function printPdf() {
     if (!data) return
-    const catRows = (cat === 'all' ? cats : cats.filter(c => c.category === cat)).map(c => `<tr>
-        <td>${escapeHtml(c.category)}</td><td class="num">${c.units}</td><td class="num">${rs(c.revenue)}</td>
-        <td class="num">${c.cost > 0 ? rs(c.cost) : '—'}</td>
-        <td class="num">${c.costedRevenue > 0 ? rs(c.profit) + (c.marginPct != null ? ` <span class="sm">(${c.marginPct}%)</span>` : '') : '—'}</td>
-        <td class="num">${c.noCostRevenue > 0 ? rs(c.noCostRevenue) : '—'}</td></tr>`).join('')
-    const lineRows = rows.map(r => `<tr>
-        <td>${escapeHtml(r.date)}</td><td class="mono">${escapeHtml(String(r.invoice))}</td><td class="sm">${escapeHtml(r.category)}</td>
-        <td class="mono">${escapeHtml(r.sku)}</td><td>${escapeHtml(r.item)}${r.vehicleNo ? `<div class="sm">${escapeHtml(r.vehicleNo)}</div>` : ''}</td>
-        <td>${escapeHtml(r.customer)}${r.workshop ? ' <span class="tag">workshop</span>' : ''}</td>
-        <td class="num">${r.qty}</td><td class="num">${rs(r.revenue)}</td>
-        <td class="num">${r.cost != null ? rs(r.cost) : '—'}</td>
-        <td class="num" style="color:${r.cost == null ? '#b45309' : r.profit >= 0 ? '#15803d' : '#dc2626'}">${r.cost != null ? rs(r.profit) : 'no cost'}</td></tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Spare parts sales ${escapeHtml(from)} to ${escapeHtml(to)}</title>
-      <style>
-        body{font-family:Arial,Helvetica,sans-serif;margin:22px;color:#111}
-        h1{font-size:17px;margin:0} .sub{font-size:11px;color:#666}
-        h3{font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:#555;margin:20px 0 6px;border-bottom:1.5px solid #ddd;padding-bottom:4px}
-        table{width:100%;border-collapse:collapse;font-size:11px}
-        th,td{border-bottom:1px solid #eee;padding:5px 6px;text-align:left;vertical-align:top}
-        th{background:#f4f4f4;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
-        .num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-        .mono{font-family:ui-monospace,Menlo,monospace;font-size:10px} .sm{font-size:9.5px;color:#777}
-        .tot td{font-weight:700;background:#fafafa}
-        .tag{font-size:9px;background:#e0f2fe;color:#075985;padding:1px 4px;border-radius:3px}
-        .note{font-size:10.5px;color:#555;line-height:1.5;margin:6px 0 10px}
-        .foot{margin-top:18px;font-size:9.5px;color:#999;border-top:1px solid #eee;padding-top:8px}
-        @media print{@page{size:A4 landscape;margin:10mm}}
-      </style></head><body>
-      <h1>Spare parts sales — ${escapeHtml(catLabel)}</h1>
-      <div class="sub">${escapeHtml(from)} to ${escapeHtml(to)} · ${t.units} unit${t.units !== 1 ? 's' : ''} · ${rs(t.revenue)}</div>
-      <h3>By category</h3>
-      <table><thead><tr><th>Category</th><th class="num">Units</th><th class="num">Sales</th><th class="num">Cost</th><th class="num">Profit</th><th class="num">Sales with no cost</th></tr></thead>
-        <tbody>${catRows}
-          <tr class="tot"><td>Total</td><td class="num">${t.units}</td><td class="num">${rs(t.revenue)}</td><td class="num">${t.cost > 0 ? rs(t.cost) : '—'}</td>
-          <td class="num">${t.costedRevenue > 0 ? rs(t.profit) + (margin != null ? ` <span class="sm">(${margin}%)</span>` : '') : '—'}</td><td class="num">${t.noCostRevenue > 0 ? rs(t.noCostRevenue) : '—'}</td></tr>
-        </tbody></table>
-      ${ws.units > 0 ? `<p class="note">Of which to the shop's own workshop (Macforce Auto Engineering): <strong>${ws.units} unit${ws.units !== 1 ? 's' : ''}, ${rs(ws.revenue)}</strong>. Outside customers: ${t.units - ws.units} unit${t.units - ws.units !== 1 ? 's' : ''}, ${rs(t.revenue - ws.revenue)}.</p>` : ''}
-      <p class="note">Excludes tyres, tubes &amp; flaps and consumables. Sales are net of ${data.vatRate}% VAT on tax invoices. Returned quantities are left out.
-        Parts with no cost recorded (most body parts are not cost-tracked) are shown without a profit and are not in the profit figure.</p>
-      <h3>Item by item</h3>
-      <table><thead><tr><th>Date</th><th>Receipt / invoice</th><th>Category</th><th>Part no.</th><th>Item</th><th>Customer</th><th class="num">Qty</th><th class="num">Sales</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead>
-        <tbody>${lineRows}</tbody></table>
-      <div class="foot">Generated ${escapeHtml(new Date().toLocaleString('en-LK'))} · Internal management report, not a tax document.</div>
-      <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),900)}</script>
-      </body></html>`
-    const w = window.open('', '_blank', 'width=1100,height=800')
-    if (w) { w.document.write(html); w.document.close() }
+    const w = window.open('', '_blank', 'width=900,height=1000')
+    if (w) { w.document.write(sparePartsPdfHtml(data, cat)); w.document.close() }
   }
 
   return (
@@ -151,23 +106,27 @@ export default function SparePartsReport({ showToast }: { showToast: (m: string)
 
       {rows.length > 0 && (<>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-          {[
-            { l: 'Units sold', v: String(t.units) },
-            { l: 'Sales', v: rs(t.revenue) },
-            { l: 'Profit (parts with a cost)', v: t.costedRevenue > 0 ? rs(t.profit) + (margin != null ? ` · ${margin}%` : '') : '—' },
-            { l: 'Sales with no cost', v: t.noCostRevenue > 0 ? rs(t.noCostRevenue) : '—' },
-          ].map(c => (
-            <div key={c.l} className="rounded-xl border border-slate-200 px-4 py-3">
-              <p className="text-[10px] font-bold text-slate-400 uppercase">{c.l}</p>
-              <p className="font-black text-slate-800">{c.v}</p>
-            </div>
-          ))}
+          <div className="rounded-xl border-2 border-slate-800 px-4 py-3">
+            <p className="text-[10px] font-bold text-slate-500 uppercase">Total sales</p>
+            <p className="font-black text-slate-900 text-lg">{rs(t.revenue)}</p>
+            <p className="text-[11px] text-slate-400">{t.units} unit{t.units !== 1 ? 's' : ''}</p>
+          </div>
+          <div className="rounded-xl border border-sky-300 bg-sky-50 px-4 py-3">
+            <p className="text-[10px] font-bold text-sky-700 uppercase">Macforce Auto Engineering</p>
+            <p className="font-black text-slate-900 text-lg">{rs(ws.revenue)}</p>
+            <p className="text-[11px] text-slate-500">{ws.units} unit{ws.units !== 1 ? 's' : ''} · workshop</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 px-4 py-3">
+            <p className="text-[10px] font-bold text-slate-500 uppercase">Other customers</p>
+            <p className="font-black text-slate-900 text-lg">{rs(t.revenue - ws.revenue)}</p>
+            <p className="text-[11px] text-slate-400">{t.units - ws.units} unit{t.units - ws.units !== 1 ? 's' : ''}</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 px-4 py-3">
+            <p className="text-[10px] font-bold text-slate-500 uppercase">Profit (parts with a cost)</p>
+            <p className="font-black text-emerald-700 text-lg">{t.costedRevenue > 0 ? rs(t.profit) : '—'}{margin != null && <span className="text-xs font-bold text-slate-400"> {margin}%</span>}</p>
+            <p className="text-[11px] text-slate-400">{t.noCostRevenue > 0 ? `${rs(t.noCostRevenue)} sold with no cost` : 'every part has a cost'}</p>
+          </div>
         </div>
-        {ws.units > 0 && (
-          <p className="text-[11px] text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 mb-4">
-            Workshop (Macforce Auto Engineering): <strong>{ws.units} unit{ws.units !== 1 ? 's' : ''}, {rs(ws.revenue)}</strong> · outside customers: {t.units - ws.units} unit{t.units - ws.units !== 1 ? 's' : ''}, {rs(t.revenue - ws.revenue)}
-          </p>
-        )}
 
         {cat === 'all' && cats.length > 1 && (
           <div className="overflow-x-auto mb-4"><table className="w-full text-sm">
