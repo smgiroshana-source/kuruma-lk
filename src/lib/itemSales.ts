@@ -13,6 +13,13 @@
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { netOfVat } from '@/lib/margin'
 
+// Typed names that are the same service as a quick item (owner, 2026-09-28:
+// "merge N2 into Air / nitrogen fill"). Lower-case, spaces collapsed.
+const SAME_AS: Record<string, string> = {
+  'n2': 'Air / nitrogen fill', 'n2 fill': 'Air / nitrogen fill',
+  'nitrogen': 'Air / nitrogen fill', 'nitrogen fill': 'Air / nitrogen fill', 'air fill': 'Air / nitrogen fill',
+}
+
 const lkStartOfDay = (d: string) => `${d}T00:00:00+05:30`
 const lkEndOfDay = (d: string) => `${d}T23:59:59+05:30`
 
@@ -48,7 +55,8 @@ export async function itemSales(admin: any, vendorId: string, fromStr: string, t
     if (qty <= 0) continue
     const p = (it.product_id && prodById.get(it.product_id)) || (it.product_sku && prodBySku.get(it.product_sku)) || null
     const stock = !!(it.product_sku || p)
-    const rawName = String(it.product_name || p?.name || '—').trim().replace(/\s+/g, ' ')
+    const typed = String(it.product_name || p?.name || '—').trim().replace(/\s+/g, ' ')
+    const rawName = !(it.product_sku || p) ? (SAME_AS[typed.toLowerCase()] || typed) : typed
     const key = stock ? `sku:${it.product_sku || p?.sku || p?.id}` : `svc:${rawName.toLowerCase()}`
     const billed = qty * (Number(it.unit_price) || 0)
     const net = docType.get(it.sale_id) === 'tax_invoice' ? netOfVat(billed, vatRate) : billed
