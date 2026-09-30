@@ -74,6 +74,11 @@ export async function POST(req: NextRequest) {
       supplierId, supplierInvoiceId, creditNoteNo, creditNoteDate,
       invoiceNo, invoiceDate, reason, remarks, netAmount, vatAmount,
     } = body
+    // The supplier gave a discount and has confirmed no credit note will
+    // follow (owner, 2026-09-30: Richard Pieris' 5% early-payment discount).
+    // Only for a discount confirmed like that — one still waiting on a note
+    // is left open on the invoice until the note arrives, so it is never missed.
+    const noCreditNote = body.noCreditNote === true
 
     if (!supplierId) return NextResponse.json({ error: 'Pick the supplier who gave the credit' }, { status: 400 })
     if (!creditNoteDate) return NextResponse.json({ error: 'The date is required' }, { status: 400 })
@@ -85,6 +90,9 @@ export async function POST(req: NextRequest) {
     if (net <= 0) return NextResponse.json({ error: 'The credited amount must be more than zero' }, { status: 400 })
     if (vat < 0) return NextResponse.json({ error: 'VAT cannot be negative' }, { status: 400 })
     if (vat > net) return NextResponse.json({ error: `VAT (${vat}) is larger than the credited value (${net}) — check the note` }, { status: 400 })
+    // No note, no VAT adjustment: the tax invoice stands as issued, which is
+    // what the supplier declares and what IRD matches the claim against
+    if (noCreditNote && vat !== 0) return NextResponse.json({ error: 'A discount with no credit note carries no VAT — the input VAT stays as invoiced' }, { status: 400 })
 
     const { data: sup } = await admin.from('suppliers')
       .select('id, name, vat_registered').eq('id', supplierId).eq('vendor_id', vendor.id).single()
@@ -97,9 +105,9 @@ export async function POST(req: NextRequest) {
     // at all: "take 5% off". Demanding a note number there is asking for a
     // thing that doesn't exist, so an internal reference is issued instead —
     // the record still needs an identifier to be quotable and auditable.
-    let noteNo = String(creditNoteNo || '').trim()
+    let noteNo = noCreditNote ? '' : String(creditNoteNo || '').trim()
     if (!noteNo) {
-      if (sup.vat_registered) {
+      if (sup.vat_registered && !noCreditNote) {
         return NextResponse.json({
           error: `${sup.name} is VAT-registered, so their credit note has a number on it — Schedule 04 lists it. Copy it off the note.`,
         }, { status: 400 })
@@ -148,7 +156,7 @@ export async function POST(req: NextRequest) {
       invoice_no:          String(invoiceNo || '').trim() || null,
       invoice_date:        invoiceDate || null,
       reason:              reason || 'discount',
-      remarks:             String(remarks || '').trim() || null,
+      remarks:             [noCreditNote ? 'No credit note — supplier confirmed none will be issued' : '', String(remarks || '').trim()].filter(Boolean).join(' · ') || null,
       net_amount:          net,
       vat_amount:          vat,
       total_amount:        net + vat,
