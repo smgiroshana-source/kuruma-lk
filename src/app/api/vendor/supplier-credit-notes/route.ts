@@ -167,7 +167,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    if (supplierInvoiceId) await recomputeInvoice(admin, vendor.id, supplierInvoiceId)
+    if (supplierInvoiceId) {
+      // The note the bill was waiting for has come: whatever it didn't cover
+      // is ordinary money owed again, so a short note gets noticed
+      if (!noCreditNote) {
+        await admin.from('supplier_invoices').update({ cn_expected_amount: null, cn_expected_since: null, cn_expected_by: null })
+          .eq('id', supplierInvoiceId).eq('vendor_id', vendor.id)
+      }
+      await recomputeInvoice(admin, vendor.id, supplierInvoiceId)
+    }
 
     return NextResponse.json({
       ok: true, creditNote: created,

@@ -76,6 +76,9 @@ const BLANK_PAYMENT = {
   // Early-payment discount the supplier confirmed will get no credit note
   discount: '',
   discountConfirmed: false,
+  // When a balance is left: 'later' (still owed) or 'credit_note' (the
+  // supplier is sending one — marked, kept out of overdue, chased)
+  shortReason: '' as '' | 'later' | 'credit_note',
 }
 
 export default function TabSuppliers({ vendor, showToast }: Props) {
@@ -257,6 +260,27 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
     }
   }
 
+  // A part-paid bill whose balance the supplier will cancel with a credit
+  // note (2026-09-30): not money to pay, chased until the note is entered
+  async function handleToggleCn(inv: any, on: boolean) {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/vendor/supplier-invoices', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_cn_expected', invoice_id: inv.id, expected: on }),
+      })
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error ?? 'Could not update the bill')
+      showToast(on ? `${inv.invoice_no}: waiting for the supplier's credit note` : `${inv.invoice_no}: back to money owed`)
+      await fetchSuppliers()
+      await fetchInvoices(selectedSupplier.id)
+    } catch (e: any) {
+      showToast(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleApplyAdvance(inv: any) {
     setSaving(true)
     try {
@@ -287,6 +311,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
     if (amt <= 0 && disc <= 0) { showToast('Payment amount must be > 0'); return }
     if (disc > 0 && !newPayment.discountConfirmed) { showToast('⚠️ Tick that the supplier confirmed no credit note — if a note is coming, record it when it arrives'); return }
     if (amt + disc > balance) { showToast(`Payment + discount is more than the balance of ${formatRs(balance)}`); return }
+    if (amt + disc < balance && !newPayment.shortReason) { showToast(`Say why ${formatRs(balance - amt - disc)} is left — pay later, or a credit note coming`); return }
     if (amt > 0 && String(newPayment.method).toLowerCase().includes('cheque') && !newPayment.reference.trim()) {
       showToast('⚠️ Enter the cheque number — a cheque without one cannot be traced'); return
     }
@@ -305,6 +330,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           amount: amt,
           discount: disc,
           discount_no_credit_note: disc > 0 && newPayment.discountConfirmed,
+          short_reason: amt + disc < balance ? newPayment.shortReason : 'later',
         }),
       })
       const d = await res.json()
@@ -414,6 +440,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           onPay={(inv) => { setShowRecordPayment(inv); setNewPayment({ ...BLANK_PAYMENT }) }}
           onPrepay={() => { setNewPayment({ ...BLANK_PAYMENT }); setShowPrepay(true) }}
           onApplyAdvance={handleApplyAdvance}
+          onToggleCn={handleToggleCn}
           onCreditNote={(inv) => { setVatTouched(false); setNoNote(false); setCreditNoteFor(inv); setCreditForm({ ...BLANK_CREDIT_NOTE, invoiceNo: inv.invoice_no || '', invoiceDate: inv.invoice_date || '' }) }}
           supplierIsVat={!!selectedSupplier?.vat_registered}
           onDelete={handleDeleteInvoice}
@@ -869,6 +896,18 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                       Already prepaid? Leave the payment at 0 and enter just the discount to close what&apos;s left.
                     </p>
                   </div>
+                  {(payAmt > 0 || discAmt > 0) && leftAfter > 0 && (
+                    <div className="rounded-lg border-2 border-slate-200 px-3 py-2">
+                      <p className="text-xs font-black text-slate-700 mb-1">Why is {formatRs(leftAfter)} left?</p>
+                      {([['later', 'We\u2019ll pay the rest later'], ['credit_note', 'Supplier will send a credit note for it']] as const).map(([v, l]) => (
+                        <label key={v} className="flex items-center gap-2 py-0.5 cursor-pointer text-xs text-slate-700">
+                          <input type="radio" name="shortReason" checked={newPayment.shortReason === v}
+                            onChange={() => setNewPayment(p => ({ ...p, shortReason: v }))} />
+                          {l}
+                        </label>
+                      ))}
+                    </div>
+                  )}
                   {(payAmt > 0 || discAmt > 0) && (
                     <p className={`text-xs font-bold ${leftAfter < 0 ? 'text-red-600' : leftAfter === 0 ? 'text-emerald-700' : 'text-slate-600'}`}>
                       {payAmt > 0 ? `Pay ${formatRs(payAmt)}` : 'No payment'}{discAmt > 0 ? ` + discount ${formatRs(discAmt)}` : ''} ·{' '}
@@ -1080,6 +1119,7 @@ function InvoiceListView({
   onPay,
   onPrepay,
   onApplyAdvance,
+  onToggleCn,
   onCreditNote,
   onDelete,
   supplierIsVat,
@@ -1096,6 +1136,7 @@ function InvoiceListView({
   onPay: (inv: any) => void
   onPrepay: () => void
   onApplyAdvance: (inv: any) => void
+  onToggleCn: (inv: any, on: boolean) => void
   onCreditNote: (inv: any) => void
   onDelete: (inv: any) => void
   supplierIsVat: boolean
@@ -1223,6 +1264,16 @@ function InvoiceListView({
                       </td>
                       <td className="px-4 py-3 text-right text-sm font-bold text-slate-800">
                         {balance > 0 ? formatRs(balance) : <span className="text-slate-300">—</span>}
+                        {balance > 0 && Number(inv.cn_expected_amount || 0) > 0 ? (
+                          <span className="block text-[10px] font-bold text-sky-700">
+                            credit note expected {formatRs(Math.min(Number(inv.cn_expected_amount), balance))}
+                            {' · '}<button onClick={() => onToggleCn(inv, false)} className="underline text-slate-400 font-semibold">not coming</button>
+                          </span>
+                        ) : balance > 0 && (amtPaid > 0 || credited > 0) && (
+                          <button onClick={() => onToggleCn(inv, true)} className="block ml-auto text-[10px] font-semibold text-sky-700 underline">
+                            waiting for a credit note?
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">{statusBadge(inv.status)}</td>
                       <td className="px-4 py-3 text-center">

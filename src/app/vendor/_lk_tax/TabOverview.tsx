@@ -16,8 +16,9 @@ import { colomboToday } from '@/lib/dates'
 import {
   Modal, ExpenseModal, MovementModal, AdvanceModal, QuickIncomeModal,
   OpenDrawerModal, CloseDrawerModal, AttendanceModal,
-  SupplierPayModal, CustomerCollectModal,
+  CustomerCollectModal,
 } from './CashModals'
+import SupplierPayModal from './SupplierPayFlow'
 
 type Dashboard = {
   todaySales: number
@@ -31,6 +32,7 @@ type Dashboard = {
   creditOldestDays?: number
   creditOldestName?: string
   payables: { due: number; overdueCount: number; oldestDays: number }
+  cnExpected?: { count: number; amount: number; oldestDays: number; supplier: string }
   grnDrafts: number
   salaryRaisesDue?: number
   salaryRaiseName?: string
@@ -317,6 +319,17 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         text: `${d.payables.overdueCount} supplier payment${d.payables.overdueCount !== 1 ? 's' : ''} overdue` +
               (d.payables.oldestDays > 0 ? ` — oldest ${d.payables.oldestDays} days` : ''),
         cta: 'Pay', tab: 'suppliers',
+      })
+    }
+    // Supplier credit notes still to come — the balance a supplier said they
+    // would cancel with a note. Red once a month has passed without it.
+    if (d.cnExpected && d.cnExpected.count > 0) {
+      const c = d.cnExpected
+      attention.push({
+        icon: '🧾', tone: c.oldestDays > 30 ? 'red' : 'amber',
+        text: `${c.count} supplier credit note${c.count !== 1 ? 's' : ''} still to come — ${formatRs(c.amount)}` +
+              (c.supplier ? ` (${c.supplier}${c.count > 1 ? ' and others' : ''}, waiting ${c.oldestDays} day${c.oldestDays !== 1 ? 's' : ''})` : ''),
+        cta: 'Chase', tab: 'suppliers',
       })
     }
     if ((d.creditOldestDays || 0) > 30) {

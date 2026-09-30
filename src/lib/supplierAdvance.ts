@@ -8,6 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { recomputeSupplierInvoice } from '@/lib/supplierInvoice'
 
 type Admin = SupabaseClient<any, any, any>
 
@@ -63,5 +64,6 @@ export async function applySupplierAdvance(admin: Admin, vendorId: string, invoi
   await admin.from('supplier_invoices')
     .update({ amount_paid: newPaid, status: settled >= Number(inv.amount) ? 'paid' : 'partial' })
     .eq('id', inv.id).eq('vendor_id', vendorId)
+  await recomputeSupplierInvoice(admin, vendorId, inv.id)
   return { applied, remaining: owed - applied }
 }

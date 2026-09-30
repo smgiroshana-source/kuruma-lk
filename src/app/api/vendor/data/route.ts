@@ -200,7 +200,7 @@ export async function GET(req: NextRequest) {
         .select('balance_due, customer_id, created_at, customer_name').eq('vendor_id', vendor.id)
         .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0),
       admin.from('supplier_invoices')
-        .select('invoice_no, amount, amount_paid, credit_total, due_date').eq('vendor_id', vendor.id).neq('status', 'paid'),
+        .select('invoice_no, amount, amount_paid, credit_total, due_date, cn_expected_amount, cn_expected_since, supplier:suppliers(name)').eq('vendor_id', vendor.id).neq('status', 'paid'),
       admin.from('salary_increments')
         .select('effective_from, new_amount, employee:employees(name)')
         .eq('vendor_id', vendor.id).eq('status', 'scheduled').lte('effective_from', colToday)
@@ -245,8 +245,19 @@ export async function GET(req: NextRequest) {
     }
 
     let payablesDue = 0, payOverdueCount = 0, payOldestDays = 0
+    // Balances waiting on a supplier's credit note (2026-09-30): not money to
+    // pay and never overdue, but chased until the note is entered
+    const cnExpected = { count: 0, amount: 0, oldestDays: 0, supplier: '' }
     for (const inv of (payRows || [])) {
-      payablesDue += (parseInt(inv.amount || 0) - parseInt(inv.amount_paid || 0) - parseInt(inv.credit_total || 0))
+      const owedHere = parseInt(inv.amount || 0) - parseInt(inv.amount_paid || 0) - parseInt(inv.credit_total || 0)
+      const cnHere = Math.min(parseInt((inv as any).cn_expected_amount || 0), Math.max(0, owedHere))
+      if (cnHere > 0) {
+        cnExpected.count++; cnExpected.amount += cnHere
+        const waited = (inv as any).cn_expected_since ? Math.floor((Date.now() - new Date((inv as any).cn_expected_since).getTime()) / 86400000) : 0
+        if (waited >= cnExpected.oldestDays) { cnExpected.oldestDays = waited; cnExpected.supplier = (inv as any).supplier?.name || '' }
+      }
+      payablesDue += owedHere - cnHere
+      if (owedHere - cnHere <= 0) continue
       // Opening balances carry no real due date — they are what was owed when
       // the system started, dated the day they were entered. Counting them as
       // overdue turns a one-off migration artefact into a permanent red alert
@@ -292,6 +303,7 @@ export async function GET(req: NextRequest) {
       attendance: { marked: attMarked, total: empIds.length },
       creditOwed, creditCustomers, creditOldestDays, creditOldestName, creditInternalOwed,
       payables: { due: payablesDue, overdueCount: payOverdueCount, oldestDays: payOldestDays },
+      cnExpected,
       salaryRaisesDue, salaryRaiseName, payrollUnpaid,
       grnDrafts: grnDrafts || 0,
       recentActivity,

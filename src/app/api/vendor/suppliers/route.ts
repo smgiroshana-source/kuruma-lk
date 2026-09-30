@@ -39,7 +39,7 @@ export async function GET() {
   try {
     invoices = await fetchAllRows((from, to) => admin
       .from('supplier_invoices')
-      .select('supplier_id, amount, amount_paid, credit_total, status, due_date')
+      .select('supplier_id, invoice_no, amount, amount_paid, credit_total, status, due_date, cn_expected_amount, cn_expected_since')
       .eq('vendor_id', vendor.id)
       .neq('status', 'paid')
       .order('id')
@@ -57,22 +57,38 @@ export async function GET() {
     overdue_count: number
     overdue_amount: number
     oldest_overdue_days: number
+    // What is actually to be paid, and what waits on a supplier's credit note
+    payable_now: number
+    cn_expected: number
+    cn_expected_since: string | null
+    bill_count: number
+    next_due: string | null
   }
   const agg: Record<string, InvoiceAgg> = {}
 
   for (const inv of (invoices || [])) {
     const sid = inv.supplier_id as string
     if (!agg[sid]) {
-      agg[sid] = { total_owed: 0, overdue_count: 0, overdue_amount: 0, oldest_overdue_days: 0 }
+      agg[sid] = { total_owed: 0, overdue_count: 0, overdue_amount: 0, oldest_overdue_days: 0, payable_now: 0, cn_expected: 0, cn_expected_since: null, bill_count: 0, next_due: null }
     }
     // Supplier credit notes settle a payable without any cash moving, so they
     // count against what is owed exactly as a payment does.
     const owed = (inv.amount as number) - (inv.amount_paid as number) - ((inv.credit_total as number) || 0)
     agg[sid].total_owed += owed
+    const cn = Math.min(Number((inv as any).cn_expected_amount || 0), Math.max(0, owed))
+    const payable = owed - cn
+    agg[sid].payable_now += payable
+    agg[sid].cn_expected += cn
+    if (cn > 0 && (!agg[sid].cn_expected_since || String((inv as any).cn_expected_since) < String(agg[sid].cn_expected_since))) agg[sid].cn_expected_since = (inv as any).cn_expected_since || null
+    if (payable > 0) {
+      agg[sid].bill_count += 1
+      if (inv.due_date && (!agg[sid].next_due || String(inv.due_date) < String(agg[sid].next_due))) agg[sid].next_due = inv.due_date as string
+    }
 
-    if (inv.status === 'overdue') {
+    // Only money still to be paid can be overdue — not a balance waiting on a credit note
+    if (payable > 0 && inv.due_date && String(inv.due_date) < today.toISOString().slice(0, 10)) {
       agg[sid].overdue_count += 1
-      agg[sid].overdue_amount += owed
+      agg[sid].overdue_amount += payable
       const dueDate = new Date(inv.due_date as string)
       dueDate.setHours(0, 0, 0, 0)
       const diffDays = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24))
@@ -89,6 +105,7 @@ export async function GET() {
       overdue_count: 0,
       overdue_amount: 0,
       oldest_overdue_days: 0,
+      payable_now: 0, cn_expected: 0, cn_expected_since: null, bill_count: 0, next_due: null,
     }
     return { ...s, ...totals }
   })

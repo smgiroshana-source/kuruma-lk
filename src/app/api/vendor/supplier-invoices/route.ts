@@ -5,6 +5,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { applySupplierAdvance, bumpSupplierAdvance } from '@/lib/supplierAdvance'
 import { recordNoNoteDiscount } from '@/lib/supplierDiscount'
+import { payBills, setCreditNoteExpected } from '@/lib/supplierPay'
 import { recomputeSupplierInvoice } from '@/lib/supplierInvoice'
 
 async function getVendor() {
@@ -92,7 +93,7 @@ export async function GET(req: NextRequest) {
       (inv) =>
         (inv.status === 'unpaid' || inv.status === 'partial') &&
         (inv.due_date as string) < today &&
-        ((inv.amount_paid as number) + (((inv as any).credit_total as number) || 0)) < (inv.amount as number)
+        ((inv.amount_paid as number) + (((inv as any).credit_total as number) || 0) + (((inv as any).cn_expected_amount as number) || 0)) < (inv.amount as number)
     )
     .map((inv) => inv.id as string)
 
@@ -109,6 +110,22 @@ export async function GET(req: NextRequest) {
       if (overdueIds.includes(row.id as string)) {
         row.status = 'overdue'
       }
+    }
+  }
+
+  // What each bill was for: its GRN number and the first items on it
+  const grnIds = [...new Set(rows.map((r: any) => r.grn_id).filter(Boolean))]
+  if (grnIds.length) {
+    const [{ data: grns }, { data: items }] = await Promise.all([
+      admin.from('grns').select('id, grn_number').in('id', grnIds).eq('vendor_id', vendor.id),
+      admin.from('grn_items').select('grn_id, product_name, quantity').in('grn_id', grnIds).order('created_at'),
+    ])
+    for (const r of rows as any[]) {
+      if (!r.grn_id) continue
+      r.grn_number = (grns || []).find((g: any) => g.id === r.grn_id)?.grn_number || null
+      const mine = (items || []).filter((i: any) => i.grn_id === r.grn_id)
+      r.items_summary = mine.slice(0, 2).map((i: any) => `${Number(i.quantity) > 1 ? i.quantity + ' × ' : ''}${i.product_name}`).join(', ')
+        + (mine.length > 2 ? ` +${mine.length - 2} more` : '')
     }
   }
 
@@ -254,6 +271,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, applied: r.applied, remaining: r.remaining })
   }
 
+  // ── PAY ONE OR SEVERAL BILLS (dashboard) — src/lib/supplierPay.ts ────────────
+  if (action === 'pay_bills') {
+    const b = body as any
+    const r = await payBills(admin, {
+      vendorId: vendor.id, userId, supplierId: b.supplier_id, invoiceIds: b.invoice_ids,
+      amount: b.amount, method: b.method, reference: b.reference, notes: b.notes, date: b.payment_date,
+      discount: b.discount, discountConfirmed: b.discount_no_credit_note === true,
+      shortReason: b.short_reason === 'credit_note' ? 'credit_note' : 'later',
+    })
+    if (r.error) return NextResponse.json({ error: r.error }, { status: r.status || 400 })
+    return NextResponse.json({ ok: true, confirm_no: r.confirm_no, confirm_kind: r.confirm_kind, bills: r.bills })
+  }
+
+  // ── MARK / CLEAR "CREDIT NOTE EXPECTED" ON A BILL ───────────────────────────
+  if (action === 'set_cn_expected') {
+    const b = body as any
+    if (!b.invoice_id) return NextResponse.json({ error: 'invoice_id is required' }, { status: 400 })
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+    const r: any = await setCreditNoteExpected(admin, vendor.id, b.invoice_id, b.expected === true, userId, today)
+    if (r.error) return NextResponse.json({ error: r.error }, { status: 400 })
+    return NextResponse.json({ ok: true, amount: r.amount })
+  }
+
   // ── RECORD PAYMENT ───────────────────────────────────────────────────────────
   if (action === 'record_payment') {
     const { invoice_id, supplier_id, amount, payment_date, method, reference, notes } = body as {
@@ -384,6 +424,12 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Nothing saved — the discount could not be recorded: ${d.error}` }, { status: 500 })
       }
       discountNo = d.note.credit_note_no
+    }
+
+    await recomputeSupplierInvoice(admin, vendor.id, invoice_id)
+    // Still something left and the supplier is sending a credit note for it
+    if ((body as any).short_reason === 'credit_note') {
+      await setCreditNoteExpected(admin, vendor.id, invoice_id, true, userId, payment_date)
     }
 
     // Cash left the drawer — that day's expected count must know
