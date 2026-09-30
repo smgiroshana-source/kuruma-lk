@@ -6,6 +6,7 @@ import { round2 } from '@/lib/money2'
 // One rule for settling an invoice, shared with the supplier-returns route,
 // which raises a credit note when goods go back.
 import { recomputeSupplierInvoice as recomputeInvoice } from '@/lib/supplierInvoice'
+import { nextDiscNo, NO_NOTE_REMARK } from '@/lib/supplierDiscount'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Credit notes received FROM suppliers — settlement and quantity discounts,
@@ -112,13 +113,7 @@ export async function POST(req: NextRequest) {
           error: `${sup.name} is VAT-registered, so their credit note has a number on it — Schedule 04 lists it. Copy it off the note.`,
         }, { status: 400 })
       }
-      const { data: prior } = await admin.from('supplier_credit_notes')
-        .select('credit_note_no').eq('vendor_id', vendor.id).like('credit_note_no', 'DISC-%')
-      const highest = (prior || []).reduce((m: number, r: any) => {
-        const n = parseInt(String(r.credit_note_no).replace('DISC-', ''), 10)
-        return Number.isFinite(n) && n > m ? n : m
-      }, 0)
-      noteNo = `DISC-${String(highest + 1).padStart(5, '0')}`
+      noteNo = await nextDiscNo(admin, vendor.id)
     }
 
     // A goods return records its own supplier credit note. The same note
@@ -156,7 +151,7 @@ export async function POST(req: NextRequest) {
       invoice_no:          String(invoiceNo || '').trim() || null,
       invoice_date:        invoiceDate || null,
       reason:              reason || 'discount',
-      remarks:             [noCreditNote ? 'No credit note — supplier confirmed none will be issued' : '', String(remarks || '').trim()].filter(Boolean).join(' · ') || null,
+      remarks:             [noCreditNote ? NO_NOTE_REMARK : '', String(remarks || '').trim()].filter(Boolean).join(' · ') || null,
       net_amount:          net,
       vat_amount:          vat,
       total_amount:        net + vat,

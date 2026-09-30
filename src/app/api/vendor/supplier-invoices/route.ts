@@ -4,6 +4,8 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { applySupplierAdvance, bumpSupplierAdvance } from '@/lib/supplierAdvance'
+import { recordNoNoteDiscount } from '@/lib/supplierDiscount'
+import { recomputeSupplierInvoice } from '@/lib/supplierInvoice'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -263,6 +265,11 @@ export async function POST(req: NextRequest) {
       reference?: string
       notes?: string
     }
+    // Early-payment discount the supplier has confirmed will get no credit
+    // note (owner, 2026-09-30). May stand alone — amount 0 — to close what a
+    // prepayment left open. One still waiting on a note is not entered here.
+    const discount = Math.round(Number((body as any).discount) || 0)
+    const discountConfirmed = (body as any).discount_no_credit_note === true
 
     if (!invoice_id || !supplier_id || amount === undefined || !payment_date || !method) {
       return NextResponse.json(
@@ -271,8 +278,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (!Number.isInteger(amount) || amount <= 0) {
+    if (!Number.isInteger(amount) || amount < 0 || (amount === 0 && discount <= 0)) {
       return NextResponse.json({ error: 'amount must be a positive integer (whole LKR)' }, { status: 400 })
+    }
+    if (discount < 0) return NextResponse.json({ error: 'The discount cannot be negative' }, { status: 400 })
+    if (discount > 0 && !discountConfirmed) {
+      return NextResponse.json({ error: 'Only record a discount here when the supplier has confirmed no credit note will be issued. If a note is coming, enter it when it arrives.' }, { status: 400 })
     }
 
     // Fetch the invoice and verify vendor ownership
@@ -290,11 +301,24 @@ export async function POST(req: NextRequest) {
     // Credit notes already came off the bill — paying the full invoice value
     // after a discount would overpay the supplier.
     const remaining = (invoice.amount as number) - (invoice.amount_paid as number) - (((invoice as any).credit_total as number) || 0)
-    if (amount > remaining) {
+    if (amount + discount > remaining) {
       return NextResponse.json(
-        { error: `Payment amount (${amount}) exceeds remaining balance (${remaining})` },
+        { error: discount > 0
+            ? `Payment ${amount} + discount ${discount} is more than the ${remaining} left on this invoice`
+            : `Payment amount (${amount}) exceeds remaining balance (${remaining})` },
         { status: 400 }
       )
+    }
+
+    // Discount only — nothing is paid, so no payment record and no drawer
+    if (amount === 0) {
+      const { data: invInfo } = await admin.from('supplier_invoices').select('invoice_no, invoice_date').eq('id', invoice_id).single()
+      const d = await recordNoNoteDiscount(admin, {
+        vendorId: vendor.id, supplierId: supplier_id, invoiceId: invoice_id, amount: discount, date: payment_date,
+        userId, invoiceNo: invInfo?.invoice_no, invoiceDate: invInfo?.invoice_date, remarks: notes,
+      })
+      if (d.error) return NextResponse.json({ error: d.error }, { status: 500 })
+      return NextResponse.json({ ok: true, confirm_no: null, confirm_kind: null, discount_no: d.note.credit_note_no })
     }
 
     // Payment control (owner rule): cheque and online-transfer payments get an
@@ -316,7 +340,7 @@ export async function POST(req: NextRequest) {
     const methodCanon = isCheque ? 'cheque' : isOnline ? 'online' : 'cash'
 
     // Insert the payment record
-    const { error: payErr } = await admin.from('supplier_payments').insert({
+    const { data: payRow, error: payErr } = await admin.from('supplier_payments').insert({
       vendor_id: vendor.id,
       supplier_id,
       supplier_invoice_id: invoice_id,
@@ -327,9 +351,9 @@ export async function POST(req: NextRequest) {
       notes: notes ?? null,
       payment_confirm_no: paymentConfirmNo,
       created_by: userId,
-    })
+    }).select('id').single()
 
-    if (payErr) return NextResponse.json({ error: payErr.message }, { status: 500 })
+    if (payErr || !payRow) return NextResponse.json({ error: payErr?.message || 'Could not record the payment' }, { status: 500 })
 
     // Recalculate invoice totals and status
     const newAmountPaid = (invoice.amount_paid as number) + amount
@@ -344,10 +368,28 @@ export async function POST(req: NextRequest) {
 
     if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 })
 
+    // The discount that came with the payment. If it can't be recorded, the
+    // payment is taken back too — half of a settlement is worse than none.
+    let discountNo: string | null = null
+    if (discount > 0) {
+      const { data: invInfo } = await admin.from('supplier_invoices').select('invoice_no, invoice_date').eq('id', invoice_id).single()
+      const d = await recordNoNoteDiscount(admin, {
+        vendorId: vendor.id, supplierId: supplier_id, invoiceId: invoice_id, amount: discount, date: payment_date,
+        userId, invoiceNo: invInfo?.invoice_no, invoiceDate: invInfo?.invoice_date, remarks: notes,
+      })
+      if (d.error) {
+        await admin.from('supplier_payments').delete().eq('id', payRow.id).eq('vendor_id', vendor.id)
+        await admin.from('supplier_invoices').update({ amount_paid: invoice.amount_paid }).eq('id', invoice_id).eq('vendor_id', vendor.id)
+        await recomputeSupplierInvoice(admin, vendor.id, invoice_id)
+        return NextResponse.json({ error: `Nothing saved — the discount could not be recorded: ${d.error}` }, { status: 500 })
+      }
+      discountNo = d.note.credit_note_no
+    }
+
     // Cash left the drawer — that day's expected count must know
     if (methodCanon === 'cash') await recomputeSessionForDate(admin, vendor.id, payment_date)
 
-    return NextResponse.json({ ok: true, confirm_no: paymentConfirmNo, confirm_kind: isCheque ? 'cheque' : isOnline ? 'online' : null })
+    return NextResponse.json({ ok: true, confirm_no: paymentConfirmNo, confirm_kind: isCheque ? 'cheque' : isOnline ? 'online' : null, discount_no: discountNo })
   }
 
   // ── DELETE INVOICE ───────────────────────────────────────────────────────────

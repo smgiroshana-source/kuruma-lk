@@ -73,6 +73,9 @@ const BLANK_PAYMENT = {
   method: 'Cash',
   reference: '',
   notes: '',
+  // Early-payment discount the supplier confirmed will get no credit note
+  discount: '',
+  discountConfirmed: false,
 }
 
 export default function TabSuppliers({ vendor, showToast }: Props) {
@@ -276,11 +279,15 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
   async function handleRecordPayment() {
     const invoice = showRecordPayment
     if (!invoice) return
-    const balance = invoice.amount - (invoice.amount_paid ?? 0)
-    const amt = Math.round(Number(newPayment.amount))
-    if (!amt || amt <= 0) { showToast('Payment amount must be > 0'); return }
-    if (amt > balance) { showToast(`Amount exceeds balance of ${formatRs(balance)}`); return }
-    if (String(newPayment.method).toLowerCase().includes('cheque') && !newPayment.reference.trim()) {
+    // Credit notes already came off the bill
+    const balance = invoice.amount - (invoice.amount_paid ?? 0) - (invoice.credit_total ?? 0)
+    const amt = Math.round(Number(newPayment.amount) || 0)
+    const disc = Math.round(Number(newPayment.discount) || 0)
+    if (amt < 0 || disc < 0) { showToast('Amounts cannot be negative'); return }
+    if (amt <= 0 && disc <= 0) { showToast('Payment amount must be > 0'); return }
+    if (disc > 0 && !newPayment.discountConfirmed) { showToast('⚠️ Tick that the supplier confirmed no credit note — if a note is coming, record it when it arrives'); return }
+    if (amt + disc > balance) { showToast(`Payment + discount is more than the balance of ${formatRs(balance)}`); return }
+    if (amt > 0 && String(newPayment.method).toLowerCase().includes('cheque') && !newPayment.reference.trim()) {
       showToast('⚠️ Enter the cheque number — a cheque without one cannot be traced'); return
     }
     setSaving(true)
@@ -296,15 +303,18 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           supplier_id: invoice.supplier_id || selectedSupplier?.id,
           ...newPayment,
           amount: amt,
+          discount: disc,
+          discount_no_credit_note: disc > 0 && newPayment.discountConfirmed,
         }),
       })
       const d = await res.json()
       if (!res.ok) throw new Error(d.error ?? 'Failed to record payment')
+      if (d.discount_no) showToast(`✅ ${amt > 0 ? 'Payment recorded · ' : ''}discount ${formatRs(disc)} recorded as ${d.discount_no}`)
       // Cheque/bank payments come back with the 8-digit confirmation number —
       // show it full-screen for the operator to copy (slip or transfer remarks)
-      if (d.confirm_no) {
+      if (d.confirm_no && amt > 0) {
         setPaySlip({ no: d.confirm_no, kind: d.confirm_kind, supplier: selectedSupplier?.name || invoice.supplier_name || '', amount: amt, reference: newPayment.reference, date: newPayment.payment_date })
-      } else {
+      } else if (!d.discount_no) {
         showToast('Payment recorded')
       }
       setShowRecordPayment(null)
@@ -763,7 +773,11 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           {(() => {
             const inv = showRecordPayment
             const alreadyPaid = inv.amount_paid ?? 0
-            const balance = inv.amount - alreadyPaid
+            const credited = inv.credit_total ?? 0
+            const balance = inv.amount - alreadyPaid - credited
+            const payAmt = Math.round(Number(newPayment.amount) || 0)
+            const discAmt = Math.round(Number(newPayment.discount) || 0)
+            const leftAfter = balance - payAmt - discAmt
             return (
               <>
                 {/* Invoice summary */}
@@ -775,8 +789,8 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                       {formatRs(inv.amount)}
                     </div>
                     <div>
-                      <span className="block font-semibold text-slate-700">Paid</span>
-                      {formatRs(alreadyPaid)}
+                      <span className="block font-semibold text-slate-700">Paid{credited > 0 ? ' + credited' : ''}</span>
+                      {formatRs(alreadyPaid + credited)}
                     </div>
                     <div>
                       <span className="block font-semibold text-orange-600">Balance</span>
@@ -790,7 +804,7 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                     <label className="block text-xs font-bold text-slate-500 mb-1">Payment Amount (Rs.) <span className="text-red-500">*</span></label>
                     <input
                       type="number"
-                      min={1}
+                      min={0}
                       max={balance}
                       className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
                       placeholder={String(balance)}
@@ -830,6 +844,37 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
                       onChange={e => setNewPayment(p => ({ ...p, reference: e.target.value }))}
                     />
                   </div>
+                  {/* Early-payment discount with no paperwork. Only when the supplier
+                      has said no credit note will come — one still coming is left
+                      open and entered when it arrives, so it is never missed. */}
+                  <div className={`rounded-lg border-2 px-3 py-2.5 ${discAmt > 0 ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}>
+                    <label className="block text-xs font-bold text-slate-500 mb-1">Discount taken (Rs.) — only if NO credit note will come</label>
+                    <input
+                      type="number" min={0} max={balance}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 bg-white"
+                      placeholder="0"
+                      value={newPayment.discount}
+                      onChange={e => setNewPayment(p => ({ ...p, discount: e.target.value }))}
+                    />
+                    {discAmt > 0 && (
+                      <label className="flex items-start gap-2 mt-2 cursor-pointer">
+                        <input type="checkbox" className="mt-0.5" checked={newPayment.discountConfirmed}
+                          onChange={e => setNewPayment(p => ({ ...p, discountConfirmed: e.target.checked }))} />
+                        <span className="text-[11px] text-slate-700">
+                          <span className="font-bold">The supplier confirmed no credit note will be issued.</span> If a note is coming, clear this box and enter the note when it arrives.
+                        </span>
+                      </label>
+                    )}
+                    <p className="text-[10px] text-slate-400 mt-1.5">
+                      Already prepaid? Leave the payment at 0 and enter just the discount to close what&apos;s left.
+                    </p>
+                  </div>
+                  {(payAmt > 0 || discAmt > 0) && (
+                    <p className={`text-xs font-bold ${leftAfter < 0 ? 'text-red-600' : leftAfter === 0 ? 'text-emerald-700' : 'text-slate-600'}`}>
+                      {payAmt > 0 ? `Pay ${formatRs(payAmt)}` : 'No payment'}{discAmt > 0 ? ` + discount ${formatRs(discAmt)}` : ''} ·{' '}
+                      {leftAfter < 0 ? `${formatRs(-leftAfter)} more than the balance` : leftAfter === 0 ? 'invoice fully settled' : `${formatRs(leftAfter)} still owed`}
+                    </p>
+                  )}
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">Notes</label>
                     <textarea
