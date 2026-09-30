@@ -198,6 +198,12 @@ export async function GET(req: NextRequest) {
   const admin = createAdminClient()
 
   const url = new URL(req.url)
+  // Which cycles have a run and whether it is paid — lets the screen open on
+  // the right month (owner, 2026-09-30)
+  if (url.searchParams.get('runs') === '1') {
+    const { data } = await admin.from('payroll_runs').select('period, status').eq('vendor_id', caller.vendor.id)
+    return NextResponse.json({ runs: data || [] })
+  }
   const period = url.searchParams.get('period') || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }).slice(0, 7)
   if (!/^\d{4}-\d{2}$/.test(period)) return NextResponse.json({ error: 'period must be YYYY-MM' }, { status: 400 })
   const { from, to } = cycleBounds(period)

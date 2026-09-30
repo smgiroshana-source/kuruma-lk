@@ -24,6 +24,15 @@ const KIND_LABEL: Record<string, string> = {
 
 type Line = any
 
+// The salary cycle running today, named by the month it ends in: from the
+// 25th that is next month's (25 Sep → the "October" cycle)
+function runningCycle(): string {
+  const today = colomboToday()
+  const [y, m] = today.slice(0, 7).split('-').map(Number)
+  const d = Number(today.slice(8, 10)) >= 25 ? new Date(y, m, 1) : new Date(y, m - 1, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 // Salary cycle runs 25th → 24th; the period key is the month the cycle ends
 // in (= is paid in). "2026-08" ⇒ 25 Jul – 24 Aug, paid ~25 Aug.
 function cycleLabel(p: string): string {
@@ -82,6 +91,25 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
     setLoading(false)
   }, [showToast])
   useEffect(() => { load(period) }, [period, load])
+
+  // Opening month (owner, 2026-09-30): the oldest ended cycle not yet paid,
+  // so a month is never skipped; once every ended cycle is paid, the cycle
+  // running now. A dashboard link to a month (initialPeriod) always wins.
+  useEffect(() => {
+    if (initialPeriod) return
+    fetch('/api/vendor/payroll?runs=1').then(r => r.json()).then(j => {
+      const paid = new Set((j.runs || []).filter((r: any) => r.status === 'paid').map((r: any) => r.period))
+      const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const running = runningCycle()
+      let pick = running
+      for (let p = '2026-09'; p < running; ) {
+        if (!paid.has(p)) { pick = p; break }
+        const [py, pm] = p.split('-').map(Number)
+        p = ym(new Date(py, pm, 1))
+      }
+      setPeriod(cur => cur === pick ? cur : pick)
+    }).catch(() => {})
+  }, [initialPeriod])
 
   const isPaid = run?.status === 'paid'
 
@@ -182,7 +210,7 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
       {/* ── Month + state ── */}
       <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
         <div className="flex items-center gap-2">
-          <input type="month" value={period} max={colomboToday().slice(0, 7)}
+          <input type="month" value={period} max={runningCycle()}
             onChange={e => setPeriod(e.target.value)}
             className="px-3 py-2 rounded-xl border-2 border-slate-200 text-sm font-bold outline-none focus:border-orange-400" />
           <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200">Cycle {cycleLabel(period)}</span>
