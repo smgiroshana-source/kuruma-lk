@@ -195,7 +195,7 @@ export async function GET(req: NextRequest) {
       admin.from('cash_sessions')
         .select('session_date').eq('vendor_id', vendor.id).eq('status', 'open').lt('session_date', colToday)
         .order('session_date', { ascending: false }).limit(1),
-      admin.from('employees').select('id').eq('vendor_id', vendor.id).eq('active', true),
+      admin.from('employees').select('id').eq('vendor_id', vendor.id).eq('active', true).or(`left_on.is.null,left_on.gte.${colToday}`),
       admin.from('sales')
         .select('balance_due, customer_id, created_at, customer_name').eq('vendor_id', vendor.id)
         .neq('payment_status', 'voided').neq('payment_status', 'draft').gt('balance_due', 0),

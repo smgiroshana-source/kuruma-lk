@@ -109,7 +109,7 @@ export default function StaffLoans({ employees, loans, post, reload, toast }: Pr
               <div className="min-w-0">
                 <span className="text-sm font-bold text-slate-700">{empName(l.employee_id)}</span>
                 <span className="text-xs text-slate-400 ml-2">
-                  Loan {rs(l.amount)} on {l.date} · {rs(l.instalment)}/month · repaid {rs(l.repaid)}{l.note ? ` · ${l.note}` : ''}
+                  Loan {rs(l.amount)} on {l.date} · {rs(l.instalment)}/month · repaid {rs(l.repaid)}{l.written_off > 0 ? ` · written off ${rs(l.written_off)}` : ''}{l.note ? ` · ${l.note}` : ''}
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">

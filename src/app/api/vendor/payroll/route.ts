@@ -63,7 +63,12 @@ const halfFactor = (policy: string) => (policy === 'full' ? 1 : policy === 'none
 // Everything here is a starting point the owner can edit before saving: the
 // system knows attendance and rates, it cannot know how many tyre repairs
 // someone did or what the workshop's profit was.
-function proposeLine(emp: any, items: any[], att: any[], advances: any[], loans: LoanWithBalance[] = []) {
+function proposeLine(emp: any, items: any[], att: any[], advances: any[], loans: LoanWithBalance[] = [], leftOn: string | null = null) {
+  // Leaving in this cycle (owner, 2026-09-30): the final settlement. Only the
+  // days up to the leaving date count, monthly pay is monthly ÷ 25 × days
+  // worked (the Profit Report's rule — an ordinary line the owner can change),
+  // and the whole loan balance is proposed, as far as the pay covers it.
+  if (leftOn) att = att.filter((a: any) => !a.date || a.date <= leftOn)
   const present = att.filter(a => a.status === 'present').length
   const half = att.filter(a => a.status === 'half').length
   const absent = att.filter(a => a.status === 'absent').length
@@ -102,6 +107,11 @@ function proposeLine(emp: any, items: any[], att: any[], advances: any[], loans:
       continue
     }
 
+    if (leftOn) {
+      components.push({ ...base, qty: 1, rate, amount: r0(rate / 25 * payableDaysFor(present, half, it.half_day_policy)), prorated: true })
+      continue
+    }
+
     // Monthly salary is a FIXED amount (owner, 2026-08-24): attendance is
     // information for the owner, never an automatic deduction. Holidays stay
     // unmarked, normal leave is paid, and marking someone absent changes the
@@ -134,14 +144,20 @@ function proposeLine(emp: any, items: any[], att: any[], advances: any[], loans:
     if (loan.balance <= 0) continue
     components.push({
       kind: 'loan', label: 'Loan repayment', unit: 'cash', period: 'monthly',
-      qty: 1, rate: loan.instalment, amount: Math.min(loan.instalment, loan.balance), isDeduction: true,
-      loan_id: loan.id, balance: loan.balance,
+      qty: 1, rate: loan.instalment, amount: leftOn ? loan.balance : Math.min(loan.instalment, loan.balance), isDeduction: true,
+      loan_id: loan.id, balance: loan.balance, ...(leftOn ? { final: true } : {}),
     })
   }
 
   const gross = components.filter(c => !c.isDeduction).reduce((s, c) => s + c.amount, 0)
-  const deductions = components.filter(c => c.isDeduction).reduce((s, c) => s + c.amount, 0)
   const advTotal = advances.reduce((s, a) => s + r0(a.amount), 0)
+  // Final pay: a loan can only take what the pay leaves; the rest is decided
+  // on payday (write off, or keep as owed)
+  if (leftOn) {
+    let room = Math.max(0, gross - components.filter(c => c.isDeduction && c.kind !== 'loan').reduce((s, c) => s + c.amount, 0) - advTotal)
+    for (const c of components.filter(c => c.kind === 'loan')) { c.amount = Math.min(c.amount, room); room -= c.amount }
+  }
+  const deductions = components.filter(c => c.isDeduction).reduce((s, c) => s + c.amount, 0)
 
   return {
     employee_id: emp.id,
@@ -152,8 +168,28 @@ function proposeLine(emp: any, items: any[], att: any[], advances: any[], loans:
     gross, deductions, advances: advTotal,
     net_pay: gross - deductions - advTotal,
     advance_ids: advances.map(a => a.id),
-    note: null,
+    note: leftOn ? `Final settlement — left on ${leftOn}` : null,
+    left_on: leftOn,
   }
+}
+
+// Days worked for a pay item, with a half day counted by the item's own rule
+function payableDaysFor(present: number, half: number, policy: string) {
+  return present + half * halfFactor(policy)
+}
+
+// Undo what a payday did for the people it settled for the last time: loans it
+// wrote off come back, and they return to the payroll (active again)
+async function undoLeaving(admin: any, vendorId: string, runId: string, from: string, to: string) {
+  const { data: wo } = await admin.from('staff_loans').select('id, write_off_expense_id')
+    .eq('vendor_id', vendorId).eq('written_off_run', runId)
+  for (const l of wo || []) {
+    if (l.write_off_expense_id) await admin.from('expenses').delete().eq('id', l.write_off_expense_id).eq('vendor_id', vendorId)
+    await admin.from('staff_loans').update({ written_off_amount: 0, written_off_on: null, written_off_run: null, write_off_expense_id: null })
+      .eq('id', l.id).eq('vendor_id', vendorId)
+  }
+  await admin.from('employees').update({ active: true, updated_at: new Date().toISOString() })
+    .eq('vendor_id', vendorId).eq('active', false).gte('left_on', from).lte('left_on', to)
 }
 
 export async function GET(req: NextRequest) {
@@ -171,9 +207,13 @@ export async function GET(req: NextRequest) {
 
   // Advances taken against this cycle — shown whether the run is saved or
   // not, so the owner can always see what has already gone out against it.
-  const { data: employees } = await admin.from('employees')
+  const { data: employeesAll } = await admin.from('employees')
     .select('*').eq('vendor_id', caller.vendor.id).eq('active', true).order('branch').order('name')
-  const empIds = (employees || []).map((e: any) => e.id)
+  // Someone who left before this cycle began was settled in an earlier one;
+  // someone leaving inside it gets their final settlement here
+  const employees = (employeesAll || []).filter((e: any) => !e.left_on || e.left_on >= from)
+  const leaving = new Map<string, string>(employees.filter((e: any) => e.left_on && e.left_on <= to).map((e: any) => [e.id, e.left_on]))
+  const empIds = employees.map((e: any) => e.id)
 
   // EVERY advance still unsettled up to the cycle end (the 24th) — not just
   // ones taken during it. An advance from a past cycle that no run deducted
@@ -225,7 +265,7 @@ export async function GET(req: NextRequest) {
     const loanChanges: { employee_name: string; change: 'added' | 'removed'; amount: number }[] = []
     if (run.status !== 'paid' && (lines || []).length > 0) {
       const all = await loansWithBalance(admin, caller.vendor.id, (lines || []).map((l: any) => l.employee_id))
-      const due = all.filter(l => l.date < from && l.balance > 0)
+      const due = all.filter(l => (l.date < from || leaving.has(l.employee_id)) && l.balance > 0)
       for (const l of lines || []) {
         const comps = [...(l.components || [])]
         let changed = false
@@ -239,7 +279,7 @@ export async function GET(req: NextRequest) {
         }
         for (const loan of due.filter(x => x.employee_id === l.employee_id)) {
           if (comps.some((c: any) => c.kind === 'loan' && c.loan_id === loan.id)) continue
-          const amount = Math.min(loan.instalment, loan.balance)
+          const amount = leaving.has(l.employee_id) ? loan.balance : Math.min(loan.instalment, loan.balance)
           comps.push({
             kind: 'loan', label: 'Loan repayment', unit: 'cash', period: 'monthly',
             qty: 1, rate: loan.instalment, amount, isDeduction: true,
@@ -255,12 +295,46 @@ export async function GET(req: NextRequest) {
         }
       }
     }
+    // Leaving recorded after the draft was saved: turn their line into the
+    // final settlement — monthly pay ÷ 25 × days, whole loan as far as the pay covers
+    const leaveChanges: string[] = []
+    if (run.status !== 'paid') {
+      for (const l of (lines || []) as any[]) {
+        const leftOn = leaving.get(l.employee_id)
+        if (!leftOn) continue
+        const comps = (l.components || []).map((c: any) => ({ ...c }))
+        let changed = false
+        for (const c of comps) {
+          if (!c.isDeduction && c.period === 'monthly' && c.unit === 'rs' && !c.prorated) {
+            c.amount = r0((Number(c.rate) || 0) / 25 * Number(l.payable_days || 0)); c.prorated = true; changed = true
+          }
+          if (c.kind === 'loan' && !c.final && r0(c.amount) < r0(c.balance)) { c.amount = r0(c.balance); c.final = true; changed = true }
+        }
+        if (!changed) continue
+        const gross = comps.filter((c: any) => !c.isDeduction).reduce((t: number, c: any) => t + r0(c.amount), 0)
+        let room = Math.max(0, gross - comps.filter((c: any) => c.isDeduction && c.kind !== 'loan').reduce((t: number, c: any) => t + r0(c.amount), 0) - r0(l.advances))
+        for (const c of comps.filter((c: any) => c.kind === 'loan')) { c.amount = Math.min(r0(c.amount), room); room -= c.amount }
+        const deductions = comps.filter((c: any) => c.isDeduction).reduce((t: number, c: any) => t + r0(c.amount), 0)
+        const before = r0(l.net_pay)
+        Object.assign(l, { components: comps, gross, deductions, net_pay: gross - deductions - r0(l.advances), note: `Final settlement — left on ${leftOn}` })
+        leaveChanges.push(`${l.employee_name}: leaving on ${leftOn} — final settlement, pay ${rsText(before)} → ${rsText(r0(l.net_pay))}`)
+      }
+    }
     // Attendance and advances marked since the draft was saved
-    const draftChanges: string[] = loanChanges.map(c => c.change === 'added'
+    const draftChanges: string[] = [...leaveChanges, ...loanChanges.map(c => c.change === 'added'
       ? `${c.employee_name}: loan repayment ${rsText(c.amount)} added`
-      : `${c.employee_name}: loan repayment ${rsText(c.amount)} removed — that loan was deleted`)
+      : `${c.employee_name}: loan repayment ${rsText(c.amount)} removed — that loan was deleted`)]
     if (run.status !== 'paid') draftChanges.push(...await refreshDraftLines(admin, caller.vendor.id, lines || [], from, to))
     const detail = wantDetail ? await slipDetail((lines || []).map((l: any) => l.employee_id), run.status === 'paid' ? run.id : null) : undefined
+    // Who is being settled for the last time in this cycle (paid runs too —
+    // by then the person is inactive, so ask by id)
+    if ((lines || []).length) {
+      const { data: lv } = await admin.from('employees').select('id, left_on').in('id', (lines || []).map((l: any) => l.employee_id))
+      for (const l of lines || []) {
+        const e = (lv || []).find((x: any) => x.id === l.employee_id)
+        if (e?.left_on && e.left_on >= from && e.left_on <= to) (l as any).left_on = e.left_on
+      }
+    }
     return NextResponse.json({ period, run, lines: lines || [], saved: true, draftChanges, advances: advances || [], cycle: { from, to }, detail })
   }
 
@@ -273,9 +347,9 @@ export async function GET(req: NextRequest) {
     : { data: [] as any[] }
   // Repayment starts with the first payroll AFTER the loan: one handed over
   // during this cycle is repaid from next month, not taken straight back.
-  const loans = (await loansWithBalance(admin, caller.vendor.id, empIds)).filter(l => l.date < from && l.balance > 0)
+  const loans = (await loansWithBalance(admin, caller.vendor.id, empIds)).filter(l => (l.date < from || leaving.has(l.employee_id)) && l.balance > 0)
 
-  const lines = (employees || [])
+  const lines = employees
     // Someone who joined after the cycle ended has nothing to be paid for it
     .filter((e: any) => !e.join_date || e.join_date <= to)
     .map((e: any) => proposeLine(
@@ -284,6 +358,7 @@ export async function GET(req: NextRequest) {
       (att || []).filter((a: any) => a.employee_id === e.id),
       (advances || []).filter((a: any) => a.employee_id === e.id),
       loans.filter(l => l.employee_id === e.id),
+      leaving.get(e.id) || null,
     ))
 
   const detail = wantDetail ? await slipDetail(lines.map((l: any) => l.employee_id), null) : undefined
@@ -406,6 +481,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Leaving this cycle: final settlement ─────────────────────────────────
+    // A loan the final pay doesn't cover is decided per case (owner,
+    // 2026-09-30: mostly written off) — the screen asks, nothing is assumed.
+    const { to: cycleTo, from: cycleFrom } = cycleBounds(run.period)
+    const { data: lv } = await admin.from('employees').select('id, name, left_on')
+      .in('id', lines.map((l: any) => l.employee_id))
+    const leavers = (lv || []).filter((e: any) => e.left_on && e.left_on >= cycleFrom && e.left_on <= cycleTo)
+    const remainders: { loan: any; employee: any; left: number; decision: 'write_off' | 'keep' }[] = []
+    if (leavers.length > 0) {
+      const decisions = (body.loan_remainders || {}) as Record<string, string>
+      const loans = await loansWithBalance(admin, caller.vendor.id, leavers.map((e: any) => e.id))
+      for (const loan of loans) {
+        const repaying = loanParts.filter(p => p.loan_id === loan.id).reduce((t, p) => t + p.amount, 0)
+        const left = loan.balance - repaying
+        if (left <= 0) continue
+        const employee = leavers.find((e: any) => e.id === loan.employee_id)
+        const d = decisions[loan.id]
+        if (d !== 'write_off' && d !== 'keep') {
+          return NextResponse.json({ error: `${employee?.name}'s final pay leaves ${rsText(left)} of their loan — choose write off or keep as owed` }, { status: 400 })
+        }
+        remainders.push({ loan, employee, left, decision: d })
+      }
+    }
+
     // A cash payday belongs to that day's drawer
     let sessionId: string | null = null
     if (method === 'cash') {
@@ -453,6 +552,7 @@ export async function POST(req: NextRequest) {
       await admin.from('staff_advances').update({ settled_in_run: null }).eq('vendor_id', caller.vendor.id).eq('settled_in_run', runId)
       await admin.from('staff_loan_repayments').delete().eq('run_id', runId)
       await admin.from('staff_advances').delete().eq('vendor_id', caller.vendor.id).eq('carried_from_run', runId)
+      await undoLeaving(admin, caller.vendor.id, runId, cycleFrom, cycleTo)
     }
 
     // What came off each loan
@@ -478,6 +578,26 @@ export async function POST(req: NextRequest) {
       if (carryErr) { await undo(); return NextResponse.json({ error: 'Could not carry the unpaid balance forward: ' + carryErr.message }, { status: 500 }) }
     }
 
+    // Loans the final pay didn't cover: written off as a loss, or left owed
+    for (const r of remainders.filter(x => x.decision === 'write_off')) {
+      const { data: exp, error: wErr } = await admin.from('expenses').insert({
+        vendor_id: caller.vendor.id, expense_date: date, category: 'staff_loan_writeoff',
+        description: `Staff loan written off — ${r.employee?.name} (left on ${r.employee?.left_on})`,
+        amount: r.left, payment_method: 'none', created_by: caller.userId,
+      }).select('id').single()
+      if (wErr || !exp) { await undo(); return NextResponse.json({ error: 'Could not write the loan off: ' + (wErr?.message || 'unknown') }, { status: 500 }) }
+      const { error: lErr } = await admin.from('staff_loans').update({
+        written_off_amount: Number(r.loan.written_off || 0) + r.left, written_off_on: date,
+        written_off_run: runId, write_off_expense_id: exp.id,
+      }).eq('id', r.loan.id).eq('vendor_id', caller.vendor.id)
+      if (lErr) { await admin.from('expenses').delete().eq('id', exp.id); await undo(); return NextResponse.json({ error: 'Could not write the loan off: ' + lErr.message }, { status: 500 }) }
+    }
+    // Settled for the last time: off future payrolls and attendance, history kept
+    if (leavers.length > 0) {
+      await admin.from('employees').update({ active: false, updated_at: new Date().toISOString() })
+        .in('id', leavers.map((e: any) => e.id)).eq('vendor_id', caller.vendor.id)
+    }
+
     await admin.from('payroll_runs').update({
       status: 'paid', paid_date: date, payment_method: method, updated_at: new Date().toISOString(),
     }).eq('id', runId).eq('vendor_id', caller.vendor.id)
@@ -486,7 +606,8 @@ export async function POST(req: NextRequest) {
 
     admin.from('staff_audit').insert({
       vendor_id: caller.vendor.id, actor: caller.email, action: 'payroll_paid',
-      detail: { period: run.period, net: run.net_total, date, method, people: posted.length },
+      detail: { period: run.period, net: run.net_total, date, method, people: posted.length,
+        final: leavers.map((e: any) => e.name), written_off: remainders.filter(x => x.decision === 'write_off').map(x => ({ name: x.employee?.name, amount: x.left })) },
     }).then(() => {}, () => {})
 
     return NextResponse.json({ ok: true, paid: posted.length })
@@ -510,6 +631,7 @@ export async function POST(req: NextRequest) {
     await admin.from('staff_advances').delete().eq('vendor_id', caller.vendor.id).eq('carried_from_run', runId)
     // Put the loan balances back as they were before this payday
     await admin.from('staff_loan_repayments').delete().eq('run_id', runId)
+    { const { from: rf, to: rt } = cycleBounds(run.period); await undoLeaving(admin, caller.vendor.id, runId, rf, rt) }
 
     const { data: lines } = await admin.from('payroll_lines').select('id, expense_id').eq('run_id', runId)
     const expenseIds = (lines || []).map((l: any) => l.expense_id).filter(Boolean)

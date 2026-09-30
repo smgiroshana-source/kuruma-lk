@@ -43,10 +43,12 @@ export async function GET(req: NextRequest) {
   // else — no pay items, no salaries, no advance history for other people.
   // Without this they cannot record the payment at all and the till goes short.
   if (url.searchParams.get('mode') === 'names') {
-    let q = admin.from('employees').select('id, name, branch, active').eq('vendor_id', vendor.id).eq('active', true)
+    let q = admin.from('employees').select('id, name, branch, active, left_on').eq('vendor_id', vendor.id).eq('active', true)
     if (scope === 'shop' || scope === 'workshop') q = q.eq('branch', scope)
     const { data } = await q.order('name')
-    return NextResponse.json({ employees: data || [] })
+    // Past their last day: no more advances out of the drawer
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+    return NextResponse.json({ employees: (data || []).filter((e: any) => !e.left_on || e.left_on >= today) })
   }
 
   if (role !== 'owner' && role !== 'manager') return NextResponse.json({ error: 'No access' }, { status: 403 })
@@ -160,6 +162,32 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Create / edit employee profile (owner + manager/office) ──
+  // ── Someone is leaving (owner, 2026-09-30) ──
+  // Records the last day and why. They stay on the payroll of the cycle they
+  // leave in — their final settlement — and go inactive once that is paid.
+  // Cancel is allowed only until then.
+  if (action === 'set_leaving') {
+    const { employee_id, left_on, leave_reason, leave_note } = body
+    const { data: emp } = await admin.from('employees').select('id, name, branch, join_date, active, left_on')
+      .eq('id', employee_id).eq('vendor_id', vendor.id).single()
+    if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    if (!inScope(emp.branch)) return NextResponse.json({ error: `Your access covers the ${scope} only` }, { status: 403 })
+    if (!emp.active) return NextResponse.json({ error: `${emp.name}'s final pay is already done — reopen that payroll to change the leaving date` }, { status: 400 })
+    if (left_on === null) {
+      await admin.from('employees').update({ left_on: null, leave_reason: null, leave_note: null, updated_at: new Date().toISOString() }).eq('id', emp.id)
+      audit(admin, vendor.id, email, 'leaving_cancelled', emp.id, { name: emp.name, was: emp.left_on })
+      return NextResponse.json({ ok: true })
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(left_on || ''))) return NextResponse.json({ error: 'The last working day is required' }, { status: 400 })
+    if (emp.join_date && left_on < emp.join_date) return NextResponse.json({ error: `${emp.name} joined on ${emp.join_date} — the last day can't be before that` }, { status: 400 })
+    const reason = ['resigned', 'dismissed', 'contract_ended', 'other'].includes(leave_reason) ? leave_reason : 'resigned'
+    await admin.from('employees').update({
+      left_on, leave_reason: reason, leave_note: String(leave_note || '').trim() || null, updated_at: new Date().toISOString(),
+    }).eq('id', emp.id)
+    audit(admin, vendor.id, email, 'leaving_recorded', emp.id, { name: emp.name, left_on, reason })
+    return NextResponse.json({ ok: true })
+  }
+
   if (action === 'upsert_employee') {
     const { id, name, nic, phone, address, branch, join_date, pay_type, active, id_photos } = body
     if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
@@ -277,7 +305,7 @@ export async function POST(req: NextRequest) {
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Array.isArray(marks)) {
       return NextResponse.json({ error: 'date and marks required' }, { status: 400 })
     }
-    let empQ = admin.from('employees').select('id, name, join_date').eq('vendor_id', vendor.id)
+    let empQ = admin.from('employees').select('id, name, join_date, left_on').eq('vendor_id', vendor.id)
     if (scope === 'shop' || scope === 'workshop') empQ = empQ.eq('branch', scope)
     const { data: emps } = await empQ
     // Nobody can be marked before the day they joined
@@ -288,6 +316,14 @@ export async function POST(req: NextRequest) {
     })
     if (tooEarly.length > 0) {
       const names = (emps || []).filter((e: any) => tooEarly.some((m: any) => m.employee_id === e.id)).map((e: any) => `${e.name} (joined ${e.join_date})`)
+      return NextResponse.json({ error: `Not employed on ${date}: ${names.join(', ')}` }, { status: 400 })
+    }
+    const gone = marks.filter((m: any) => {
+      const e = (emps || []).find((x: any) => x.id === m.employee_id)
+      return e?.left_on && date > e.left_on
+    })
+    if (gone.length > 0) {
+      const names = (emps || []).filter((e: any) => gone.some((m: any) => m.employee_id === e.id)).map((e: any) => `${e.name} (left ${e.left_on})`)
       return NextResponse.json({ error: `Not employed on ${date}: ${names.join(', ')}` }, { status: 400 })
     }
     const valid = new Set((emps || []).map((e: any) => e.id))

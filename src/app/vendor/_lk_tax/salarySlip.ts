@@ -158,7 +158,7 @@ export function slipHtml(company: string, cycle: { from: string; to: string }, l
   return `
   <section class="slip">
     <div class="band">
-      <div><div class="co">${escapeHtml(company)}</div><div class="kind">SALARY SLIP</div></div>
+      <div><div class="co">${escapeHtml(company)}</div><div class="kind">SALARY SLIP${line.left_on ? ' · FINAL SETTLEMENT' : ''}</div>${line.left_on ? `<div class="sub">Last working day ${escapeHtml(String(line.left_on))}</div>` : ''}</div>
       <div class="cyc"><strong>${monthLabel}</strong>Cycle ${cycleText}</div>
     </div>
 

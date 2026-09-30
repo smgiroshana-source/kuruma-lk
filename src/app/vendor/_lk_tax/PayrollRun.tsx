@@ -57,6 +57,9 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
   const [payDate, setPayDate] = useState(colomboToday())
   const [payMethod, setPayMethod] = useState<'cash' | 'online' | 'owner'>('cash')
   const [showPay, setShowPay] = useState(false)
+  // Leaving this cycle: what to do with each loan balance the final pay
+  // doesn't cover (owner, 2026-09-30: asked per case, mostly written off)
+  const [loanDecisions, setLoanDecisions] = useState<Record<string, 'write_off' | 'keep'>>({})
   const [dirty, setDirty] = useState(false)
   // What moved since the draft was saved — loans, attendance, advances
   const [draftChanges, setDraftChanges] = useState<string[]>([])
@@ -118,6 +121,11 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
 
   const needsAttention = lines.filter(l => (l.components || []).some((c: any) => c.needsInput))
 
+  // Final settlements: loan balance left after what this pay takes off it
+  const uncovered = lines.filter(l => l.left_on).flatMap(l => (l.components || [])
+    .filter((c: any) => c.kind === 'loan' && c.loan_id && r0(c.balance) - r0(c.amount) > 0)
+    .map((c: any) => ({ loan_id: c.loan_id as string, name: l.employee_name as string, left: r0(c.balance) - r0(c.amount) })))
+
   async function post(body: any, okMsg: string) {
     setBusy(true)
     try {
@@ -138,7 +146,9 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
   async function markPaid() {
     if (!run?.id) { showToast('Save the draft first'); return }
     setShowPay(false)
-    await post({ action: 'mark_paid', runId: run.id, paid_date: payDate, payment_method: payMethod },
+    const loan_remainders: Record<string, string> = {}
+    for (const u of uncovered) loan_remainders[u.loan_id] = loanDecisions[u.loan_id] || 'write_off'
+    await post({ action: 'mark_paid', runId: run.id, paid_date: payDate, payment_method: payMethod, loan_remainders },
       `✅ Paid — ${rs(totals.net)} recorded as salaries`)
   }
 
@@ -271,7 +281,10 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
                     className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
                     <span className="text-slate-300 text-xs w-3">{isOpen ? '▾' : '▸'}</span>
                     <span className="flex-1 min-w-0">
-                      <span className="block text-sm font-bold text-slate-800 truncate">{l.employee_name}</span>
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm font-bold text-slate-800 truncate">{l.employee_name}</span>
+                        {l.left_on && <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">FINAL · left {l.left_on}</span>}
+                      </span>
                       <span className="block text-[11px] text-slate-400">
                         {l.branch} · {Number(l.payable_days)} day{Number(l.payable_days) !== 1 ? 's' : ''} payable
                         {Number(l.days_absent) > 0 && <span className="text-red-500"> · {Number(l.days_absent)} absent</span>}
@@ -423,6 +436,29 @@ export default function PayrollRun({ showToast, vendorName, initialPeriod }: { s
               <p className="text-[11px] text-slate-500 mb-2">
                 {rs(totals.net)} is booked as the shop&apos;s salary cost, paid by you personally. The drawer and bank are not touched, and Cash Flow shows it separately.
               </p>
+            )}
+
+            {uncovered.length > 0 && (
+              <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-3 py-2.5 mt-3">
+                <p className="text-xs font-black text-amber-900 mb-1">Loan left after the final pay</p>
+                {uncovered.map(u => {
+                  const d = loanDecisions[u.loan_id] || 'write_off'
+                  return (
+                    <div key={u.loan_id} className="py-1">
+                      <p className="text-[11px] font-bold text-slate-800">{u.name} — {rs(u.left)} not covered</p>
+                      <div className="flex gap-3 mt-0.5">
+                        {([['write_off', 'Write off'], ['keep', 'Keep as owed']] as const).map(([v, t]) => (
+                          <label key={v} className="flex items-center gap-1 text-[11px] text-slate-700 cursor-pointer">
+                            <input type="radio" name={`loan-${u.loan_id}`} checked={d === v}
+                              onChange={() => setLoanDecisions(x => ({ ...x, [u.loan_id]: v }))} />{t}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                <p className="text-[10px] text-amber-800 mt-1">Write off = a loss in the Profit Report. Keep = stays on their loan as money they owe.</p>
+              </div>
             )}
 
             <div className="flex gap-2 mt-4">

@@ -13,6 +13,7 @@ import { compressImage } from '@/lib/compressImage'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { advanceSettledOutsideSystem } from '@/lib/payrollStart'
 import PayrollRun from './PayrollRun'
+import StaffLeaving from './StaffLeaving'
 import StaffLoans from './StaffLoans'
 import StaffLogins from '../_shared/StaffLogins'
 
@@ -25,7 +26,11 @@ type Employee = {
   id: string; name: string; nic: string | null; phone: string | null; address: string | null
   branch: 'shop' | 'workshop'; join_date: string | null; pay_type: string; active: boolean
   pay_items: PayItem[]
+  // Leaving (2026-09-30): last working day and why
+  left_on?: string | null; leave_reason?: string | null; leave_note?: string | null
 }
+// On the books on this day: joined by then, not yet past their last day
+const employedOn = (e: Employee, d: string) => e.active && !(e.join_date && d < e.join_date) && !(e.left_on && d > e.left_on)
 
 const PAY_PRESETS: Omit<PayItem, 'visible_to_office'>[] = [
   { kind: 'base', label: 'Base salary', amount: '', unit: 'rs', period: 'monthly', half_day_policy: 'half' },
@@ -258,7 +263,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
 
   const saveAttendance = async () => {
     const marks = employees
-      .filter(e => e.active && attMarks[e.id] && !(e.join_date && attDate < e.join_date))
+      .filter(e => employedOn(e, attDate) && attMarks[e.id])
       .map(e => ({ employee_id: e.id, status: attMarks[e.id] }))
     if (marks.length === 0) { tt('⚠️ Mark at least one person'); return }
     setAttSaving(true)
@@ -308,7 +313,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
               <div key={e.id} className={`bg-white rounded-xl border p-4 ${e.active ? 'border-slate-200' : 'border-slate-100 opacity-50'}`}>
                 <div className="flex justify-between items-start">
                   <div>
-                    <div className="font-bold text-slate-800 flex items-center gap-2">{e.name} {branchChip(e.branch)}{!e.active && <span className="text-[10px] text-slate-400">INACTIVE</span>}</div>
+                    <div className="font-bold text-slate-800 flex items-center gap-2">{e.name} {branchChip(e.branch)}{!e.active && <span className="text-[10px] text-slate-400">{e.left_on ? `LEFT ${e.left_on}` : 'INACTIVE'}</span>}{e.active && e.left_on && <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">LEAVING {e.left_on}</span>}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{e.pay_type} · {e.phone || 'no phone'}{e.nic ? ` · ${e.nic}` : ''}</div>
                   </div>
                   <button onClick={() => setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })), _origItemCount: (e.pay_items || []).length, id_photos: Array.isArray((e as any).id_photos) ? [...(e as any).id_photos] : [] })}
@@ -410,10 +415,10 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
             <input type="date" value={attDate} max={colomboToday()} onChange={e => { setAttDate(e.target.value) }} className="px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-semibold outline-none focus:border-orange-400" />
             <span className="text-xs text-slate-400">Present / Half day / Absent — allowances follow these marks</span>
           </div>
-          {employees.filter(e => e.active && !(e.join_date && attDate < e.join_date)).length === 0 && (
+          {employees.filter(e => employedOn(e, attDate)).length === 0 && (
             <p className="text-sm text-slate-400 py-4 text-center">Nobody was employed on this date.</p>
           )}
-          {employees.filter(e => e.active && !(e.join_date && attDate < e.join_date)).map(e => (
+          {employees.filter(e => employedOn(e, attDate)).map(e => (
             <div key={e.id} className="flex items-center justify-between py-2.5 border-b border-slate-100">
               <div className="text-sm font-semibold text-slate-700 flex items-center gap-2">{e.name} {branchChip(e.branch)}</div>
               <div className="flex gap-1.5">
@@ -460,7 +465,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
             <div className="grid sm:grid-cols-4 gap-2">
               <select value={advEmp} onChange={e => setAdvEmp(e.target.value)} className="px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400">
                 <option value="">Select person…</option>
-                {employees.filter(e => e.active).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                {employees.filter(e => employedOn(e, colomboToday())).map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
               </select>
               <input type="number" inputMode="numeric" min="0" value={advAmt} onChange={e => setAdvAmt(e.target.value)} placeholder="Amount Rs." className="px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm font-mono font-bold outline-none focus:border-orange-400" />
               <select value={advSource} onChange={e => setAdvSource(e.target.value as any)} className="px-3 py-2.5 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400">
@@ -545,9 +550,13 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
               </div>
             </div>
             {editing.id && (
+              <StaffLeaving emp={employees.find(x => x.id === editing.id)} post={post} toast={tt}
+                onDone={() => { setEditing(null); load() }} />
+            )}
+            {editing.id && (
               <label className="flex items-center gap-2 mt-3 cursor-pointer">
                 <input type="checkbox" checked={editing.active} onChange={e => setEditing({ ...editing, active: e.target.checked })} className="rounded" />
-                <span className="text-sm text-slate-600">Active (uncheck when someone leaves — history is kept)</span>
+                <span className="text-sm text-slate-600">Active <span className="text-[11px] text-slate-400">— someone leaving: use Staff leaving above, so their final pay is done first</span></span>
               </label>
             )}
 

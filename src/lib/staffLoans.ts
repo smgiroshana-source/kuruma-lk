@@ -4,9 +4,12 @@
  * deducts in full on the next payday — a loan keeps a balance, and each PAID
  * payroll run records what came off it in staff_loan_repayments.
  *
- * Balance = amount − every repayment on record. Repayments exist only for
- * paid runs (written on payday, removed if the run is reopened), so the
- * balance is always what has actually come off the person's pay.
+ * Balance = amount − every repayment on record − any amount written off.
+ * Repayments exist only for paid runs (written on payday, removed if the run
+ * is reopened), so the balance is always what has actually come off the
+ * person's pay. A write-off happens when someone leaves and their final pay
+ * can't cover the loan (owner, 2026-09-30: decided case by case, mostly
+ * written off); it too belongs to a payday and goes if that run is reopened.
  */
 
 type Admin = any
@@ -21,6 +24,7 @@ export type LoanWithBalance = {
   note: string | null
   expense_id: string | null
   repaid: number
+  written_off: number
   balance: number
   repayment_count: number
 }
@@ -40,10 +44,11 @@ export async function loansWithBalance(admin: Admin, vendorId: string, employeeI
   return loans.map((l: any) => {
     const mine = (reps || []).filter((r: any) => r.loan_id === l.id)
     const repaid = mine.reduce((s: number, r: any) => s + Math.round(Number(r.amount) || 0), 0)
+    const writtenOff = Math.round(Number(l.written_off_amount) || 0)
     return {
       id: l.id, employee_id: l.employee_id, amount: Math.round(l.amount), instalment: Math.round(l.instalment),
       date: l.date, source: l.source, note: l.note, expense_id: l.expense_id,
-      repaid, balance: Math.max(0, Math.round(l.amount) - repaid), repayment_count: mine.length,
+      repaid, written_off: writtenOff, balance: Math.max(0, Math.round(l.amount) - repaid - writtenOff), repayment_count: mine.length,
     }
   })
 }

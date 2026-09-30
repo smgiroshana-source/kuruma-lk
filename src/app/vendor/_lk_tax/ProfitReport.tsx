@@ -137,6 +137,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
     const CAT_LABEL: Record<string, string> = {
       bank_charges: 'Bank charges (card machine fees)',
       supplier_return_loss: 'Supplier return loss',
+      staff_loan_writeoff: 'Staff loans written off (staff who left)',
       petty_cash: 'Petty cash',
     }
     const catLabel = (c: string) => CAT_LABEL[c] || (c ? c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, ' ') : 'Other')

@@ -80,6 +80,8 @@ const CATEGORY_LABELS: Record<string, string> = {
   utilities: 'Utilities',
   fuel: 'Fuel',
   bank_charges: 'Bank Charges',
+  staff_loan_writeoff: 'Staff loan written off',
+  supplier_return_loss: 'Supplier return loss',
   tax: 'Tax',
   petty_cash: 'Petty Cash',
   consumables: 'Consumables',
