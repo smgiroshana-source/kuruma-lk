@@ -139,7 +139,7 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
           <tr><td><strong>Output VAT</strong> (invoices net of CRNs)</td><td style="text-align:right">Rs.${d.outputVat.toLocaleString()}</td></tr>
           <tr><td>&nbsp;&nbsp;Net taxable sales</td><td style="text-align:right">Rs.${d.outputNetSales.toLocaleString()}</td></tr>
           <tr><td>&nbsp;&nbsp;Invoices: ${d.invoiceCount} | Credit notes: ${d.crnCount}</td><td></td></tr>
-          <tr><td><strong>Input VAT</strong> (from posted GRNs)</td><td style="text-align:right">Rs.${d.inputVat.toLocaleString()}</td></tr>
+          <tr><td><strong>Input VAT</strong> (as printed on supplier tax invoices — same as the Filing Centre)</td><td style="text-align:right">Rs.${d.inputVat.toLocaleString()}</td></tr>
           <tr style="font-size:14px;font-weight:bold;background:#f0f0f0"><td>Net VAT Payable</td><td style="text-align:right;${netPayableStyle}">Rs.${Math.abs(d.netPayable).toLocaleString()}${d.netPayable < 0 ? ' (credit)' : ''}</td></tr>
         </tbody>
       </table>`
@@ -570,11 +570,18 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
               </div>
               {/* Input VAT block */}
               <div className="bg-slate-50 rounded-xl p-4">
-                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Input VAT (from posted GRNs)</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Input VAT (as printed — same as the Filing Centre)</p>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-500">Input VAT claimed this period</span>
                   <span className="font-bold text-green-700">Rs.{d.inputVat.toLocaleString()}</span>
                 </div>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  stock Rs.{(d.inputVatLocal || 0).toLocaleString()} · overheads Rs.{(d.inputVatExpense || 0).toLocaleString()} · imports Rs.{(d.inputVatImport || 0).toLocaleString()}
+                  {(d.supplierCrnVat || 0) > 0 && <> · less supplier credit notes Rs.{d.supplierCrnVat.toLocaleString()}</>}
+                </p>
+                {(d.notClaimableVat || 0) > 0 && (
+                  <p className="text-[10px] text-amber-700 mt-0.5">Rs.{d.notClaimableVat.toLocaleString()} not counted — tax invoice details still missing (see the Filing Centre)</p>
+                )}
                 {(d.availableCarryForward || 0) > 0 && (
                   <div className="flex justify-between text-xs mt-1.5 pt-1.5 border-t border-slate-200">
                     <span className="text-purple-600">Held back for later months</span>

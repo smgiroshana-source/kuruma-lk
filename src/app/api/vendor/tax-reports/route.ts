@@ -5,6 +5,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { resolveBranch } from '@/lib/branchScope'
 import { loadRateHistory, rateAsOf } from '@/lib/taxRates'
+import { round2, exactOr } from '@/lib/money2'
+import { missingVatPaperwork } from '@/lib/vatPaperwork'
 
 // Month bucket in the Colombo calendar — slicing the raw UTC timestamp bins
 // late-night (pre-05:30) transactions into the previous month.
@@ -566,65 +568,82 @@ export async function GET(req: NextRequest) {
     const outputTotal    = validInvoices.reduce((s: number, r: any) => s + parseInt(r.total || 0), 0)
                          - countedCns.reduce((s: number, r: any) => s + parseInt(r.total || 0), 0)
 
-    // ── Input VAT: posted GRNs from VAT-registered suppliers only ──
-    // supplier_vat_registered=false GRNs are excluded — those invoices are not
-    // valid tax invoices and the IRD will disallow the claim.
-    // supplier_vat_registered=null means legacy GRN (created before the column existed) —
-    // included with a conservative assumption; accountant should verify those manually.
-    // Input VAT is counted by the period it is CLAIMED in, not the purchase
-    // month — credits can be carried forward (12 months local / 24 imports) to
-    // avoid a refund position. Wide window, then bucket by claim period.
+    // ── Input VAT — the Filing Centre's own rules (owner, 2026-09-30) ──
+    // This summary and the Filing Centre (/api/vendor/vat-filing) disagreed —
+    // Rs.190 vs Rs.186 payable for Sep 2026 — because this one added the book
+    // VAT per GRN in whole rupees. Now it takes each credit exactly as the
+    // Filing Centre does: the VAT printed on the supplier's invoice where
+    // recorded (else the book figure); a local GRN only once its tax-invoice
+    // details are on record (missingVatPaperwork); overheads with a tax
+    // invoice; import Cusdecs; each by its claim period; supplier credit notes
+    // with VAT reduce it. Summed to the cent, shown to the rupee.
     const sumWindowStart = new Date(new Date(fromTs).getTime() - 800 * 86400000).toISOString()
-    // grns has no is_import column (imports are the GRN-I series); asking for it
-    // failed the whole query and the summary showed input VAT as Rs.0 (owner,
-    // 2026-09-30). A failed read now says so instead of reading as nothing.
-    const { data: grns, error: sumGrnErr } = await admin
-      .from('grns')
-      .select('input_vat, supplier_vat_registered, received_at, vat_claim_period, grn_series')
-      .eq('vendor_id', vendor.id)
-      .eq('status', 'posted')
-      .gt('input_vat', 0)
-      .gte('received_at', sumWindowStart)
-      .lte('received_at', toTs)
-    if (sumGrnErr) return NextResponse.json({ error: 'Could not read the GRNs: ' + sumGrnErr.message }, { status: 500 })
-
     const sumFromMonth = from.slice(0, 7)
     const sumToMonth = to.slice(0, 7)
-    const claimMonthOf = (g: any) => g.vat_claim_period || colomboMonth(g.received_at)
-    const claimableGrns = (grns || []).filter((g: any) => g.supplier_vat_registered !== false)   // exclude known non-VAT suppliers
-    const claimedThisPeriod = claimableGrns.filter((g: any) => {
-      const cm = claimMonthOf(g)
-      return cm >= sumFromMonth && cm <= sumToMonth
-    })
-    const inputVatLocal = claimedThisPeriod.reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0)
+    const inWindow = (m: string) => m >= sumFromMonth && m <= sumToMonth
+    const [{ data: grns, error: sumGrnErr }, { data: sumExpenses, error: sumExpErr }, { data: sumImports, error: sumImpErr }] = await Promise.all([
+      admin.from('grns')
+        .select('input_vat, doc_vat, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, supplier_tin, tax_invoice_confirmed, received_at, vat_claim_period, grn_series')
+        .eq('vendor_id', vendor.id).eq('status', 'posted').gt('input_vat', 0)
+        .gte('received_at', sumWindowStart).lte('received_at', toTs),
+      admin.from('expenses')
+        .select('input_vat, doc_vat, expense_date, supplier_invoice_date, vat_claim_period')
+        .eq('vendor_id', vendor.id).gt('input_vat', 0)
+        .gte('expense_date', sumWindowStart.slice(0, 10)).lte('expense_date', to),
+      admin.from('import_vat_entries')
+        .select('vat_upfront, vat_deferred, disallowed_vat, doc_vat_upfront, doc_vat_deferred, doc_disallowed_vat, cusdec_date, vat_claim_period')
+        .eq('vendor_id', vendor.id)
+        .gte('cusdec_date', sumWindowStart.slice(0, 10)).lte('cusdec_date', to),
+    ])
+    const readErr = sumGrnErr || sumExpErr || sumImpErr
+    if (readErr) return NextResponse.json({ error: 'Could not read the input credits: ' + readErr.message }, { status: 500 })
 
-    // Import VAT (Schedule 03) claimed in this period
-    const { data: sumImports } = await admin
-      .from('import_vat_entries')
-      .select('vat_upfront, vat_deferred, disallowed_vat, cusdec_date, vat_claim_period')
-      .eq('vendor_id', vendor.id)
-      .gte('cusdec_date', sumWindowStart.slice(0, 10))
-      .lte('cusdec_date', to)
+    const registered = (grns || []).filter((g: any) => g.supplier_vat_registered !== false)
+    const grnClaimMonth = (g: any) => g.vat_claim_period || colomboMonth(g.received_at)
+    // Not yet a credit: no tax invoice details on record (the Filing Centre's "Not claimable yet")
+    const grnClaimable = registered.filter((g: any) => missingVatPaperwork(g).length === 0)
+    const inputVatLocalExact = round2(grnClaimable.filter((g: any) => inWindow(grnClaimMonth(g)))
+      .reduce((t: number, g: any) => t + exactOr(g.doc_vat, g.input_vat), 0))
+    const expClaimMonth = (e: any) => e.vat_claim_period || String(e.supplier_invoice_date || e.expense_date).slice(0, 7)
+    const inputVatExpenseExact = round2((sumExpenses || []).filter((e: any) => inWindow(expClaimMonth(e)))
+      .reduce((t: number, e: any) => t + exactOr(e.doc_vat, e.input_vat), 0))
     const importClaimMonth = (im: any) => im.vat_claim_period || String(im.cusdec_date).slice(0, 7)
-    const importClaimable = (im: any) => parseInt(im.vat_upfront || 0) + parseInt(im.vat_deferred || 0) - parseInt(im.disallowed_vat || 0)
-    const inputVatImport = (sumImports || [])
-      .filter((im: any) => { const cm = importClaimMonth(im); return cm >= sumFromMonth && cm <= sumToMonth })
-      .reduce((s: number, im: any) => s + importClaimable(im), 0)
-    const importCarryForward = (sumImports || [])
-      .filter((im: any) => importClaimMonth(im) > sumToMonth)
-      .reduce((s: number, im: any) => s + importClaimable(im), 0)
+    const importClaimable = (im: any) => round2(exactOr(im.doc_vat_upfront, im.vat_upfront) + exactOr(im.doc_vat_deferred, im.vat_deferred) - exactOr(im.doc_disallowed_vat, im.disallowed_vat))
+    const inputVatImportExact = round2((sumImports || []).filter((im: any) => inWindow(importClaimMonth(im)))
+      .reduce((t: number, im: any) => t + importClaimable(im), 0))
 
-    const inputVat = inputVatLocal + inputVatImport
+    // Supplier credit notes carrying VAT, dated in the window, reduce input VAT
+    const [{ data: sumRets, error: sumRetErr }, { data: sumSupCns, error: sumSupCnErr }] = await Promise.all([
+      admin.from('supplier_returns').select('credit_vat, doc_credit_vat')
+        .eq('vendor_id', vendor.id).not('supplier_credit_note_no', 'is', null)
+        .gte('supplier_credit_note_date', from).lte('supplier_credit_note_date', to),
+      admin.from('supplier_credit_notes').select('vat_amount, doc_vat')
+        .eq('vendor_id', vendor.id).gt('vat_amount', 0)
+        .gte('credit_note_date', from).lte('credit_note_date', to),
+    ])
+    if (sumRetErr || sumSupCnErr) return NextResponse.json({ error: 'Could not read supplier credit notes: ' + (sumRetErr || sumSupCnErr)!.message }, { status: 500 })
+    const supplierCrnVatExact = round2((sumRets || []).reduce((t: number, r: any) => t + exactOr(r.doc_credit_vat, r.credit_vat), 0)
+      + (sumSupCns || []).reduce((t: number, c: any) => t + exactOr(c.doc_vat, c.vat_amount), 0))
+
+    const inputVatExact = round2(inputVatLocalExact + inputVatExpenseExact + inputVatImportExact - supplierCrnVatExact)
+    const inputVatLocal = Math.round(inputVatLocalExact)
+    const inputVatImport = Math.round(inputVatImportExact)
+    const inputVatExpense = Math.round(inputVatExpenseExact)
+    const supplierCrnVat = Math.round(supplierCrnVatExact)
+    const inputVat = Math.round(inputVatExact)
     // Credits deliberately held back for a future month — shown so the figure
     // can be topped up when output VAT is high enough to absorb them
-    const availableCarryForward = claimableGrns
-      .filter((g: any) => claimMonthOf(g) > sumToMonth)
-      .reduce((s: number, g: any) => s + parseInt(g.input_vat || 0), 0) + importCarryForward
+    const availableCarryForward = Math.round(
+      grnClaimable.filter((g: any) => grnClaimMonth(g) > sumToMonth).reduce((t: number, g: any) => t + exactOr(g.doc_vat, g.input_vat), 0)
+      + (sumImports || []).filter((im: any) => importClaimMonth(im) > sumToMonth).reduce((t: number, im: any) => t + importClaimable(im), 0))
     // Legacy GRNs (created before the VAT-registered snapshot existed) are included
     // in inputVat but flagged so the accountant can verify them manually.
-    const legacyCount = claimedThisPeriod.filter((g: any) => g.supplier_vat_registered == null).length
+    const legacyCount = grnClaimable.filter((g: any) => inWindow(grnClaimMonth(g)) && g.supplier_vat_registered == null).length
+    // Waiting on tax-invoice details — not in the figure, as in the Filing Centre
+    const notClaimableVat = Math.round(registered.filter((g: any) => missingVatPaperwork(g).length > 0 && inWindow(grnClaimMonth(g)))
+      .reduce((t: number, g: any) => t + exactOr(g.doc_vat, g.input_vat), 0))
 
-    const netPayable = outputVat - inputVat
+    const netPayable = Math.round(round2(outputVat - inputVatExact))
 
     return NextResponse.json({
       outputVat,
@@ -633,6 +652,9 @@ export async function GET(req: NextRequest) {
       inputVat,
       inputVatLocal,
       inputVatImport,
+      inputVatExpense,
+      supplierCrnVat,
+      notClaimableVat,
       availableCarryForward,
       legacyCount,
       netPayable,
