@@ -50,7 +50,7 @@ export default function SupplierPayModal({ amount, onClose, onSaved, showToast }
       const j = await (await fetch('/api/vendor/suppliers')).json()
       const list = (j.suppliers || []).filter((s: any) => Number(s.payable_now || 0) > 0 || Number(s.cn_expected || 0) > 0)
       // Overdue first, then whoever is due soonest
-      list.sort((a: any, b: any) => (Number(b.overdue_amount || 0) > 0 ? 1 : 0) - (Number(a.overdue_amount || 0) > 0 ? 1 : 0)
+      list.sort((a: any, b: any) => (Number(b.overdue_trading || 0) > 0 ? 1 : 0) - (Number(a.overdue_trading || 0) > 0 ? 1 : 0)
         || String(a.next_due || '9999').localeCompare(String(b.next_due || '9999')))
       setSuppliers(list)
     } catch { showToast('Could not load suppliers') }
@@ -191,9 +191,9 @@ export default function SupplierPayModal({ amount, onClose, onSaved, showToast }
                 <p className="text-[10px] font-black uppercase tracking-wider text-orange-800">To pay</p>
                 <p className="text-lg font-black text-orange-900">{formatRs(sum('payable_now'))}</p>
               </div>
-              <div className={`rounded-xl border px-3 py-2 ${sum('overdue_amount') > 0 ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
-                <p className={`text-[10px] font-black uppercase tracking-wider ${sum('overdue_amount') > 0 ? 'text-red-700' : 'text-slate-500'}`}>Overdue</p>
-                <p className={`text-lg font-black ${sum('overdue_amount') > 0 ? 'text-red-700' : 'text-slate-800'}`}>{formatRs(sum('overdue_amount'))}</p>
+              <div className={`rounded-xl border px-3 py-2 ${sum('overdue_trading') > 0 ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+                <p className={`text-[10px] font-black uppercase tracking-wider ${sum('overdue_trading') > 0 ? 'text-red-700' : 'text-slate-500'}`}>Overdue</p>
+                <p className={`text-lg font-black ${sum('overdue_trading') > 0 ? 'text-red-700' : 'text-slate-800'}`}>{formatRs(sum('overdue_trading'))}</p>
               </div>
               {cnTotal > 0 && (
                 <div className="rounded-xl bg-sky-50 border border-sky-200 px-3 py-2">
@@ -211,7 +211,7 @@ export default function SupplierPayModal({ amount, onClose, onSaved, showToast }
             ) : (
               <div className="space-y-2 max-h-[55vh] overflow-y-auto">
                 {shown.map(s => {
-                  const overdue = Number(s.overdue_amount || 0), cn = Number(s.cn_expected || 0), pre = Number(s.advance_balance || 0)
+                  const overdue = Number(s.overdue_trading || 0), cn = Number(s.cn_expected || 0), pre = Number(s.advance_balance || 0)
                   return (
                     <button key={s.id} onClick={() => openSupplier(s)}
                       className="w-full text-left rounded-xl border-2 border-slate-200 hover:border-orange-400 px-3.5 py-3 flex items-center gap-3 transition">
@@ -276,7 +276,8 @@ export default function SupplierPayModal({ amount, onClose, onSaved, showToast }
                   const payable = payableOf(b), cn = Math.min(Number(b.cn_expected_amount || 0), owedOf(b))
                   const blocked = payable <= 0
                   const on = picked.includes(b.id)
-                  const overdue = payable > 0 && b.due_date && b.due_date < todayStr()
+                  // An opening balance carries no real due date — never "overdue"
+                  const overdue = payable > 0 && b.invoice_no !== 'OPENING-BALANCE' && b.due_date && b.due_date < todayStr()
                   const partPaid = Number(b.amount_paid || 0) + Number(b.credit_total || 0) > 0
                   return (
                     <div key={b.id} className={`rounded-xl border-2 px-3 py-2.5 ${on ? 'border-orange-500 bg-orange-50' : blocked ? 'border-sky-200 bg-sky-50/50' : 'border-slate-200'}`}>

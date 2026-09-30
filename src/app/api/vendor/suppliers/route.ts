@@ -63,13 +63,17 @@ export async function GET() {
     cn_expected_since: string | null
     bill_count: number
     next_due: string | null
+    // Overdue leaving out opening balances — what was owed when the system
+    // started carries no real due date, so the dashboard never counts it
+    // (same rule as Needs Attention in api/vendor/data). The pay popup uses this.
+    overdue_trading: number
   }
   const agg: Record<string, InvoiceAgg> = {}
 
   for (const inv of (invoices || [])) {
     const sid = inv.supplier_id as string
     if (!agg[sid]) {
-      agg[sid] = { total_owed: 0, overdue_count: 0, overdue_amount: 0, oldest_overdue_days: 0, payable_now: 0, cn_expected: 0, cn_expected_since: null, bill_count: 0, next_due: null }
+      agg[sid] = { total_owed: 0, overdue_count: 0, overdue_amount: 0, oldest_overdue_days: 0, payable_now: 0, cn_expected: 0, cn_expected_since: null, bill_count: 0, next_due: null, overdue_trading: 0 }
     }
     // Supplier credit notes settle a payable without any cash moving, so they
     // count against what is owed exactly as a payment does.
@@ -89,6 +93,7 @@ export async function GET() {
     if (payable > 0 && inv.due_date && String(inv.due_date) < today.toISOString().slice(0, 10)) {
       agg[sid].overdue_count += 1
       agg[sid].overdue_amount += payable
+      if ((inv as any).invoice_no !== 'OPENING-BALANCE') agg[sid].overdue_trading += payable
       const dueDate = new Date(inv.due_date as string)
       dueDate.setHours(0, 0, 0, 0)
       const diffDays = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24))
@@ -105,7 +110,7 @@ export async function GET() {
       overdue_count: 0,
       overdue_amount: 0,
       oldest_overdue_days: 0,
-      payable_now: 0, cn_expected: 0, cn_expected_since: null, bill_count: 0, next_due: null,
+      payable_now: 0, cn_expected: 0, cn_expected_since: null, bill_count: 0, next_due: null, overdue_trading: 0,
     }
     return { ...s, ...totals }
   })
