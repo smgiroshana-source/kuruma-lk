@@ -68,6 +68,9 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
 
   // Employee editor
   const [editing, setEditing] = useState<any>(null) // null | {employee fields + pay_items + id_photos}
+  // Someone who left coming back: the card asks for the new start date
+  const [rehire, setRehire] = useState<{ id: string; date: string } | null>(null)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   // Scheduled salary rises — "From 2027 Apr salary 60,000" off the salary sheet
   const [raises, setRaises] = useState<any[]>([])
   const [raiseFor, setRaiseFor] = useState<any>(null)
@@ -316,7 +319,22 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
                     <div className="font-bold text-slate-800 flex items-center gap-2">{e.name} {branchChip(e.branch)}{!e.active && <span className="text-[10px] text-slate-400">{e.left_on ? `LEFT ${e.left_on}` : 'INACTIVE'}</span>}{e.active && e.left_on && <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">LEAVING {e.left_on}</span>}</div>
                     <div className="text-xs text-slate-500 mt-0.5">{e.pay_type} · {e.phone || 'no phone'}{e.nic ? ` · ${e.nic}` : ''}</div>
                   </div>
-                  <button onClick={() => setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })), _origItemCount: (e.pay_items || []).length, id_photos: Array.isArray((e as any).id_photos) ? [...(e as any).id_photos] : [] })}
+                  {!e.active && (
+                    rehire?.id === e.id ? (
+                      <span className="flex items-center gap-1.5 mr-2">
+                        <input type="date" value={rehire.date} min={e.left_on || undefined} onChange={ev => setRehire({ id: e.id, date: ev.target.value })}
+                          className="px-2 py-1 rounded-lg border-2 border-slate-200 text-xs outline-none focus:border-orange-400" aria-label="New start date" />
+                        <button onClick={async () => {
+                          try { await post({ action: 'rehire', employee_id: e.id, join_date: rehire.date }); tt(`✅ ${e.name} is back from ${rehire.date}`); setRehire(null); load() }
+                          catch (err: any) { tt('❌ ' + err.message) }
+                        }} className="text-xs font-bold text-emerald-600">Confirm</button>
+                        <button onClick={() => setRehire(null)} className="text-xs font-bold text-slate-400">✕</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setRehire({ id: e.id, date: colomboToday() })} className="text-xs font-bold text-emerald-600 hover:text-emerald-700 mr-3">Rehire</button>
+                    )
+                  )}
+                  <button onClick={() => { setConfirmRemove(false); setEditing({ id: e.id, name: e.name, nic: e.nic || '', phone: e.phone || '', address: e.address || '', branch: e.branch, join_date: e.join_date || '', pay_type: e.pay_type, active: e.active, pay_items: (e.pay_items || []).map(i => ({ ...i })), _origItemCount: (e.pay_items || []).length, id_photos: Array.isArray((e as any).id_photos) ? [...(e as any).id_photos] : [] }) }}
                     className="text-xs font-bold text-orange-500 hover:text-orange-600">Edit</button>
                 </div>
                 {isOwner && (() => {
@@ -554,10 +572,18 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
                 onDone={() => { setEditing(null); load() }} />
             )}
             {editing.id && (
-              <label className="flex items-center gap-2 mt-3 cursor-pointer">
-                <input type="checkbox" checked={editing.active} onChange={e => setEditing({ ...editing, active: e.target.checked })} className="rounded" />
-                <span className="text-sm text-slate-600">Active <span className="text-[11px] text-slate-400">— someone leaving: use Staff leaving above, so their final pay is done first</span></span>
-              </label>
+              <div className="mt-2 text-right">
+                {!confirmRemove
+                  ? <button onClick={() => setConfirmRemove(true)} className="text-[11px] font-semibold text-slate-400 underline">Registered by mistake?</button>
+                  : <span className="inline-flex items-center gap-2 text-[11px]">
+                      <span className="text-slate-600">Remove this record for good? Only possible if nothing has been recorded for them yet.</span>
+                      <button onClick={async () => {
+                        try { await post({ action: 'remove_mistake', employee_id: editing.id }); tt(`${editing.name} removed`); setConfirmRemove(false); setEditing(null); load() }
+                        catch (e: any) { tt('❌ ' + e.message); setConfirmRemove(false) }
+                      }} className="font-bold text-red-600 underline">Remove</button>
+                      <button onClick={() => setConfirmRemove(false)} className="font-bold text-slate-500 underline">Keep</button>
+                    </span>}
+              </div>
             )}
 
             {/* Pay items — OWNER ONLY */}

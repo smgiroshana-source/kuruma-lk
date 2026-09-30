@@ -188,8 +188,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
+  // ── Someone who left comes back (owner, 2026-09-30) ──
+  // The Active switch is gone: leaving is 'Staff leaving' (final pay first),
+  // coming back is this. The new start date replaces the old one; the old
+  // service stays in the audit trail and in every slip and payroll already paid.
+  if (action === 'rehire') {
+    const { employee_id, join_date: start } = body
+    const { data: emp } = await admin.from('employees').select('id, name, branch, active, join_date, left_on')
+      .eq('id', employee_id).eq('vendor_id', vendor.id).single()
+    if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    if (!inScope(emp.branch)) return NextResponse.json({ error: `Your access covers the ${scope} only` }, { status: 403 })
+    if (emp.active) return NextResponse.json({ error: `${emp.name} is already on the staff` }, { status: 400 })
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(start || ''))) return NextResponse.json({ error: 'The start date is required' }, { status: 400 })
+    if (emp.left_on && start <= emp.left_on) return NextResponse.json({ error: `${emp.name} left on ${emp.left_on} — the new start must be after that` }, { status: 400 })
+    await admin.from('employees').update({
+      active: true, join_date: start, left_on: null, leave_reason: null, leave_note: null, updated_at: new Date().toISOString(),
+    }).eq('id', emp.id)
+    audit(admin, vendor.id, email, 'rehired', emp.id, { name: emp.name, start, previous_join: emp.join_date, previous_left: emp.left_on })
+    return NextResponse.json({ ok: true })
+  }
+
+  // ── A record made by mistake (duplicate, never started) ──
+  // Only while nothing real hangs off it: once there is attendance, an
+  // advance, a loan or a payroll line, it is a person's history and stays.
+  if (action === 'remove_mistake') {
+    const { employee_id } = body
+    const { data: emp } = await admin.from('employees').select('id, name, branch')
+      .eq('id', employee_id).eq('vendor_id', vendor.id).single()
+    if (!emp) return NextResponse.json({ error: 'Employee not found' }, { status: 404 })
+    if (!inScope(emp.branch)) return NextResponse.json({ error: `Your access covers the ${scope} only` }, { status: 403 })
+    const has = async (t: string) => ((await admin.from(t).select('id', { count: 'exact', head: true }).eq('employee_id', emp.id)).count || 0) > 0
+    const found: string[] = []
+    for (const [t, label] of [['staff_attendance', 'attendance'], ['staff_advances', 'advances'], ['staff_loans', 'a loan'], ['payroll_lines', 'payroll']] as const) {
+      if (await has(t)) found.push(label)
+    }
+    if (found.length) {
+      return NextResponse.json({ error: `${emp.name} already has ${found.join(', ')} on record, so this is real history and can't be removed. If they have left, use Staff leaving.` }, { status: 400 })
+    }
+    await admin.from('salary_increments').delete().eq('employee_id', emp.id)
+    await admin.from('employee_pay_items').delete().eq('employee_id', emp.id)
+    // The audit trail keeps its lines (they carry the name); only the link goes
+    await admin.from('staff_audit').update({ employee_id: null }).eq('employee_id', emp.id)
+    const { error } = await admin.from('employees').delete().eq('id', emp.id).eq('vendor_id', vendor.id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    audit(admin, vendor.id, email, 'removed_as_mistake', null, { name: emp.name })
+    return NextResponse.json({ ok: true })
+  }
+
   if (action === 'upsert_employee') {
-    const { id, name, nic, phone, address, branch, join_date, pay_type, active, id_photos } = body
+    const { id, name, nic, phone, address, branch, join_date, pay_type, id_photos } = body
     if (!name?.trim()) return NextResponse.json({ error: 'Name required' }, { status: 400 })
 
     // NIC identifies the person — required, and unique per vendor so the same
@@ -224,9 +271,12 @@ export async function POST(req: NextRequest) {
       branch: branch === 'workshop' ? 'workshop' : 'shop',
       join_date: join_date || null,
       pay_type: ['monthly', 'daily', 'contract'].includes(pay_type) ? pay_type : 'monthly',
-      active: active !== false,
       updated_at: new Date().toISOString(),
     }
+    // A new record starts on the staff. An existing one's Active state is
+    // never set from this form any more — only Staff leaving (after the final
+    // pay) and Rehire change it (owner, 2026-09-30)
+    if (!id) rec.active = true
     if (photoPaths !== undefined) rec.id_photos = photoPaths
     if (!id && (!photoPaths || photoPaths.length === 0)) {
       return NextResponse.json({ error: 'At least one ID copy photo is required' }, { status: 400 })
