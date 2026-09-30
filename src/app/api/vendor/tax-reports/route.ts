@@ -385,7 +385,7 @@ export async function GET(req: NextRequest) {
     const windowStart = new Date(new Date(fromTs).getTime() - 800 * 86400000).toISOString() // ~26 months back
     const { data: grns, error: grnsError } = await admin
       .from('grns')
-      .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, net_cost, input_vat, total_cost, vat_claim_period, is_import')
+      .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, net_cost, input_vat, total_cost, vat_claim_period, grn_series')
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
@@ -408,7 +408,7 @@ export async function GET(req: NextRequest) {
       const originMonth = colomboMonth(g.received_at)
       const claimPeriod = g.vat_claim_period || originMonth
       // Deadline: 12 months for local purchases, 24 for imports
-      const expiryMonth = addMonths(originMonth, g.is_import ? 24 : 12)
+      const expiryMonth = addMonths(originMonth, g.grn_series === 'I' ? 24 : 12)
       const monthsLeft = (() => {
         const [ey, em] = expiryMonth.split('-').map(Number)
         const [ny, nm] = nowMonth.split('-').map(Number)
@@ -419,7 +419,7 @@ export async function GET(req: NextRequest) {
         grnNumber: g.grn_number,
         receivedAt: g.received_at,
         originMonth, claimPeriod, expiryMonth, monthsLeft,
-        isImport: g.is_import === true,
+        isImport: g.grn_series === 'I',
         deferred: claimPeriod !== originMonth,
         supplierName: g.supplier_name || '—',
         supplierTin: g.supplier_tin || null,
@@ -575,14 +575,18 @@ export async function GET(req: NextRequest) {
     // month — credits can be carried forward (12 months local / 24 imports) to
     // avoid a refund position. Wide window, then bucket by claim period.
     const sumWindowStart = new Date(new Date(fromTs).getTime() - 800 * 86400000).toISOString()
-    const { data: grns } = await admin
+    // grns has no is_import column (imports are the GRN-I series); asking for it
+    // failed the whole query and the summary showed input VAT as Rs.0 (owner,
+    // 2026-09-30). A failed read now says so instead of reading as nothing.
+    const { data: grns, error: sumGrnErr } = await admin
       .from('grns')
-      .select('input_vat, supplier_vat_registered, received_at, vat_claim_period, is_import')
+      .select('input_vat, supplier_vat_registered, received_at, vat_claim_period, grn_series')
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
       .gte('received_at', sumWindowStart)
       .lte('received_at', toTs)
+    if (sumGrnErr) return NextResponse.json({ error: 'Could not read the GRNs: ' + sumGrnErr.message }, { status: 500 })
 
     const sumFromMonth = from.slice(0, 7)
     const sumToMonth = to.slice(0, 7)
@@ -762,11 +766,12 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = createAdminClient()
-  const { data: grns } = await admin
+  const { data: grns, error: grnReadErr } = await admin
     .from('grns')
-    .select('id, received_at, is_import, grn_number')
+    .select('id, received_at, grn_series, grn_number')
     .eq('vendor_id', vendor.id)
     .in('id', grnIds)
+  if (grnReadErr) return NextResponse.json({ error: 'Could not read the GRNs: ' + grnReadErr.message }, { status: 500 })
   if (!grns || grns.length === 0) return NextResponse.json({ error: 'No matching GRNs' }, { status: 404 })
 
   if (period) {
@@ -780,10 +785,10 @@ export async function POST(req: NextRequest) {
       if (period < originMonth) {
         return NextResponse.json({ error: `${g.grn_number}: a credit cannot be claimed before the purchase month (${originMonth})` }, { status: 400 })
       }
-      const limit = addMonths(originMonth, g.is_import ? 24 : 12)
+      const limit = addMonths(originMonth, g.grn_series === 'I' ? 24 : 12)
       if (period > limit) {
         return NextResponse.json({
-          error: `${g.grn_number}: ${period} is past the claim deadline (${limit}) — ${g.is_import ? 'imports: 24 months' : 'local purchases: 12 months'}`,
+          error: `${g.grn_number}: ${period} is past the claim deadline (${limit}) — ${g.grn_series === 'I' ? 'imports: 24 months' : 'local purchases: 12 months'}`,
         }, { status: 400 })
       }
     }
