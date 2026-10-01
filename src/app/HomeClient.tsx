@@ -121,7 +121,19 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
       const r = await fetch('/api/store')
       if (r.ok) {
         const j = await r.json()
-        setProducts(j.products); setVendors(j.vendors); setSynonyms(j.synonyms || [])
+        // The page's own rows are the fresher copy: every product edit rebuilds
+        // the page, while this feed sits in the edge cache for up to an hour.
+        // Keep the page's rows and take from the feed only the older products
+        // the page didn't load. A feed row inside the page's date range that
+        // the page doesn't have was sold out or hidden since — drop it. (A part
+        // marked Damaged read Reconditioned from the cached feed, 2026-10-01.)
+        // No extra download — same single cached feed as before.
+        const fresh = initialProducts
+        const have = new Set(fresh.map(p => p.id))
+        const oldest = fresh.length ? fresh[fresh.length - 1].created_at : null
+        const older = (j.products as typeof fresh).filter(p => !have.has(p.id) && (!oldest || p.created_at < oldest))
+        setProducts(fresh.length ? [...fresh, ...older] : j.products)
+        setVendors(j.vendors); setSynonyms(j.synonyms || [])
       }
     } catch {}
   })() }, [])

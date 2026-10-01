@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { revalidatePath } from 'next/cache'
 import sharp from 'sharp'
 
 export async function POST(req: NextRequest) {
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Only image files can be uploaded.' }, { status: 415 })
   }
 
-  const { data: product } = await admin.from('products').select('vendor_id').eq('id', productId).single()
+  const { data: product } = await admin.from('products').select('vendor_id, slug').eq('id', productId).single()
   if (!product || product.vendor_id !== vendor.id) return NextResponse.json({ error: 'Product not found' }, { status: 404 })
 
   const arrayBuffer = await file.arrayBuffer()
@@ -91,5 +92,11 @@ export async function POST(req: NextRequest) {
   }).select().single()
 
   if (dbError) return NextResponse.json({ error: 'DB save failed: ' + dbError.message }, { status: 500 })
+  // A damage photo is news to customers — refresh that one product page.
+  // Ordinary uploads don't (bulk imports send hundreds; that's ISR writes).
+  if (isDamage) {
+    if (product.slug) revalidatePath(`/product/${product.slug}`)
+    revalidatePath(`/product/${productId}`)
+  }
   return NextResponse.json({ success: true, image: imageRecord, url: urlData.publicUrl, message: 'Image uploaded' })
 }

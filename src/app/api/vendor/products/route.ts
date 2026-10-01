@@ -176,8 +176,14 @@ export async function POST(req: NextRequest) {
   if (['damage_info', 'record_damage', 'set_damage_photos', 'mark_repaired'].includes(action)) {
     const { productId } = body
     if (!productId) return NextResponse.json({ success: false, error: 'productId required' }, { status: 400 })
-    const { data: product } = await admin.from('products').select('id, vendor_id, sku, name, condition, description').eq('id', productId).single()
+    const { data: product } = await admin.from('products').select('id, vendor_id, sku, name, condition, description, slug').eq('id', productId).single()
     if (!product || product.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
+    // Customers see condition, notes and damage photos — refresh like any edit
+    const refreshStorefront = () => {
+      if (product.slug) revalidatePath(`/product/${product.slug}`)
+      revalidatePath(`/product/${productId}`)
+      revalidatePath('/')
+    }
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
 
     if (action === 'damage_info') {
@@ -195,6 +201,7 @@ export async function POST(req: NextRequest) {
       if (body.markDamaged !== false) patch.condition = 'Damaged'
       const { error } = await admin.from('products').update(patch).eq('id', productId).eq('vendor_id', vendor.id)
       if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      refreshStorefront()
       return NextResponse.json({ success: true })
     }
 
@@ -206,6 +213,7 @@ export async function POST(req: NextRequest) {
         .update(on ? { is_damage: true, damage_marked_at: new Date().toISOString(), damage_resolved_at: null } : { is_damage: false, damage_marked_at: null, damage_resolved_at: null })
         .in('id', ids).eq('product_id', productId)
       if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
+      refreshStorefront()
       return NextResponse.json({ success: true })
     }
 
@@ -222,6 +230,7 @@ export async function POST(req: NextRequest) {
       if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
       await admin.from('product_images').update({ damage_resolved_at: new Date().toISOString() })
         .eq('product_id', productId).eq('is_damage', true).is('damage_resolved_at', null)
+      refreshStorefront()
       return NextResponse.json({ success: true })
     }
   }
