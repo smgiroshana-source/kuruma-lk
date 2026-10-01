@@ -795,7 +795,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     </div>
   ) : null
 
-  const dropdownCls = "px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white w-full"
+  // min-w-0 + truncate: a long location name must not widen the page on a phone
+  const dropdownCls = "px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400 bg-white w-full min-w-0 truncate"
 
   return (
     <div>
@@ -1781,7 +1782,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       )}
 
       {/* ── STOCKTAKE (Stock Levels) ── */}
-      {stockMainView === 'stocktake' && (<div>
+      {stockMainView === 'stocktake' && (<div className="min-w-0 max-w-full overflow-x-hidden">
       {/* ── Mode toggle — horizontal scroll on narrow screens ── */}
       <div className="flex items-center gap-2 mb-5 overflow-x-auto pb-1">
         <button onClick={() => setStockView('browse')}
@@ -1808,7 +1809,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           {/* 4-level filter row */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
             <p className="text-xs font-bold text-slate-400 uppercase">Filter by Location</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 *:min-w-0">
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 mb-1">Store</label>
                 <select value={stockFilter.store} onChange={e => setStockFilter(f => ({...f, store: e.target.value, floor: '', sub1: '', sub2: ''}))} className={dropdownCls}>
@@ -1946,7 +1947,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           ) : (
           <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 mb-5">
             <p className="text-xs font-bold text-amber-800 uppercase mb-3">📍 I'm standing at this location</p>
-            <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="grid grid-cols-2 gap-2 mb-3 *:min-w-0">
               <div>
                 <label className="block text-[10px] font-bold text-amber-700 mb-1">Store</label>
                 <input value={assignLoc.store} onChange={e => setAssignLoc(l => ({...l, store: e.target.value}))}
