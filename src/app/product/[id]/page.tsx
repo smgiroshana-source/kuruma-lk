@@ -1,3 +1,4 @@
+import { storefrontImages } from '@/lib/damage'
 import type { Metadata } from 'next'
 import { safeJsonLd } from '@/lib/security'
 import { notFound, redirect } from 'next/navigation'
@@ -30,7 +31,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const admin = createAdminClient()
     const { data: product } = await findProduct(
       admin, id,
-      'name, description, price, show_price, category, condition, make, model, model_code, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order)'
+      'name, description, price, show_price, category, condition, make, model, model_code, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order, is_damage, damage_resolved_at)'
     )
 
     if (!product) {
@@ -40,7 +41,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       }
     }
 
-    const images = (product.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+    const images = storefrontImages(product.images as any[]).all
     const imageUrl = images[0]?.url || `${SITE_URL}/og-image.jpg`
     const vehicle = [product.make, product.model, product.year].filter(Boolean).join(' ')
     const vendorName = (product.vendor as any)?.name || ''
@@ -125,12 +126,12 @@ async function getProductJsonLd(idOrSlug: string) {
     const admin = createAdminClient()
     const { data: product } = await findProduct(
       admin, idOrSlug,
-      'name, description, price, show_price, category, condition, make, model, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order)'
+      'name, description, price, show_price, category, condition, make, model, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order, is_damage, damage_resolved_at)'
     )
 
     if (!product) return null
 
-    const images = (product.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+    const images = storefrontImages(product.images as any[]).all
     const imageUrls = images.map((img: any) => img.url)
     const vendorName = (product.vendor as any)?.name || 'kuruma.lk'
     const productSlug = (product as any).slug || idOrSlug

@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
   while (true) {
     const { data } = await admin
       .from('products')
-      .select('id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, cost, cost_vat_rate, cost_includes_vat, cost_is_estimate, price, quantity, min_stock_level, parent_product_id, show_price, is_active, vendor_id, created_at, loc_store, loc_floor, loc_sub1, loc_sub2, last_stock_confirmed_at, product_type, show_in_money_in, tyre_width, tyre_profile, tyre_rim, origin_country, images:product_images(id, url, sort_order)')
+      .select('id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, cost, cost_vat_rate, cost_includes_vat, cost_is_estimate, price, quantity, min_stock_level, parent_product_id, show_price, is_active, vendor_id, created_at, loc_store, loc_floor, loc_sub1, loc_sub2, last_stock_confirmed_at, product_type, show_in_money_in, tyre_width, tyre_profile, tyre_rim, origin_country, images:product_images(id, url, sort_order, is_damage, damage_resolved_at)')
       .eq('vendor_id', vendor.id)
       // created_at is NOT unique (bulk imports share a timestamp). Without a
       // unique tiebreaker, ties have no defined order across .range() batches,
@@ -145,7 +145,9 @@ export async function GET(req: NextRequest) {
     return out
   }
   products = products.map((p: any) => {
-    const sorted = (p.images || []).slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+    // A damage photo (2026-10-01) never leads: the product's own photos first
+    const sorted = (p.images || []).slice().sort((a: any, b: any) => (a.is_damage ? 1 : 0) - (b.is_damage ? 1 : 0) || (a.sort_order || 0) - (b.sort_order || 0))
+    const damagePhotos = (p.images || []).filter((i: any) => i.is_damage && !i.damage_resolved_at).length
     const range = costRange.get(p.id)
     return {
       ...compact(p),
@@ -154,6 +156,8 @@ export async function GET(req: NextRequest) {
       in_history: inHistory.has(p.id),
       images: sorted.slice(0, 1),
       image_count: sorted.length,
+      // Only when there are any — open (unrepaired) damage photos
+      ...(damagePhotos > 0 ? { damage_photos: damagePhotos } : {}),
       // Only present when the shelf genuinely spans more than one cost —
       // most products have exactly one layer and need nothing extra here.
       ...(range && range.min !== range.max ? { cost_min: range.min, cost_max: range.max, cost_layer_count: range.n } : {}),
