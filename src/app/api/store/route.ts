@@ -1,3 +1,4 @@
+import { storefrontImages } from '@/lib/damage'
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 
@@ -10,7 +11,7 @@ export async function GET() {
   const [productsRes, vendorsRes, synonymsRes] = await Promise.all([
     admin
       .from('products')
-      .select('id, name, sku, category, make, model, condition, price, show_price, quantity, vendor_id, created_at, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order)')
+      .select('id, name, sku, category, make, model, condition, price, show_price, quantity, vendor_id, created_at, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order, is_damage, damage_resolved_at)')
       .eq('is_active', true)
       .gt('quantity', 0)
       .order('created_at', { ascending: false })
@@ -30,9 +31,10 @@ export async function GET() {
   // Strip to only primary image per product to reduce payload size
   const products = (productsRes.data || []).map(p => ({
     ...p,
-    images: p.images
-      ? [p.images.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]].filter(Boolean)
-      : [],
+    // Cover = the product's own photo, never a damage photo; damage_photos
+    // drives the card's "Damage photos" tag (2026-10-01)
+    images: storefrontImages(p.images).cover ? [storefrontImages(p.images).cover] : [],
+    ...(storefrontImages(p.images).damage.length ? { damage_photos: storefrontImages(p.images).damage.length } : {}),
   }))
 
   const response = NextResponse.json({

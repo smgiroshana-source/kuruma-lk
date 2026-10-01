@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { thumbnail, medium, thumb64, imgFallback } from '@/lib/image'
 import ProductThumb, { showsThumb } from '@/components/ProductThumb'
+import { storefrontImages, damageNotes } from '@/lib/damage'
 
 const CONDITION_COLORS: Record<string, string> = {
   'Excellent': 'bg-emerald-100 text-emerald-700',
@@ -18,10 +19,14 @@ function formatPrice(price: number | null, showPrice: boolean) {
 }
 
 function getProductImage(product: any): string | null {
-  if (!product.images || product.images.length === 0) return null
-  const primary = product.images.find((img: any) => img.sort_order === 0)
-  return (primary || product.images[0])?.url || null
+  // Never a damage photo as the cover (2026-10-01)
+  return storefrontImages(product.images).cover?.url || null
 }
+
+// The DAMAGE tag on a damage photo
+const DamageTag = ({ small = false }: { small?: boolean }) => (
+  <span className={`absolute ${small ? 'left-0.5 bottom-0.5 text-[7px] px-1' : 'left-2 top-2 text-[10px] px-2 py-0.5'} font-black tracking-wide rounded bg-amber-500 text-white shadow pointer-events-none`}>DAMAGE</span>
+)
 
 export default function ProductDetailPage() {
   const params = useParams()
@@ -84,7 +89,8 @@ export default function ProductDetailPage() {
 
   function navigateImage(dir: number) {
     if (!product?.images) return
-    const len = product.images.length
+    const len = storefrontImages(product.images).all.length
+    if (!len) return
     const next = (activeImage + dir + len) % len
     setActiveImage(next)
     // Scroll to image on mobile
@@ -98,9 +104,10 @@ export default function ProductDetailPage() {
   function handleImageScroll() {
     if (!imageScrollRef.current || !product?.images) return
     const el = imageScrollRef.current
-    const imageWidth = el.scrollWidth / product.images.length
+    const n = storefrontImages(product.images).all.length || 1
+    const imageWidth = el.scrollWidth / n
     const idx = Math.round(el.scrollLeft / imageWidth)
-    if (idx !== activeImage && idx >= 0 && idx < product.images.length) setActiveImage(idx)
+    if (idx !== activeImage && idx >= 0 && idx < n) setActiveImage(idx)
   }
 
   if (loading) return (
@@ -130,7 +137,13 @@ export default function ProductDetailPage() {
     </div>
   )
 
-  const images = (product.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+  // Own photos first, then damage photos (tagged); repaired-damage photos never shown
+  const gallery = storefrontImages(product.images)
+  const images = gallery.all
+  const firstDamage = gallery.ordinary.length
+  const activeIsDamage = !!images[activeImage]?.is_damage
+  // What the damage is — the newest damage note, shown with a damage photo
+  const damageText = damageNotes(product.description).find(n => n.kind === 'damage')?.text || ''
   const vendor = product.vendor
 
   return (
@@ -144,7 +157,13 @@ export default function ProductDetailPage() {
             <button onClick={(e) => { e.stopPropagation(); navigateImage(-1) }} className="absolute left-2 top-1/2 -translate-y-1/2 text-white z-10 w-12 h-12 flex items-center justify-center bg-white/10 rounded-full active:bg-white/20 text-2xl font-bold">‹</button>
             <button onClick={(e) => { e.stopPropagation(); navigateImage(1) }} className="absolute right-2 top-1/2 -translate-y-1/2 text-white z-10 w-12 h-12 flex items-center justify-center bg-white/10 rounded-full active:bg-white/20 text-2xl font-bold">›</button>
           </>)}
-          <img src={images[activeImage]?.url} alt={product.name} className="max-w-[95vw] max-h-[85vh] object-contain" onClick={(e) => e.stopPropagation()} />
+          <img src={images[activeImage]?.url} alt={activeIsDamage ? `${product.name} — damage` : product.name} className="max-w-[95vw] max-h-[85vh] object-contain" onClick={(e) => e.stopPropagation()} />
+          {activeIsDamage && (
+            <div className="absolute top-3 left-3 right-16 text-white" onClick={(e) => e.stopPropagation()}>
+              <span className="inline-block text-[11px] font-black tracking-wide px-2 py-0.5 rounded bg-amber-500">DAMAGE</span>
+              {damageText && <p className="text-sm mt-1 drop-shadow">{damageText}</p>}
+            </div>
+          )}
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5">
             {images.map((_: any, i: number) => (
               <button key={i} onClick={(e) => { e.stopPropagation(); setActiveImage(i) }}
@@ -176,16 +195,20 @@ export default function ProductDetailPage() {
                   <div ref={imageScrollRef} onScroll={handleImageScroll}
                     className="flex overflow-x-auto snap-x snap-mandatory" style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}>
                     {images.map((img: any, i: number) => (
-                      <div key={img.id} className="w-full flex-shrink-0 snap-center aspect-square bg-white" onClick={() => setLightbox(true)}>
-                        <img src={medium(img.url)} alt={product.name} width={600} height={600} loading={i === 0 ? 'eager' : 'lazy'} onError={imgFallback} className="w-full h-full object-contain" />
+                      <div key={img.id} className="relative w-full flex-shrink-0 snap-center aspect-square bg-white" onClick={() => setLightbox(true)}>
+                        <img src={medium(img.url)} alt={img.is_damage ? `${product.name} — damage` : product.name} width={600} height={600} loading={i === 0 ? 'eager' : 'lazy'} onError={imgFallback} className="w-full h-full object-contain" />
+                        {img.is_damage && <DamageTag />}
+                        {img.is_damage && damageText && (
+                          <p className="absolute left-0 right-0 bottom-0 px-3 py-2 bg-black/55 text-white text-xs leading-snug">{damageText}</p>
+                        )}
                       </div>
                     ))}
                   </div>
                   {/* Dots */}
                   {images.length > 1 && (
                     <div className="flex justify-center gap-1.5 py-2 bg-white">
-                      {images.map((_: any, i: number) => (
-                        <span key={i} className={`h-1.5 rounded-full transition-all ${i === activeImage ? 'w-5 bg-orange-500' : 'w-1.5 bg-slate-300'}`} />
+                      {images.map((img: any, i: number) => (
+                        <span key={i} className={`h-1.5 rounded-full transition-all ${i === activeImage ? `w-5 ${img.is_damage ? 'bg-amber-500' : 'bg-orange-500'}` : img.is_damage ? 'w-1.5 bg-amber-300' : 'w-1.5 bg-slate-300'}`} />
                       ))}
                     </div>
                   )}
@@ -194,7 +217,11 @@ export default function ProductDetailPage() {
                 {/* Desktop: main image + thumbnails */}
                 <div className="hidden md:block">
                   <div className="relative bg-white rounded-2xl border border-slate-200 overflow-hidden cursor-zoom-in aspect-square" onClick={() => setLightbox(true)}>
-                    <img src={medium(images[activeImage]?.url)} alt={product.name} onError={imgFallback} className="w-full h-full object-contain" />
+                    <img src={medium(images[activeImage]?.url)} alt={activeIsDamage ? `${product.name} — damage` : product.name} onError={imgFallback} className="w-full h-full object-contain" />
+                    {activeIsDamage && <DamageTag />}
+                    {activeIsDamage && damageText && (
+                      <p className="absolute left-0 right-0 bottom-0 px-4 py-2.5 bg-black/55 text-white text-sm leading-snug">{damageText}</p>
+                    )}
                     {images.length > 1 && (<>
                       <button onClick={(e) => { e.stopPropagation(); navigateImage(-1) }} className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:bg-white text-lg font-bold">‹</button>
                       <button onClick={(e) => { e.stopPropagation(); navigateImage(1) }} className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:bg-white text-lg font-bold">›</button>
@@ -203,12 +230,16 @@ export default function ProductDetailPage() {
                   </div>
                   {images.length > 1 && (
                     <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
-                      {images.map((img: any, i: number) => (
-                        <button key={img.id} onClick={() => setActiveImage(i)}
-                          className={`w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition ${i === activeImage ? 'border-orange-500 shadow-md' : 'border-slate-200 hover:border-slate-400'}`}>
+                      {images.map((img: any, i: number) => (<Fragment key={img.id}>
+                        {i === firstDamage && gallery.damage.length > 0 && (
+                          <span className="flex-shrink-0 self-center text-[10px] font-black text-amber-700 uppercase leading-tight w-14 text-center">Damage photos ({gallery.damage.length})</span>
+                        )}
+                        <button onClick={() => setActiveImage(i)}
+                          className={`relative w-16 h-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition ${i === activeImage ? 'border-orange-500 shadow-md' : img.is_damage ? 'border-amber-300' : 'border-slate-200 hover:border-slate-400'}`}>
                           <img src={thumb64(img.url)} alt="" width={64} height={64} onError={imgFallback} className="w-full h-full object-cover" />
+                          {img.is_damage && <DamageTag small />}
                         </button>
-                      ))}
+                      </Fragment>))}
                     </div>
                   )}
                 </div>

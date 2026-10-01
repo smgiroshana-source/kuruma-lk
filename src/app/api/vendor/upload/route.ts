@@ -80,10 +80,14 @@ export async function POST(req: NextRequest) {
 
   const { data: urlData } = admin.storage.from('product-images').getPublicUrl(fileName)
 
+  // A damage photo (stock count's damage window, 2026-10-01) is flagged and
+  // goes after the product's own photos, so it never becomes the cover
+  const isDamage = formData.get('isDamage') === 'true'
   const { data: imageRecord, error: dbError } = await admin.from('product_images').insert({
     product_id: productId,
     url: urlData.publicUrl,
-    sort_order: 0,
+    sort_order: isDamage ? 1000 : 0,
+    ...(isDamage ? { is_damage: true, damage_marked_at: new Date().toISOString() } : {}),
   }).select().single()
 
   if (dbError) return NextResponse.json({ error: 'DB save failed: ' + dbError.message }, { status: 500 })

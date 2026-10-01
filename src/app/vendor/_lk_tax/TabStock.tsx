@@ -1909,10 +1909,16 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                         className="w-20 h-10 text-center font-bold text-lg border-2 rounded-xl outline-none focus:border-orange-400 border-slate-200 bg-white" />
                       <button onClick={() => setStockQtyEdits(prev => ({...prev, [p.id]: (prev[p.id] ?? p.quantity) + 1}))}
                         className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 font-bold text-2xl flex items-center justify-center active:bg-slate-200 select-none">+</button>
-                      <button onClick={() => setDamageProduct(p)}
-                        className="ml-auto h-10 px-3 rounded-xl border-2 border-amber-200 bg-amber-50 text-amber-700 font-bold text-xs active:bg-amber-100">
-                        ⚠ Damage
-                      </button>
+                      {/* Damaged, or damage on record: open its Details instead (2026-10-01) */}
+                      {(() => {
+                        const hasDamage = p.condition === 'Damaged' || (p.damage_photos || 0) > 0 || String(p.description || '').includes('⚠ DAMAGE (')
+                        return (
+                          <button onClick={() => setDamageProduct(p)}
+                            className={`ml-auto h-10 px-3 rounded-xl border-2 font-bold text-xs ${hasDamage ? 'border-amber-500 bg-amber-500 text-white active:bg-amber-600' : 'border-amber-200 bg-amber-50 text-amber-700 active:bg-amber-100'}`}>
+                            {hasDamage ? `⚠ Details${p.damage_photos ? ` · ${p.damage_photos}📷` : ''}` : '⚠ Damage'}
+                          </button>
+                        )
+                      })()}
                     </div>
                   </div>
                 )

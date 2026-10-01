@@ -1,3 +1,4 @@
+import { storefrontImages } from '@/lib/damage'
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
@@ -72,7 +73,7 @@ export default async function TyreSizePage({ params }: Props) {
 
   const admin = createAdminClient()
   const { data: products } = await (admin.from('products') as any)
-    .select('id, name, sku, make, condition, quantity, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, category, vendor:vendors(name), images:product_images(url, sort_order)')
+    .select('id, name, sku, make, condition, quantity, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, category, vendor:vendors(name), images:product_images(url, sort_order, is_damage, damage_resolved_at)')
     .eq('is_active', true).gt('quantity', 0)
     .eq('tyre_width', parsed!.width).eq('tyre_profile', parsed!.profile).eq('tyre_rim', parsed!.rim)
     .order('created_at', { ascending: false })
@@ -136,14 +137,18 @@ export default async function TyreSizePage({ params }: Props) {
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mt-6">
           {products.map((p: any) => {
-            const img = (p.images || []).sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]
+            const g = storefrontImages(p.images)
+            const img = g.cover
             return (
               <Link key={p.id} href={`/product/${p.slug || p.id}`}
-                className="bg-white rounded-xl border border-slate-200 hover:border-orange-400 overflow-hidden transition-colors">
+                className="relative bg-white rounded-xl border border-slate-200 hover:border-orange-400 overflow-hidden transition-colors">
                 {img
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={img.url} alt={p.name} loading="lazy" className="w-full aspect-square object-cover" />
                   : <ProductThumb product={p} variant="card" className="w-full aspect-square" />}
+                {g.damage.length > 0 && (
+                  <span className="absolute top-2 left-2 text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white shadow">⚠ Damage photos</span>
+                )}
                 <div className="p-3">
                   <p className="text-sm font-bold text-slate-900 leading-tight line-clamp-2">{p.name}</p>
                   <p className="text-xs text-slate-400 mt-1">

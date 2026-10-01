@@ -1,5 +1,6 @@
 'use client'
 
+import { storefrontImages } from '@/lib/damage'
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { thumbnail, imgFallback } from '@/lib/image'
 import ProductThumb, { showsThumb } from '@/components/ProductThumb'
@@ -18,9 +19,8 @@ function formatPrice(price: number | null, showPrice: boolean) {
 }
 
 function getPrimaryImage(product: any): string | null {
-  if (!product.images || product.images.length === 0) return null
-  const primary = product.images.find((img: any) => img.sort_order === 0)
-  return (primary || product.images[0])?.url || null
+  // Never a damage photo as the cover (2026-10-01)
+  return storefrontImages(product.images).cover?.url || null
 }
 
 function conditionBadge(condition: string) {
@@ -287,6 +287,9 @@ export default function MakePageClient({ makeSlug, displayName, products, topCat
                           <span className="text-[40px] opacity-[0.08]">🔧</span>
                         </div>
                     }
+                    {(product.damage_photos || 0) > 0 && (
+                      <span className="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md shadow">⚠ Damage photos</span>
+                    )}
                   </div>
 
                   {/* Info */}

@@ -1,3 +1,4 @@
+import { storefrontImages } from '@/lib/damage'
 import type { Metadata } from 'next'
 import { safeJsonLd } from '@/lib/security'
 import { notFound } from 'next/navigation'
@@ -116,7 +117,7 @@ export default async function MakePage({ params }: Props) {
     .select(
       'id, name, sku, category, make, model, year, condition, price, show_price, quantity, slug, created_at, ' +
       'product_type, tyre_width, tyre_profile, tyre_rim, origin_country, ' +
-      'vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order)',
+      'vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order, is_damage, damage_resolved_at)',
     )
     .ilike('make', makeQuery)
     .eq('is_active', true)
@@ -131,9 +132,10 @@ export default async function MakePage({ params }: Props) {
   // Keep only primary image per product (reduces client payload)
   const normalizedProducts = products.map((p: any) => ({
     ...p,
-    images: p.images
-      ? [p.images.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))[0]].filter(Boolean)
-      : [],
+    // Cover = the product's own photo, never a damage photo; damage_photos
+    // drives the card's "Damage photos" tag (2026-10-01)
+    images: storefrontImages(p.images).cover ? [storefrontImages(p.images).cover] : [],
+    ...(storefrontImages(p.images).damage.length ? { damage_photos: storefrontImages(p.images).damage.length } : {}),
   }))
 
   const count = products.length
