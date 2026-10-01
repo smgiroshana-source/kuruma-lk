@@ -46,7 +46,7 @@ export default function DamageSheet({ product, showToast, onClose, onSaved }: Pr
   const [picking, setPicking] = useState(false)
   const [markDamaged, setMarkDamaged] = useState(true)
   const [repairing, setRepairing] = useState(false)
-  const [repairCond, setRepairCond] = useState('Reconditioned')
+  const [repairCond, setRepairCond] = useState('')   // no default: a repair is a choice, not two taps
   const [repairNote, setRepairNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [viewer, setViewer] = useState<{ list: Img[]; i: number } | null>(null)
@@ -128,7 +128,7 @@ export default function DamageSheet({ product, showToast, onClose, onSaved }: Pr
     try {
       await post({ action: 'mark_repaired', productId: product.id, condition: repairCond, note: repairNote })
       showToast(`✓ ${product.sku} marked repaired — ${repairCond}`)
-      setRepairing(false); setRepairNote(''); onSaved(); await load()
+      setRepairing(false); setRepairNote(''); setRepairCond(''); onSaved(); await load()
     } catch (e: any) { showToast('⚠ ' + e.message) }
     setSaving(false)
   }
@@ -313,26 +313,31 @@ export default function DamageSheet({ product, showToast, onClose, onSaved }: Pr
               repairing ? (
                 <section className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3 space-y-2">
                   <p className="text-sm font-black text-emerald-900">Mark repaired</p>
-                  <label className="block text-xs font-bold text-slate-600">Condition now
+                  <label className="block text-xs font-bold text-slate-600">Condition now *
                     <select value={repairCond} onChange={e => setRepairCond(e.target.value)}
                       className="mt-1 block w-full h-12 px-3 rounded-xl border-2 border-slate-200 text-base bg-white outline-none focus:border-emerald-400">
+                      <option value="" disabled>Choose…</option>
                       {CONDITIONS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </label>
-                  <label className="block text-xs font-bold text-slate-600">What was done (optional)
+                  <label className="block text-xs font-bold text-slate-600">What was done *
                     <input value={repairNote} onChange={e => setRepairNote(e.target.value)} placeholder="e.g. bracket replaced"
                       className="mt-1 block w-full h-12 px-3 rounded-xl border-2 border-slate-200 text-base bg-white outline-none focus:border-emerald-400" />
                   </label>
                   <p className="text-[11px] text-emerald-800">The damage photos stop showing to customers and stay here as &quot;before repair&quot;.</p>
                   <div className="flex gap-2">
-                    <button onClick={() => setRepairing(false)} disabled={saving} className="flex-1 h-12 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-bold">Back</button>
-                    <button onClick={saveRepaired} disabled={saving} className="flex-[1.4] h-12 rounded-xl bg-emerald-600 text-white font-black disabled:opacity-50">{saving ? 'Saving…' : 'Mark repaired'}</button>
+                    <button onClick={() => { setRepairing(false); setRepairCond(''); setRepairNote('') }} disabled={saving} className="flex-1 h-12 rounded-xl border-2 border-slate-200 bg-white text-slate-600 font-bold">Back</button>
+                    <button onClick={saveRepaired} disabled={saving || !repairCond || repairNote.trim().length < 3} className="flex-[1.4] h-12 rounded-xl bg-emerald-600 text-white font-black disabled:opacity-50">{saving ? 'Saving…' : 'Mark repaired'}</button>
                   </div>
                 </section>
               ) : (
-                <button onClick={() => setRepairing(true)} className="w-full h-12 rounded-xl border-2 border-emerald-300 text-emerald-800 font-bold text-sm active:bg-emerald-50">
-                  ✓ Repaired / not damaged any more
-                </button>
+                // A quiet link set well apart from the buttons — it used to be a
+                // full-width button right above Close and was tapped by accident
+                <div className="pt-6 mt-2 border-t border-dashed border-slate-200 text-center">
+                  <button onClick={() => setRepairing(true)} className="min-h-11 px-3 text-xs font-semibold text-slate-500 underline underline-offset-2 active:text-emerald-700">
+                    Fixed now? Mark as repaired…
+                  </button>
+                </div>
               )
             )}
           </>)}

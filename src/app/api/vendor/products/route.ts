@@ -211,7 +211,10 @@ export async function POST(req: NextRequest) {
 
     if (action === 'mark_repaired') {
       const CONDITIONS = ['New', 'New-Genuine', 'New-Other', 'Reconditioned']
-      const condition = CONDITIONS.includes(body.condition) ? body.condition : 'Reconditioned'
+      // Both asked for on purpose — a repair is never a default (owner, 2026-10-01)
+      if (!CONDITIONS.includes(body.condition) || String(body.note || '').trim().length < 3)
+        return NextResponse.json({ success: false, error: 'Choose the condition and say what was done' }, { status: 400 })
+      const condition = body.condition
       const line = repairedLine(today, String(body.note || ''))
       const { error } = await admin.from('products').update({
         condition, description: product.description ? `${product.description}\n\n${line}` : line, updated_at: new Date().toISOString(),
