@@ -5,7 +5,6 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { damageLine, repairedLine } from '@/lib/damage'
 import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/security'
 import { revalidatePath } from 'next/cache'
 import { createServerSupabase } from '@/lib/supabase/server'
@@ -157,62 +156,6 @@ export async function POST(req: NextRequest) {
       success: true,
       layers: layers.map(l => ({ unit_cost: Math.round(l.unit_cost), quantity_remaining: l.quantity_remaining, received_at: l.received_at })),
     })
-  }
-
-  // ─── DAMAGE — notes and photos (owner, 2026-10-01; src/lib/damage.ts) ───
-  // damage_info: everything the stock count's damage window shows.
-  // record_damage: a dated note (and condition Damaged when asked).
-  // set_damage_photos: flag / unflag existing product photos as damage photos.
-  // mark_repaired: condition back, a dated REPAIRED line, and the damage
-  //   photos retired from the storefront (kept for staff as "before repair").
-  if (['damage_info', 'record_damage', 'set_damage_photos', 'mark_repaired'].includes(action)) {
-    const { productId } = body
-    if (!productId) return NextResponse.json({ success: false, error: 'productId required' }, { status: 400 })
-    const { data: product } = await admin.from('products').select('id, vendor_id, sku, name, condition, description').eq('id', productId).single()
-    if (!product || product.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
-
-    if (action === 'damage_info') {
-      const { data: images, error } = await admin.from('product_images')
-        .select('id, url, sort_order, is_damage, damage_marked_at, damage_resolved_at').eq('product_id', productId).order('sort_order').order('created_at')
-      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
-      return NextResponse.json({ success: true, product: { id: product.id, sku: product.sku, name: product.name, condition: product.condition, description: product.description }, images: images || [] })
-    }
-
-    if (action === 'record_damage') {
-      const note = String(body.note || '').trim()
-      if (!note) return NextResponse.json({ success: false, error: 'Describe the damage first' }, { status: 400 })
-      const stamp = damageLine(today, note)
-      const patch: any = { description: product.description ? `${product.description}\n\n${stamp}` : stamp, updated_at: new Date().toISOString() }
-      if (body.markDamaged !== false) patch.condition = 'Damaged'
-      const { error } = await admin.from('products').update(patch).eq('id', productId).eq('vendor_id', vendor.id)
-      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
-      return NextResponse.json({ success: true })
-    }
-
-    if (action === 'set_damage_photos') {
-      const ids = Array.isArray(body.imageIds) ? body.imageIds.filter((x: any) => typeof x === 'string') : []
-      if (ids.length === 0) return NextResponse.json({ success: false, error: 'Pick the photos' }, { status: 400 })
-      const on = body.on === true
-      const { error } = await admin.from('product_images')
-        .update(on ? { is_damage: true, damage_marked_at: new Date().toISOString(), damage_resolved_at: null } : { is_damage: false, damage_marked_at: null, damage_resolved_at: null })
-        .in('id', ids).eq('product_id', productId)
-      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
-      return NextResponse.json({ success: true })
-    }
-
-    if (action === 'mark_repaired') {
-      const CONDITIONS = ['New', 'New-Genuine', 'New-Other', 'Reconditioned']
-      const condition = CONDITIONS.includes(body.condition) ? body.condition : 'Reconditioned'
-      const line = repairedLine(today, String(body.note || ''))
-      const { error } = await admin.from('products').update({
-        condition, description: product.description ? `${product.description}\n\n${line}` : line, updated_at: new Date().toISOString(),
-      }).eq('id', productId).eq('vendor_id', vendor.id)
-      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
-      await admin.from('product_images').update({ damage_resolved_at: new Date().toISOString() })
-        .eq('product_id', productId).eq('is_damage', true).is('damage_resolved_at', null)
-      return NextResponse.json({ success: true })
-    }
   }
 
   // ─── CREATE SINGLE PRODUCT ───

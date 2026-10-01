@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { storefrontImages } from '@/lib/damage'
 import { pgSafe } from '@/lib/security'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isUUID } from '@/lib/slug'
@@ -14,7 +13,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // Public page. The row used to go out as '*' — cost, cost_vat_rate, shelf
     // location, min_stock_level, parent_product_id, the lot — to every visitor
     // and every competitor. Only what the listing shows.
-    .select('id, vendor_id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, price, show_price, quantity, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, created_at, vendor:vendors(id, name, slug, location, phone, whatsapp), images:product_images(id, url, sort_order, is_damage, damage_resolved_at)')
+    .select('id, vendor_id, sku, name, description, category, make, model, model_code, year, condition, side, color, oem_code, price, show_price, quantity, slug, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, created_at, vendor:vendors(id, name, slug, location, phone, whatsapp), images:product_images(id, url, sort_order)')
     .eq('is_active', true)
   q = isUUID(id) ? q.eq('id', id) : q.eq('slug', id)
 
@@ -24,14 +23,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Product not found' }, { status: 404 })
   }
 
-  // As a customer sees them (2026-10-01): own photos first, then damage photos
-  // not yet repaired; a repaired part's damage photos are staff history only
-  if (product.images) (product as any).images = storefrontImages(product.images as any[]).all
+  if (product.images) {
+    product.images.sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
+  }
 
   // Related products — include slug so client can build correct links
   const { data: related } = await admin
     .from('products')
-    .select('id, name, price, show_price, category, condition, make, model, slug, images:product_images(url, sort_order, is_damage, damage_resolved_at)')
+    .select('id, name, price, show_price, category, condition, make, model, slug, images:product_images(url, sort_order)')
     .eq('is_active', true)
     .neq('id', product.id)
     // category is vendor-typed text inside a filter string; quote it so a comma

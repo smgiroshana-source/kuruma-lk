@@ -1,6 +1,5 @@
 'use client'
 
-import { storefrontImages } from '@/lib/damage'
 import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import type { Product, Vendor } from '@/types'
 import { thumbnail, thumb64, imgFallback } from '@/lib/image'
@@ -79,8 +78,9 @@ function formatPrice(price: number | null, showPrice: boolean) {
 }
 
 function getProductImage(product: any): string | null {
-  // Never a damage photo as the cover (2026-10-01)
-  return storefrontImages(product.images).cover?.url || null
+  if (!product.images || product.images.length === 0) return null
+  const primary = product.images.find((img: any) => img.sort_order === 0)
+  return (primary || product.images[0])?.url || null
 }
 
 type HomeProps = {
@@ -702,7 +702,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
                 <a href={`/product/${(product as any).slug || product.id}`} className="block">
                   <div className="aspect-[4/3] bg-[#fafafa] relative overflow-hidden">
                     {imageUrl?<img src={thumbnail(imageUrl)} alt={product.name} loading={idx<6?'eager':'lazy'} fetchPriority={idx<6?'high':undefined} onError={imgFallback} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"/>:showsThumb(product)?<ProductThumb product={product} variant="card" className="w-full h-full"/>:<div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#f8f8f8] to-[#f0f0f0]"><span className="text-[40px] opacity-[0.08]">🔧</span></div>}
-                    {imageCount>1&&<span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-md">📷 {imageCount}</span>}{(product.damage_photos||0)>0&&<span className="absolute top-2.5 left-2.5 bg-amber-500 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md shadow">⚠ Damage photos</span>}
+                    {imageCount>1&&<span className="absolute bottom-2 left-2 bg-black/60 backdrop-blur text-white text-[10px] font-bold px-2 py-0.5 rounded-md">📷 {imageCount}</span>}
                   </div>
                   <div className="p-3">
                     <div className="flex items-center gap-1.5 mb-1.5">

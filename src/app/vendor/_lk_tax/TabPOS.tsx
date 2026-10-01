@@ -1210,10 +1210,7 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             {p.make && <span className="text-[10px] text-slate-400">{p.make}</span>}
                             {p.origin_country && <span className="text-[10px] font-semibold text-slate-500">🌐 {p.origin_country}</span>}
                             <span className="text-[10px] text-slate-400">Qty: {p.quantity}</span>
-                            {/* Damage on record (2026-10-01): staff see it before selling */}
-                            {(p.condition === 'Damaged' || (p.damage_photos || 0) > 0)
-                              ? <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">⚠ {p.condition === 'Damaged' ? 'Damaged' : 'Damage photos'}</span>
-                              : <span className="text-[10px] font-semibold capitalize text-slate-400">{p.condition}</span>}
+                            <span className="text-[10px] font-semibold capitalize text-slate-400">{p.condition}</span>
                           </div>
                         </div>
                         <span className="font-bold text-orange-600 shrink-0">Rs.{p.price?.toLocaleString() || '–'}</span>
