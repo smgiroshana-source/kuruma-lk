@@ -5,7 +5,7 @@ import SupplierForm from './SupplierForm'
 import { useState, useEffect, useRef } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
 import { useIncomingTransferCount } from '../_shared/useIncomingTransfers'
-import DamageCapture from '../_shared/DamageCapture'
+import DamageSheet from './DamageSheet'
 
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
@@ -2233,7 +2233,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
       {/* ── Damage capture sheet (from stock count) ── */}
       {damageProduct && (
-        <DamageCapture
+        <DamageSheet
           product={damageProduct}
           showToast={showToast}
           onClose={() => setDamageProduct(null)}
