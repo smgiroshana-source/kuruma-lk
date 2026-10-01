@@ -14,6 +14,14 @@ import { generateProductSlug } from '@/lib/slug'
 import { isLooseCount } from '@/lib/looseCount'
 import { getRemainingLayers, refreshProductCost } from '@/lib/fifoCost'
 
+// cost_vat_rate from a form or CSV: a 0–100 number, else left unset. Sets
+// cost_includes_vat false with it — the cost typed is the net figure.
+function vatRateField(v: any): Record<string, any> {
+  if (v === null || v === undefined || v === '') return {}
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? { cost_vat_rate: n, cost_includes_vat: false } : {}
+}
+
 async function getVendor() {
   const supabase = await createServerSupabase()
   const { data: { user } } = await supabase.auth.getUser()
@@ -234,6 +242,8 @@ export async function POST(req: NextRequest) {
       model_code: pd.model_code || null, year: pd.year || null, condition: pd.condition || 'Reconditioned',
       side: pd.side || null, color: pd.color || null, oem_code: pd.oem_code || null,
       price: pd.price ? parseInt(pd.price) : null, cost: pd.cost ? parseInt(pd.cost) : null,
+      // The VAT on that (net) cost, asked when the cost is typed (2026-10-01)
+      ...vatRateField(pd.cost_vat_rate),
       // 0 must stay 0 (GRN pre-creates at zero stock) — only ABSENT quantity defaults to 1
       show_price: pd.show_price !== false, quantity: Number.isFinite(parseInt(pd.quantity)) ? Math.max(0, parseInt(pd.quantity)) : 1,
       added_date: pd.added_date || null, is_active: true, slug,
@@ -315,6 +325,7 @@ export async function POST(req: NextRequest) {
         side: item.side || null, color: item.color || null, oem_code: item.oem_code || null,
         price: item.price ? parseInt(item.price) : null,
         cost: item.cost ? parseInt(item.cost) : null,
+        ...vatRateField(item.cost_vat_rate),
         show_price: item.show_price !== false,
         quantity: parseInt(item.quantity) || 1,
         added_date: item.added_date || null, is_active: true,

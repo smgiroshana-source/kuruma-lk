@@ -68,11 +68,19 @@ async function landAtDestination(
   const { data: destExisting } = await admin.from('products')
     .select('id, quantity').eq('vendor_id', toVendorId).eq('sku', sku).maybeSingle()
 
+  // WHEEL MART reads cost_vat_rate for the POS minimum price. A transfer cost
+  // is what Sakura (not VAT-registered) charges — no VAT on it, so 0%, never
+  // left blank (owner, 2026-10-01). Only for an lk_tax receiver; Sakura's
+  // own products are not touched.
+  const { data: destVendor, error: destVendorErr } = await admin.from('vendor_settings').select('invoice_mode').eq('vendor_id', toVendorId).maybeSingle()
+  if (destVendorErr) return { error: `Could not read the receiving shop's settings: ${destVendorErr.message}` }
+  const noVatOnCost = destVendor?.invoice_mode === 'lk_tax' ? { cost_vat_rate: 0, cost_includes_vat: false } : {}
+
   if (destExisting) {
     await adjustProductQuantity(admin, destExisting.id, toVendorId, qty)
     // topped up something they already stocked — a reversal must not remove it
     const destUpdate: any = {}
-    if (row.transfer_cost  != null) destUpdate.cost  = row.transfer_cost
+    if (row.transfer_cost  != null) Object.assign(destUpdate, { cost: row.transfer_cost, ...noVatOnCost })
     if (row.transfer_price != null) destUpdate.price = row.transfer_price
     if (Object.keys(destUpdate).length > 0) {
       await admin.from('products').update(destUpdate).eq('id', destExisting.id).eq('vendor_id', toVendorId)
@@ -108,6 +116,7 @@ async function landAtDestination(
     vendor_id: toVendorId,
     quantity:  qty,
     cost:      row.transfer_cost  ?? fields.cost,
+    ...((row.transfer_cost ?? fields.cost) != null ? noVatOnCost : {}),
     price:     row.transfer_price ?? fields.price,
     is_active: true,
     slug: destSlug,
