@@ -14,7 +14,8 @@ const CONDITION_COLORS: Record<string, string> = {
 }
 
 function formatPrice(price: number | null, showPrice: boolean) {
-  if (!showPrice || price === null) return 'Ask Price'
+  // A price of 0 means "not priced yet", never "free" — ask, don't print Rs. 0
+  if (!showPrice || price === null || !(Number(price) > 0)) return 'Ask Price'
   return 'Rs.' + price.toLocaleString()
 }
 
