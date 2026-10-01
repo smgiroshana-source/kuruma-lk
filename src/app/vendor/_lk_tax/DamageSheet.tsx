@@ -83,8 +83,12 @@ export default function DamageSheet({ product, showToast, onClose, onSaved }: Pr
   const dirty = note.trim() !== '' || files.length > 0 || picked.length > 0
 
   function addFiles(list: FileList | null) {
-    if (!list) return
-    setFiles(prev => [...prev, ...Array.from(list)].slice(0, 6))
+    // Copy NOW: the FileList is live, and the input is cleared right after
+    // this call — read inside the updater it was already empty, so camera and
+    // gallery photos never reached the sheet
+    const picked = list ? Array.from(list) : []
+    if (!picked.length) return
+    setFiles(prev => [...prev, ...picked].slice(0, 6))
   }
 
   async function saveDamage() {
@@ -95,6 +99,7 @@ export default function DamageSheet({ product, showToast, onClose, onSaved }: Pr
       if (note.trim()) await post({ action: 'record_damage', productId: product.id, note, markDamaged: isDamaged ? true : markDamaged })
       if (picked.length) await post({ action: 'set_damage_photos', productId: product.id, imageIds: picked, on: true })
       let uploaded = 0
+      let uploadErr = ''
       for (const f of files) {
         try {
           const fd = new FormData()
@@ -104,11 +109,12 @@ export default function DamageSheet({ product, showToast, onClose, onSaved }: Pr
           fd.append('isDamage', 'true')
           const ur = await fetch('/api/vendor/upload', { method: 'POST', body: fd })
           if (ur.ok) uploaded++
-        } catch {}
+          else uploadErr = (await ur.json().catch(() => null))?.error || `upload failed (${ur.status})`
+        } catch (e: any) { uploadErr = e?.message || 'upload failed' }
       }
       const photos = uploaded + picked.length
       showToast(files.length > uploaded
-        ? `⚠ Damage saved, but only ${uploaded}/${files.length} new photo(s) uploaded`
+        ? `⚠ Damage saved, but only ${uploaded}/${files.length} new photo(s) uploaded${uploadErr ? ` — ${uploadErr}` : ''}`
         : `⚠ Damage recorded on ${product.sku}${photos ? ` · ${photos} damage photo${photos !== 1 ? 's' : ''}` : ''}`)
       setNote(''); setFiles([]); setPicked([]); setPicking(false)
       onSaved(); await load()
