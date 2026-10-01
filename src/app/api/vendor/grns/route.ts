@@ -287,6 +287,19 @@ export async function POST(req: NextRequest) {
       for (const productId of touched) await refreshProductCost(admin, vendor.id, productId as string)
     }
 
+    // The VAT on this purchase, recorded against the product's (net) cost:
+    // 18% from a VAT-registered supplier, 0% otherwise. The POS grosses the
+    // cost up by it for the minimum price — a receipt has no VAT to recover,
+    // so its price must clear the VAT paid. Never set before (2026-10-01):
+    // P-ITV629, cost Rs.5,118 + 18%, showed a Rs.5,118 minimum instead of
+    // Rs.6,039 on 11 GRN-V products.
+    for (const item of items) {
+      if (!item.product_id) continue
+      await admin.from('products')
+        .update({ cost_vat_rate: Number(item.vat_rate) || 0, cost_includes_vat: false })
+        .eq('id', item.product_id).eq('vendor_id', vendor.id)
+    }
+
     // 3. The goods now exist in stock, so the debt for them must exist too.
     // Auto-create the payable from the GRN totals (invoice total = net + VAT —
     // what the supplier actually billed). Due date follows the supplier's

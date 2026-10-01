@@ -1294,10 +1294,13 @@ export default function TabPOSLkTax({ vendor, products, vendorSettings, showToas
                             {Number(item.cost) > 0 && (() => {
                               const basis = posCostBasis(item), floor = posCostFloor(item), mixed = posCostBreakdown(item)
                               return isBelowCost(posMarginBase(item.unitPrice), basis)
-                                ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{floor.toLocaleString()} or more{posIsVatEntity ? ` (cost Rs.${basis.toLocaleString()} excl VAT)` : ''}{mixed ? ` · ${mixed}` : ''}</p>
+                                // The minimum in the terms of the price box (2026-10-01): incl. VAT
+                                // normally; net when prices are typed excl. VAT. "(cost … excl VAT)"
+                                // beside an incl.-VAT box read as if Rs.5,118 were enough.
+                                ? <p className="text-[9px] font-bold text-red-600 mt-0.5 leading-none">⚠ below cost — ask Rs.{(posEntryExcl ? basis : floor).toLocaleString()} or more{posEntryExcl ? ' excl. VAT' : posIsVatEntity ? ' incl. VAT' : ''}{floor > posNetCostBasis(item) && !posEntryExcl ? ` (cost Rs.${posNetCostBasis(item).toLocaleString()} + VAT)` : ''}{mixed ? ` · ${mixed}` : ''}</p>
                                 : Number(item.unitPrice) > 0
                                   ? <p className="text-[9px] text-slate-400 mt-0.5 leading-none">GP {gpPercent(posMarginBase(item.unitPrice), basis)}%{posIsVatEntity ? ' net' : ''}{mixed ? ` · avg cost: ${mixed}` : ''}</p>
-                                  : <p className="text-[9px] text-slate-400 mt-0.5 leading-none">min Rs.{floor.toLocaleString()}{mixed ? ` · ${mixed}` : ''}</p>
+                                  : <p className="text-[9px] text-slate-400 mt-0.5 leading-none">min Rs.{(posEntryExcl ? basis : floor).toLocaleString()}{posEntryExcl ? ' excl. VAT' : posIsVatEntity ? ' incl. VAT' : ''}{mixed ? ` · ${mixed}` : ''}</p>
                             })()}
                           </td>
                           <td className="px-2 sm:px-4 py-2 text-right font-bold text-xs sm:text-sm">Rs.{(item.quantity * cardPrice(item.unitPrice)).toLocaleString()}</td>
