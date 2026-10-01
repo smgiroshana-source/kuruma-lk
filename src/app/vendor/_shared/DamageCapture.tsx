@@ -22,8 +22,11 @@ export default function DamageCapture({ product, showToast, onClose, onSaved }: 
   const [saving, setSaving] = useState(false)
 
   function addFiles(list: FileList | null) {
-    if (!list) return
-    setFiles(prev => [...prev, ...Array.from(list)].slice(0, 6)) // cap at 6 photos
+    // Copy NOW: the FileList is live and the input is cleared right after
+    // this call, so read inside the updater it was already empty
+    const picked = list ? Array.from(list) : []
+    if (!picked.length) return
+    setFiles(prev => [...prev, ...picked].slice(0, 6)) // cap at 6 photos
   }
 
   async function save() {
