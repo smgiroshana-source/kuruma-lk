@@ -188,7 +188,7 @@ export async function GET(req: NextRequest) {
     const [
       { data: todaySalesRows }, { data: cashSess }, { data: staleOpen }, { data: empRows },
       { data: creditRowsAll }, { data: payRows }, { data: dueRaises }, { count: grnDrafts },
-      { data: payrollRuns },
+      { data: payrollRuns }, { data: incomingRows },
     ] = await Promise.all([
       admin.from('sales')
         .select('total, customer_name, payment_method, created_at')
@@ -211,6 +211,9 @@ export async function GET(req: NextRequest) {
         .order('effective_from'),
       admin.from('grns').select('id', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'draft'),
       admin.from('payroll_runs').select('period, status').eq('vendor_id', vendor.id),
+      // Stock another shop sent that nobody here has accepted (2026-10-01)
+      admin.from('stock_transfers').select('quantity, transferred_at, from_product_name, from_vendor:vendors!stock_transfers_from_vendor_id_fkey(name)')
+        .eq('to_vendor_id', vendor.id).eq('status', 'pending').order('transferred_at'),
     ])
     const todaySales = (todaySalesRows || []).reduce((s: number, x: any) => s + parseFloat(x.total || 0), 0)
     const recentActivity = (todaySalesRows || []).slice(0, 5).map((s: any) => ({
@@ -300,6 +303,16 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Stock in transit to us: off the sender's shelf, on nobody's until accepted.
+    // 145743 waited from 27 Aug to 1 Oct unseen — this keeps it in view.
+    const incomingWaiting = (incomingRows || []).length ? {
+      lines: (incomingRows || []).length,
+      units: (incomingRows || []).reduce((t: number, r: any) => t + (Number(r.quantity) || 0), 0),
+      oldestDays: Math.floor((Date.now() - new Date((incomingRows as any[])[0].transferred_at).getTime()) / 86400000),
+      from: (incomingRows as any[])[0].from_vendor?.name || 'another shop',
+      sample: (incomingRows as any[])[0].from_product_name || '',
+    } : null
+
     dashboard = {
       todaySales, todayCount: (todaySalesRows || []).length,
       cashSession: cashSess ? { status: cashSess.status, expected: parseInt(cashSess.expected_cash ?? cashSess.opening_balance ?? 0), openedAt: cashSess.opened_at || null } : null,
@@ -308,7 +321,7 @@ export async function GET(req: NextRequest) {
       creditOwed, creditCustomers, creditOldestDays, creditOldestName, creditInternalOwed,
       payables: { due: payablesDue, overdueCount: payOverdueCount, oldestDays: payOldestDays },
       cnExpected,
-      salaryRaisesDue, salaryRaiseName, payrollUnpaid,
+      salaryRaisesDue, salaryRaiseName, payrollUnpaid, incomingWaiting,
       grnDrafts: grnDrafts || 0,
       recentActivity,
     }

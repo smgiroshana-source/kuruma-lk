@@ -142,6 +142,18 @@ async function landAtDestination(
 }
 
 /** Send an in-transit line back to where it came from, cost layer intact. */
+// Products of this shop that already have a send waiting to be accepted,
+// with the date it was sent (2026-10-01)
+async function pendingSends(admin: ReturnType<typeof createAdminClient>, vendorId: string, productIds: string[]) {
+  const out = new Map<string, string>()
+  for (let i = 0; i < productIds.length; i += 200) {
+    const { data } = await admin.from('stock_transfers').select('from_product_id, transferred_at')
+      .eq('from_vendor_id', vendorId).eq('status', 'pending').in('from_product_id', productIds.slice(i, i + 200))
+    for (const r of (data || []) as any[]) if (!out.has(r.from_product_id)) out.set(r.from_product_id, r.transferred_at)
+  }
+  return out
+}
+
 async function returnToSender(admin: ReturnType<typeof createAdminClient>, row: any) {
   await adjustProductQuantity(admin, row.from_product_id, row.from_vendor_id, row.quantity)
   if (row.moved_unit_cost != null && row.moved_unit_cost > 0) {
@@ -207,7 +219,7 @@ export async function GET(req: NextRequest) {
     const { data: rows, error } = await admin
       .from('stock_transfers')
       .select(`
-        id, batch_id, status, from_product_name, from_product_sku,
+        id, batch_id, status, from_product_id, from_product_name, from_product_sku,
         quantity, transfer_cost, transfer_price, notes, transferred_at,
         accepted_at, rejected_at, reject_reason,
         from_vendor:vendors!stock_transfers_from_vendor_id_fkey(name)
@@ -219,6 +231,17 @@ export async function GET(req: NextRequest) {
       .limit(2000)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+    // The same item already received from a LATER shipment: accepting this
+    // line too would add it twice (owner, 2026-10-01: 7 such lines sat in the
+    // 23 Aug shipment). Flagged so the screen leaves it out unless ticked —
+    // a genuine second lot (tyres) can still be added.
+    const acceptedLater = (r: any) => (rows || []).find((o: any) =>
+      o.id !== r.id && o.status === 'accepted' && o.from_product_id && o.from_product_id === r.from_product_id && o.transferred_at > r.transferred_at)
+
+    // A shipment is WAITING while any line in it waits. It used to take the
+    // status of whichever line came first, so a 53-line shipment with 52
+    // accepted showed as accepted and its last item (145743, 27 Aug) was
+    // never offered again (owner, 2026-10-01).
     const batches = new Map<string, any>()
     for (const r of (rows || []) as any[]) {
       // batch_id is null on anything written before shipments existed — those
@@ -232,24 +255,32 @@ export async function GET(req: NextRequest) {
           sentAt: r.transferred_at,
           settledAt: r.accepted_at || r.rejected_at || null,
           rejectReason: r.reject_reason || null,
-          items: [], totalUnits: 0,
+          items: [], totalUnits: 0, settledLines: 0,
         }
         batches.set(key, b)
       }
-      b.items.push({
-        id: r.id, name: r.from_product_name, sku: r.from_product_sku,
-        quantity: r.quantity, transferCost: r.transfer_cost,
-        transferPrice: r.transfer_price, notes: r.notes,
-      })
-      b.totalUnits += r.quantity
+      if (r.status === 'pending') {
+        b.status = 'pending'
+        const later = acceptedLater(r)
+        b.items.push({
+          id: r.id, name: r.from_product_name, sku: r.from_product_sku,
+          quantity: r.quantity, transferCost: r.transfer_cost,
+          transferPrice: r.transfer_price, notes: r.notes,
+          alreadyReceivedOn: later ? String(later.accepted_at || later.transferred_at).slice(0, 10) : null,
+        })
+        b.totalUnits += r.quantity
+      } else {
+        b.settledLines++
+      }
     }
 
     const all = [...batches.values()]
+    const pending = all.filter(b => b.items.length > 0).map(b => ({ ...b, status: 'pending' }))
     return NextResponse.json({
-      pending: all.filter(b => b.status === 'pending'),
+      pending,
       // 20 was enough for a notification panel; this is a history view now.
-      recent:  all.filter(b => b.status !== 'pending').slice(0, 50),
-      pendingCount: all.filter(b => b.status === 'pending').length,
+      recent:  all.filter(b => b.items.length === 0).slice(0, 50),
+      pendingCount: pending.length,
     })
   }
 
@@ -284,10 +315,13 @@ export async function POST(req: NextRequest) {
     const productIds = items.map(i => i.fromProductId)
     const { data: sourceProducts } = await admin.from('products').select('*').eq('vendor_id', vendor.id).in('id', productIds)
     const sourceMap = new Map((sourceProducts || []).map((p: any) => [p.id, p]))
+    const waitingFor = await pendingSends(admin, vendor.id, productIds)
 
     const previews = await Promise.all(items.map(async (item) => {
       const src = sourceMap.get(item.fromProductId)
       if (!src) return { ...item, fromProductName: '?', fromProductSku: '?', fromProductQty: 0, error: 'Product not found in your inventory' }
+      const w = waitingFor.get(item.fromProductId)
+      if (w) return { ...item, fromProductName: src.name, fromProductSku: src.sku, fromProductQty: src.quantity, error: `Already sent on ${w.slice(0, 10)} and still waiting to be accepted — ask them to accept that first` }
       if (item.quantity < 1) return { ...item, fromProductName: src.name, fromProductSku: src.sku, fromProductQty: src.quantity, error: 'Quantity must be at least 1' }
       if (item.quantity > src.quantity) return { ...item, fromProductName: src.name, fromProductSku: src.sku, fromProductQty: src.quantity, error: `Insufficient stock — only ${src.quantity} available` }
 
@@ -345,6 +379,7 @@ export async function POST(req: NextRequest) {
     const productIds = [...aggregated.keys()]
     const { data: sourceProducts } = await admin.from('products').select('*').eq('vendor_id', vendor.id).in('id', productIds)
     const sourceMap = new Map((sourceProducts || []).map((p: any) => [p.id, p]))
+    const waitingFor = await pendingSends(admin, vendor.id, productIds)
 
     // Photos for every line in ONE query. Fetching them per item put a third
     // round trip inside the loop, which is a third of the time budget on a
@@ -367,6 +402,10 @@ export async function POST(req: NextRequest) {
     for (const item of aggregated.values()) {
       const src = sourceMap.get(item.fromProductId)
       if (!src) { errors.push(`Product ${item.fromProductId} not found`); continue }
+      // Sending an item again while its earlier send still waits is how the
+      // 23 Aug shipment ended up with 7 lines already received (2026-10-01)
+      const w = waitingFor.get(src.id)
+      if (w) { errors.push(`${src.name}: already sent on ${w.slice(0, 10)} and still waiting to be accepted — not sent again`); continue }
       if (item.quantity > src.quantity) { errors.push(`${src.name}: insufficient stock`); continue }
 
       // Claim source stock FIRST with an optimistic conditional update —
@@ -454,9 +493,14 @@ export async function POST(req: NextRequest) {
   // Only the RECEIVING shop may answer, and only owner/manager: accepting
   // creates products in their catalogue and changes their stock.
   if (action === 'accept' || action === 'reject') {
-    const { batchId, reason, location } = body as {
+    const { batchId, reason, location, includeIds, closeIds } = body as {
       batchId: string; reason?: string
       location?: { loc_store?: string; loc_floor?: string; loc_sub1?: string; loc_sub2?: string }
+      // Accept only (2026-10-01): includeIds land; closeIds were already
+      // received in a later shipment — closed, nothing added, nothing returned;
+      // any other waiting line stays waiting ("didn't arrive"). Neither list:
+      // every waiting line lands, as before.
+      includeIds?: string[]; closeIds?: string[]
     }
     if (!batchId) return NextResponse.json({ success: false, error: 'batchId required' }, { status: 400 })
     if (!(await callerMayTransfer(admin, vendor, userId))) {
@@ -493,8 +537,22 @@ export async function POST(req: NextRequest) {
 
     const errors: string[] = []
     let settled = 0
+    let closed = 0
+    const listed = action === 'accept' && (Array.isArray(includeIds) || Array.isArray(closeIds))
+    const toClose = new Set(action === 'accept' && Array.isArray(closeIds) ? closeIds : [])
+    const toLand = new Set(action === 'accept' && Array.isArray(includeIds) ? includeIds : [])
 
     for (const row of rows) {
+      if (toClose.has(row.id)) {
+        // Already on our shelf from a later shipment: close the line, move nothing
+        const { data: c } = await admin.from('stock_transfers').update({
+          status: 'rejected', rejected_at: new Date().toISOString(), rejected_by: userId,
+          reject_reason: 'Already received in a later shipment — closed, nothing added or returned',
+        }).eq('id', row.id).eq('status', 'pending').select('id')
+        if (c && c.length) closed++
+        continue
+      }
+      if (listed && !toLand.has(row.id)) continue   // didn't arrive — stays waiting
       if (action === 'reject') {
         // Claim this one line; if another till got there first, skip it.
         const { data: claimed } = await admin.from('stock_transfers')
@@ -531,15 +589,19 @@ export async function POST(req: NextRequest) {
     }
 
     revalidatePath('/')
-    if (settled === 0) return NextResponse.json({ success: false, error: errors.join('; ') }, { status: 400 })
+    if (settled === 0 && closed === 0) return NextResponse.json({ success: false, error: errors.join('; ') || 'Nothing was chosen' }, { status: 400 })
 
-    const units = rows.reduce((t: number, r: any) => t + r.quantity, 0)
+    const landedRows = rows.filter((r: any) => !toClose.has(r.id) && (!listed || toLand.has(r.id)))
+    const units = landedRows.reduce((t: number, r: any) => t + r.quantity, 0)
+    const waiting = rows.length - settled - closed
     return NextResponse.json({
       success: true,
-      settled,
+      settled, closed,
       errors: errors.length > 0 ? errors : undefined,
       message: action === 'accept'
-        ? `Accepted ${settled} product${settled !== 1 ? 's' : ''} — ${units} unit${units !== 1 ? 's' : ''} added to your stock`
+        ? [settled ? `Accepted ${settled} product${settled !== 1 ? 's' : ''} — ${units} unit${units !== 1 ? 's' : ''} added to your stock` : '',
+           closed ? `${closed} already received earlier — closed, not added again` : '',
+           waiting > 0 ? `${waiting} still waiting` : ''].filter(Boolean).join(' · ')
         : `Rejected — ${units} unit${units !== 1 ? 's' : ''} returned to the sending shop`,
     })
   }

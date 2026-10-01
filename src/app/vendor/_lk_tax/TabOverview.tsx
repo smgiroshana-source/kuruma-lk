@@ -33,6 +33,7 @@ type Dashboard = {
   creditOldestName?: string
   payables: { due: number; overdueCount: number; oldestDays: number }
   cnExpected?: { count: number; amount: number; oldestDays: number; supplier: string }
+  incomingWaiting?: { lines: number; units: number; oldestDays: number; from: string; sample: string } | null
   grnDrafts: number
   salaryRaisesDue?: number
   salaryRaiseName?: string
@@ -319,6 +320,19 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         text: `${d.payables.overdueCount} supplier payment${d.payables.overdueCount !== 1 ? 's' : ''} overdue` +
               (d.payables.oldestDays > 0 ? ` — oldest ${d.payables.oldestDays} days` : ''),
         cta: 'Pay', tab: 'suppliers',
+      })
+    }
+    // Stock another shop sent that nobody has accepted — off their shelf and on
+    // nobody's (2026-10-01: 145743 sat unseen from 27 Aug). Red after 3 days.
+    if (d.incomingWaiting && d.incomingWaiting.lines > 0) {
+      const w = d.incomingWaiting
+      attention.push({
+        icon: '📦', tone: w.oldestDays > 3 ? 'red' : 'amber',
+        text: `${w.lines} item${w.lines !== 1 ? 's' : ''} from ${w.from} not accepted yet` +
+              (w.oldestDays > 0 ? ` — oldest sent ${w.oldestDays} day${w.oldestDays !== 1 ? 's' : ''} ago` : ' — sent today') +
+              (w.lines === 1 && w.sample ? ` (${w.sample})` : ''),
+        cta: 'Accept', tab: 'overview',
+        open: () => document.getElementById('incoming-transfers')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
       })
     }
     // Supplier credit notes still to come — the balance a supplier said they
