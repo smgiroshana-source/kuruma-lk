@@ -1,7 +1,8 @@
 'use client'
-// ── WHEEL MART ONLY — a product's damage, from the stock count (phone-first) ──
+// ── Shared by BOTH vendors (Sakura + WHEEL MART) — keep vendor-neutral ────────
+// A product's damage, from the stock count (phone-first).
 //
-// Owner, 2026-10-01: a damaged item's card opens "Details" — the damage notes
+// Owner, 2026-10-01 (WHEEL MART first; Sakura the same day): a damaged item's card opens "Details" — the damage notes
 // and photos on record — and more can be added from three sources: the
 // camera, the phone's gallery, or this product's own photos (a photo already
 // uploaded that shows the damage but was never marked). A damaged part can be
