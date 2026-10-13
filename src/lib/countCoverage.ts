@@ -2,11 +2,16 @@
 //
 // Both shops. An item is "confirmed" when someone counted it on Browse & Count
 // (confirm or correct) or placed it with Quick Assign — both stamp
-// products.last_stock_confirmed_at. It goes stale COUNT_WINDOW_DAYS later.
+// products.last_stock_confirmed_at. It goes stale after the shop's window:
+// WHEEL MART 30 days, Sakura 90 (owner, 2026-10-13 — Sakura's yard is
+// thousands of slow-moving body parts). countWindowDays() is the only place
+// that says so.
 // Adding an item counts as its first confirmation (owner, 2026-10-13): someone
 // just had it in hand. So an item never counted is timed from when it entered
 // the system (created_at; added_date is free text in mixed formats and can't
-// be trusted) and only becomes due 30 days later.
+// be trusted) and only becomes due a window later.
+// The filter's stops are plain ages (1 / 3 / 6 months), the same in both
+// shops; the reminder and the coverage list use the shop's window.
 // No "Never" stop (owner, 2026-10-13): at Sakura it was the same items as
 // "(No location)" (2,826 of 2,861) and at WHEEL MART 7 items already in
 // "1 mo+". Each card and the printed sheet still say "Never counted".
@@ -18,8 +23,17 @@
 // Pure functions over the products the vendor page already loads — no server
 // calls, so it costs nothing in Vercel usage.
 
-export const COUNT_WINDOW_DAYS = 30
 export const REMIND_PCT = 20
+
+/** Days an item stays confirmed after a count: WHEEL MART 30, Sakura 90. */
+export function countWindowDays(isLkTax: boolean): number {
+  return isLkTax ? 30 : 90
+}
+
+/** The filter stop that shows exactly the items due under this window. */
+export function dueStop(windowDays: number): CountAge {
+  return windowDays >= 180 ? '6m' : windowDays >= 90 ? '3m' : '1m'
+}
 
 const DAY = 86_400_000
 
@@ -43,16 +57,15 @@ export function countAgeDays(p: any, now = Date.now()): number {
   return Number.isFinite(t) ? Math.max(0, (now - t) / DAY) : Infinity
 }
 
-export function isConfirmed(p: any, now = Date.now()): boolean {
-  return countAgeDays(p, now) <= COUNT_WINDOW_DAYS
+export function isConfirmed(p: any, windowDays = 30, now = Date.now()): boolean {
+  return countAgeDays(p, now) <= windowDays
 }
 
 /** Does a countable item fall under this stop of the filter? */
 export function matchesCountAge(p: any, age: CountAge, now = Date.now()): boolean {
   if (age === 'all') return true
-  const d = countAgeDays(p, now)
-  if (age === '1m') return !isConfirmed(p, now)   // ⊇ 3 mo+ ⊇ 6 mo+
-  return age === '3m' ? d > 90 : d > 180
+  const d = countAgeDays(p, now)   // plain ages: 1 mo+ ⊇ 3 mo+ ⊇ 6 mo+
+  return age === '1m' ? d > 30 : age === '3m' ? d > 90 : d > 180
 }
 
 /** How many items sit under each stop (countable items only). */
@@ -75,12 +88,12 @@ export type CoverageSummary = {
   older: { m1to3: number; m3to6: number; m6plus: number }
 }
 
-export function coverageSummary(products: any[], now = Date.now()): CoverageSummary {
+export function coverageSummary(products: any[], windowDays = 30, now = Date.now()): CoverageSummary {
   let total = 0, notConfirmed = 0, m1to3 = 0, m3to6 = 0, m6plus = 0
   for (const p of products) {
     if (!isCountable(p)) continue
     total++
-    if (isConfirmed(p, now)) continue
+    if (isConfirmed(p, windowDays, now)) continue
     notConfirmed++
     const d = countAgeDays(p, now)
     if (d <= 90) m1to3++
@@ -121,7 +134,7 @@ export type CoverageRow = {
   oldestDays: number        // among the not-confirmed; 0 when none
 }
 
-export function coverageByLocation(products: any[], now = Date.now()): CoverageRow[] {
+export function coverageByLocation(products: any[], windowDays = 30, now = Date.now()): CoverageRow[] {
   const rows = new Map<string, CoverageRow>()
   for (const p of products) {
     if (!isCountable(p)) continue
@@ -140,7 +153,7 @@ export function coverageByLocation(products: any[], now = Date.now()): CoverageR
     }
     r.total++
     const d = countAgeDays(p, now)
-    if (!isConfirmed(p, now)) {
+    if (!isConfirmed(p, windowDays, now)) {
       r.notConfirmed++
       if (!p.last_stock_confirmed_at) r.neverCounted++
       r.oldestDays = Math.max(r.oldestDays, Number.isFinite(d) ? Math.floor(d) : 0)

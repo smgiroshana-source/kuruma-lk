@@ -2,22 +2,24 @@
 // ── Shared by BOTH vendors (Sakura + WHEEL MART) — keep vendor-neutral ────────
 // Count coverage by location (owner, 2026-10-13): the whole shop's confirmed %,
 // then every store › floor › rack with how many items still wait, most first.
-// Tapping a row opens Browse & Count on that spot, filtered to "1 mo+".
+// Tapping a row opens Browse & Count on that spot, filtered to the items due
+// under the shop's window (WHEEL MART 1 mo+, Sakura 3 mo+).
 // Rules: src/lib/countCoverage.ts. Phone-first bottom sheet.
 import { useEffect, useMemo } from 'react'
 import {
-  coverageSummary, coverageByLocation, REMIND_PCT, COUNT_WINDOW_DAYS,
+  coverageSummary, coverageByLocation, dueStop, REMIND_PCT,
   type CountAge, type LocationFilter,
 } from '@/lib/countCoverage'
 
-export default function CountCoverage({ products, onClose, onPick, canCount = true }: {
+export default function CountCoverage({ products, windowDays, onClose, onPick, canCount = true }: {
   products: any[]
+  windowDays: number          // countWindowDays(): WHEEL MART 30, Sakura 90
   onClose: () => void
   onPick?: (filter: LocationFilter, age: CountAge) => void
   canCount?: boolean
 }) {
-  const sum = useMemo(() => coverageSummary(products), [products])
-  const rows = useMemo(() => coverageByLocation(products), [products])
+  const sum = useMemo(() => coverageSummary(products, windowDays), [products, windowDays])
+  const rows = useMemo(() => coverageByLocation(products, windowDays), [products, windowDays])
   const goal = 100 - REMIND_PCT
 
   useEffect(() => {
@@ -34,7 +36,7 @@ export default function CountCoverage({ products, onClose, onPick, canCount = tr
         <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3 bg-white border-b border-slate-200">
           <div>
             <h3 className="text-lg font-black text-slate-900">Count coverage</h3>
-            <p className="text-xs text-slate-500">Confirmed = counted in the last {COUNT_WINDOW_DAYS} days</p>
+            <p className="text-xs text-slate-500">Confirmed = counted in the last {windowDays} days</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="w-11 h-11 -mr-1 rounded-xl flex items-center justify-center text-slate-500 active:bg-slate-100">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -75,7 +77,7 @@ export default function CountCoverage({ products, onClose, onPick, canCount = tr
                 </>
               )
               return canCount && onPick && r.notConfirmed > 0 ? (
-                <button key={r.key} type="button" onClick={() => onPick(r.filter, '1m')}
+                <button key={r.key} type="button" onClick={() => onPick(r.filter, dueStop(windowDays))}
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 active:bg-orange-50 active:border-orange-300">{body}</button>
               ) : (
                 <div key={r.key} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">{body}</div>

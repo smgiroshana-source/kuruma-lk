@@ -1,29 +1,37 @@
 'use client'
 // ── Shared by BOTH vendors (Sakura + WHEEL MART) — keep vendor-neutral ────────
 // Stock count reminder (owner, 2026-10-13): every staff login sees it while
-// more than REMIND_PCT of the shop's stock has not been confirmed in
-// COUNT_WINDOW_DAYS. No dismiss button, by the owner's choice — it clears only
+// more than REMIND_PCT of the shop's stock has not been confirmed within the
+// shop's window (countWindowDays: WHEEL MART 30 days, Sakura 90). No dismiss button, by the owner's choice — it clears only
 // by counting. The dashboard shows the card; every other tab the one-line
 // strip. Cashiers (POS only) see it without a "count" action they can't open.
 // Rules: src/lib/countCoverage.ts.
 import { useMemo } from 'react'
 import {
-  coverageSummary, coverageByLocation, REMIND_PCT, COUNT_WINDOW_DAYS,
+  coverageSummary, coverageByLocation, dueStop, REMIND_PCT,
   type CountAge, type LocationFilter,
 } from '@/lib/countCoverage'
 
 type Props = {
   products: any[]
+  windowDays: number
   variant: 'card' | 'strip'
   canCount: boolean
   onCount?: (filter: LocationFilter | null, age: CountAge) => void
   onCoverage?: () => void
 }
 
-export default function CountReminder({ products, variant, canCount, onCount, onCoverage }: Props) {
-  const sum = useMemo(() => coverageSummary(products), [products])
-  const top = useMemo(() => (variant === 'card' && sum.remind ? coverageByLocation(products).filter(r => r.notConfirmed > 0).slice(0, 3) : []), [products, variant, sum.remind])
+export default function CountReminder({ products, windowDays, variant, canCount, onCount, onCoverage }: Props) {
+  const sum = useMemo(() => coverageSummary(products, windowDays), [products, windowDays])
+  const top = useMemo(() => (variant === 'card' && sum.remind ? coverageByLocation(products, windowDays).filter(r => r.notConfirmed > 0).slice(0, 3) : []), [products, windowDays, variant, sum.remind])
   if (!sum.remind) return null
+  const due = dueStop(windowDays)
+  // Only the age bands an overdue item can fall in under this window
+  const tiles: [string, number, boolean][] = [
+    ...(windowDays < 90 ? [['1–3 months', sum.older.m1to3, false] as [string, number, boolean]] : []),
+    ...(windowDays < 180 ? [['3–6 months', sum.older.m3to6, false] as [string, number, boolean]] : []),
+    ['6 months+', sum.older.m6plus, true],
+  ]
   const pct = Math.round(sum.pctNotConfirmed)
   const goal = 100 - REMIND_PCT
 
@@ -31,11 +39,11 @@ export default function CountReminder({ products, variant, canCount, onCount, on
     const text = (
       <>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
-        <span className="flex-1 text-[13px] leading-snug text-amber-900"><b>{pct}% of stock not confirmed</b> in {COUNT_WINDOW_DAYS} days{canCount ? '' : ' — please help count when you can'}</span>
+        <span className="flex-1 text-[13px] leading-snug text-amber-900"><b>{pct}% of stock not confirmed</b> in {windowDays} days{canCount ? '' : ' — please help count when you can'}</span>
       </>
     )
     return canCount && onCount ? (
-      <button type="button" onClick={() => onCount(null, '1m')}
+      <button type="button" onClick={() => onCount(null, due)}
         className="w-full flex items-center gap-2.5 min-h-12 px-4 py-2 mb-4 rounded-xl bg-amber-100 border border-amber-300 text-left active:bg-amber-200">
         {text}<span className="text-[13px] font-black text-orange-700 whitespace-nowrap">Count now</span>
       </button>
@@ -52,7 +60,7 @@ export default function CountReminder({ products, variant, canCount, onCount, on
         </div>
         <div>
           <h2 className="text-lg font-black text-amber-950">Stock check overdue</h2>
-          <p className="text-sm leading-snug text-amber-950"><b>{pct}%</b> of items in stock ({sum.notConfirmed.toLocaleString()} of {sum.total.toLocaleString()}) have not been confirmed in the last {COUNT_WINDOW_DAYS} days.</p>
+          <p className="text-sm leading-snug text-amber-950"><b>{pct}%</b> of items in stock ({sum.notConfirmed.toLocaleString()} of {sum.total.toLocaleString()}) have not been confirmed in the last {windowDays} days.</p>
         </div>
       </div>
 
@@ -66,8 +74,8 @@ export default function CountReminder({ products, variant, canCount, onCount, on
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        {[['1–3 months', sum.older.m1to3, false], ['3–6 months', sum.older.m3to6, false], ['6 months+', sum.older.m6plus, true]].map(([l, n, red]) => (
+      <div className={`grid gap-2 ${tiles.length === 3 ? 'grid-cols-3' : tiles.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        {tiles.map(([l, n, red]) => (
           <div key={l as string} className="bg-white rounded-xl px-2.5 py-2">
             <p className={`text-xl font-black tabular-nums ${red ? 'text-red-700' : 'text-slate-900'}`}>{(n as number).toLocaleString()}</p>
             <p className="text-xs text-slate-600">{l as string}</p>
@@ -79,7 +87,7 @@ export default function CountReminder({ products, variant, canCount, onCount, on
         <div className="space-y-1.5">
           <p className="text-[11px] font-black tracking-wider text-amber-800">START HERE</p>
           {top.map(r => (
-            <button key={r.key} type="button" onClick={() => onCount?.(r.filter, '1m')}
+            <button key={r.key} type="button" onClick={() => onCount?.(r.filter, due)}
               className="w-full flex justify-between items-center min-h-11 px-3 bg-white rounded-lg text-sm text-slate-900 active:bg-orange-50">
               <span className="text-left">{r.label}</span><b className="tabular-nums">{r.notConfirmed.toLocaleString()}</b>
             </button>
@@ -89,7 +97,7 @@ export default function CountReminder({ products, variant, canCount, onCount, on
 
       {canCount ? (
         <div className="flex gap-2">
-          <button type="button" onClick={() => onCount?.(null, '1m')} className="flex-[1.4] min-h-12 rounded-xl bg-orange-700 active:bg-orange-800 text-white font-black text-[15px]">Start counting</button>
+          <button type="button" onClick={() => onCount?.(null, due)} className="flex-[1.4] min-h-12 rounded-xl bg-orange-700 active:bg-orange-800 text-white font-black text-[15px]">Start counting</button>
           <button type="button" onClick={onCoverage} className="flex-1 min-h-12 rounded-xl border-2 border-amber-500 bg-white text-amber-950 font-bold text-sm active:bg-amber-100">By location</button>
         </div>
       ) : (
