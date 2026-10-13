@@ -185,10 +185,13 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
 
   // ── filter products by active filters + search ──
   const searchLower = stocktakeSearch.toLowerCase()
+  // Browsing shows stock on hand only (matches the "All" count). Sold-out
+  // items appear when searched for, so a part found on the shelf can still
+  // be counted back in (owner, 2026-10-13: 1,900+ sold-out rows at Sakura).
   const placeProducts = allProducts.filter((p: any) => {
     if (!matchesLocation(p, stockFilter)) return false
     if (searchLower) return p.name?.toLowerCase().includes(searchLower) || (p.sku || '').toLowerCase().includes(searchLower)
-    return true
+    return isCountable(p)
   })
   // Counts under each "not confirmed since" stop, for this spot + search
   const countAgeHere = countAgeCounts(placeProducts)
@@ -471,6 +474,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                         <div className="flex items-center gap-2 flex-wrap mb-0.5">
                           <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
                           {p.condition && <span className="text-[10px] font-semibold text-slate-400">{p.condition}</span>}
+                          {!isCountable(p) && <span className="text-[10px] font-bold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">{p.is_active === false ? 'Inactive' : 'Sold out'}</span>}
                         </div>
                         <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
                         {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model}</p>}
