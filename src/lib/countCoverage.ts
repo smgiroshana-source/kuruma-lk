@@ -3,11 +3,13 @@
 // Both shops. An item is "confirmed" when someone counted it on Browse & Count
 // (confirm or correct) or placed it with Quick Assign — both stamp
 // products.last_stock_confirmed_at. It goes stale COUNT_WINDOW_DAYS later.
-// An item NEVER counted is not confirmed from the day it is added — "1 mo+"
-// includes every one of them, so it is always the largest stop (owner,
-// 2026-10-13; a 30-day grace for new items made "Never" bigger than "1 mo+").
-// Its age for 3 mo+ / 6 mo+ runs from when it entered the system (created_at;
-// added_date is free text in mixed formats and can't be trusted).
+// Adding an item counts as its first confirmation (owner, 2026-10-13): someone
+// just had it in hand. So an item never counted is timed from when it entered
+// the system (created_at; added_date is free text in mixed formats and can't
+// be trusted) and only becomes due 30 days later.
+// "Never" = due AND never counted since it was added — so every stop sits
+// inside "1 mo+", which is always the largest. (Counting every never-counted
+// item there, new ones included, made "Never" 48 against "1 mo+" 15.)
 //
 // Every staff login sees a reminder while more than REMIND_PCT of the shop's
 // stock is not confirmed. No dismiss button, by the owner's choice: it clears
@@ -43,13 +45,13 @@ export function countAgeDays(p: any, now = Date.now()): number {
 }
 
 export function isConfirmed(p: any, now = Date.now()): boolean {
-  return !!p?.last_stock_confirmed_at && countAgeDays(p, now) <= COUNT_WINDOW_DAYS
+  return countAgeDays(p, now) <= COUNT_WINDOW_DAYS
 }
 
 /** Does a countable item fall under this stop of the filter? */
 export function matchesCountAge(p: any, age: CountAge, now = Date.now()): boolean {
   if (age === 'all') return true
-  if (age === 'never') return !p?.last_stock_confirmed_at
+  if (age === 'never') return !p?.last_stock_confirmed_at && !isConfirmed(p, now)
   const d = countAgeDays(p, now)
   if (age === '1m') return !isConfirmed(p, now)   // ⊇ 3 mo+ ⊇ 6 mo+, and ⊇ Never
   return age === '3m' ? d > 90 : d > 180
