@@ -8,7 +8,7 @@ import { useIncomingTransferCount } from '../_shared/useIncomingTransfers'
 import DamageSheet from '../_shared/DamageSheet'
 import CountAgeFilter from '../_shared/CountAgeFilter'
 import CountCoverage from '../_shared/CountCoverage'
-import { printCountSheet } from '../_shared/countSheet'
+import { printCountSheet, downloadCountSheetXlsx } from '../_shared/countSheet'
 import {
   COUNT_AGE_STOPS, NO_LOCATION, countAgeCounts, countWindowDays, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
   type CountAge, type LocationFilter,
@@ -685,6 +685,11 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     const age = COUNT_AGE_STOPS.find(s => s.v === countAge)
     const heading = countAge === 'all' ? countPlaceText : `${countPlaceText} — ${(age?.long || '').toLowerCase()}`
     if (!printCountSheet({ shopName: vendor?.name || 'Stock', heading, products: browseProducts })) showToast('Allow pop-ups to print the count sheet')
+  }
+  function excelSheet() {
+    const age = COUNT_AGE_STOPS.find(s => s.v === countAge)
+    const heading = countAge === 'all' ? countPlaceText : `${countPlaceText} — ${(age?.long || '').toLowerCase()}`
+    if (!downloadCountSheetXlsx({ shopName: vendor?.name || 'Stock', heading, products: browseProducts })) showToast('Could not create the Excel file')
   }
 
   const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch || countAge !== 'all'
@@ -1847,11 +1852,13 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           {/* 4-level filter row */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
             <CountAgeFilter value={countAge} counts={countAgeHere} onChange={setCountAge} />
-            <div className="flex gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button type="button" onClick={() => setShowCoverage(true)}
-                className="flex-1 min-h-11 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50">📍 By location</button>
-              <button type="button" onClick={printSheet} disabled={browseProducts.length === 0}
-                className="flex-1 min-h-11 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50 disabled:opacity-40">🖨 Print sheet</button>
+                className="min-h-11 px-1 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50">📍 By location</button>
+              <button type="button" onClick={printSheet} disabled={browseProducts.length === 0} title="Print the count sheet, or choose Save as PDF in the print window"
+                className="min-h-11 px-1 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50 disabled:opacity-40">🖨 Print / PDF</button>
+              <button type="button" onClick={excelSheet} disabled={browseProducts.length === 0} title="Download the count sheet as an Excel file"
+                className="min-h-11 px-1 rounded-lg border-2 border-emerald-200 bg-white text-sm font-bold text-emerald-800 active:bg-emerald-50 disabled:opacity-40">📊 Excel</button>
             </div>
             <p className="text-xs font-bold text-slate-400 uppercase">Filter by Location</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 *:min-w-0">
