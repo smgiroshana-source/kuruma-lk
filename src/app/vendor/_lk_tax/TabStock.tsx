@@ -10,7 +10,7 @@ import CountAgeFilter from '../_shared/CountAgeFilter'
 import CountCoverage from '../_shared/CountCoverage'
 import { printCountSheet } from '../_shared/countSheet'
 import {
-  COUNT_AGE_STOPS, NO_LOCATION, countAgeCounts, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
+  COUNT_AGE_STOPS, NO_LOCATION, countAgeCounts, countWindowDays, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
   type CountAge, type LocationFilter,
 } from '@/lib/countCoverage'
 
@@ -2282,7 +2282,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
       {/* ── Count coverage by location (stock count reminder, 2026-10-13) ── */}
       {showCoverage && (
-        <CountCoverage products={allProducts} onClose={() => setShowCoverage(false)}
+        <CountCoverage products={allProducts} windowDays={countWindowDays(true)} onClose={() => setShowCoverage(false)}
           onPick={(f, a) => { setShowCoverage(false); setStockFilter(f); setStocktakeSearch(''); setCountAge(a) }} />
       )}
 
