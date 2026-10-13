@@ -10,7 +10,7 @@ import CountAgeFilter from '../_shared/CountAgeFilter'
 import CountCoverage from '../_shared/CountCoverage'
 import { printCountSheet, downloadCountSheetXlsx } from '../_shared/countSheet'
 import {
-  COUNT_AGE_STOPS, NO_LOCATION, countAgeCounts, countWindowDays, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
+  countAgeStops, countRules, NO_LOCATION, countAgeCounts, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
   type CountAge, type LocationFilter,
 } from '@/lib/countCoverage'
 
@@ -673,7 +673,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     return isCountable(p)
   })
   // Counts under each "not confirmed since" stop, for this spot + search
-  const countAgeHere = countAgeCounts(placeProducts)
+  const countAgeHere = countAgeCounts(placeProducts, countRules(true))
   // A time filter shows only stock on hand, longest-waiting first
   const browseProducts = countAge === 'all' ? placeProducts
     : placeProducts.filter((p: any) => isCountable(p) && matchesCountAge(p, countAge))
@@ -682,12 +682,12 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const countPlaceText = stockFilter.store === NO_LOCATION ? 'No location set'
     : [stockFilter.store, stockFilter.floor, stockFilter.sub1, stockFilter.sub2].filter(Boolean).join(' · ') || 'Whole shop'
   function printSheet() {
-    const age = COUNT_AGE_STOPS.find(s => s.v === countAge)
+    const age = countAgeStops(countRules(true)).find(s => s.v === countAge)
     const heading = countAge === 'all' ? countPlaceText : `${countPlaceText} — ${(age?.long || '').toLowerCase()}`
     if (!printCountSheet({ shopName: vendor?.name || 'Stock', heading, products: browseProducts })) showToast('Allow pop-ups to print the count sheet')
   }
   function excelSheet() {
-    const age = COUNT_AGE_STOPS.find(s => s.v === countAge)
+    const age = countAgeStops(countRules(true)).find(s => s.v === countAge)
     const heading = countAge === 'all' ? countPlaceText : `${countPlaceText} — ${(age?.long || '').toLowerCase()}`
     if (!downloadCountSheetXlsx({ shopName: vendor?.name || 'Stock', heading, products: browseProducts })) showToast('Could not create the Excel file')
   }
@@ -1851,7 +1851,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         <div>
           {/* 4-level filter row */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
-            <CountAgeFilter value={countAge} counts={countAgeHere} onChange={setCountAge} />
+            <CountAgeFilter rules={countRules(true)} value={countAge} counts={countAgeHere} onChange={setCountAge} />
             <div className="grid grid-cols-3 gap-2">
               <button type="button" onClick={() => setShowCoverage(true)}
                 className="min-h-11 px-1 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50">📍 By location</button>
@@ -2293,7 +2293,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
       {/* ── Count coverage by location (stock count reminder, 2026-10-13) ── */}
       {showCoverage && (
-        <CountCoverage products={allProducts} windowDays={countWindowDays(true)} onClose={() => setShowCoverage(false)}
+        <CountCoverage products={allProducts} rules={countRules(true)} onClose={() => setShowCoverage(false)}
           onPick={(f, a) => { setShowCoverage(false); setStockFilter(f); setStocktakeSearch(''); setCountAge(a) }} />
       )}
 
