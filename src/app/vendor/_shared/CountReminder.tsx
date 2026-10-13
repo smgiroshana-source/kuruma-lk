@@ -67,7 +67,7 @@ export default function CountReminder({ products, variant, canCount, onCount, on
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        {[['1–3 months', sum.older.m1to3, false], ['3–6 months', sum.older.m3to6, false], ['6 months+', sum.older.m6plus, true]].map(([l, n, red]) => (
+        {[['Never counted', sum.older.never, true], ['Counted 1–6 months ago', sum.older.m1to6, false], ['Counted 6+ months ago', sum.older.m6plus, true]].map(([l, n, red]) => (
           <div key={l as string} className="bg-white rounded-xl px-2.5 py-2">
             <p className={`text-xl font-black tabular-nums ${red ? 'text-red-700' : 'text-slate-900'}`}>{(n as number).toLocaleString()}</p>
             <p className="text-xs text-slate-600">{l as string}</p>

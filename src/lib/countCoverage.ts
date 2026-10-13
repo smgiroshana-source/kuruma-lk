@@ -3,7 +3,10 @@
 // Both shops. An item is "confirmed" when someone counted it on Browse & Count
 // (confirm or correct) or placed it with Quick Assign — both stamp
 // products.last_stock_confirmed_at. It goes stale COUNT_WINDOW_DAYS later.
-// An item never counted is timed from when it entered the system (created_at;
+// An item NEVER counted is not confirmed from the day it is added — "1 mo+"
+// includes every one of them, so it is always the largest stop (owner,
+// 2026-10-13; a 30-day grace for new items made "Never" bigger than "1 mo+").
+// Its age for 3 mo+ / 6 mo+ runs from when it entered the system (created_at;
 // added_date is free text in mixed formats and can't be trusted).
 //
 // Every staff login sees a reminder while more than REMIND_PCT of the shop's
@@ -40,7 +43,7 @@ export function countAgeDays(p: any, now = Date.now()): number {
 }
 
 export function isConfirmed(p: any, now = Date.now()): boolean {
-  return countAgeDays(p, now) <= COUNT_WINDOW_DAYS
+  return !!p?.last_stock_confirmed_at && countAgeDays(p, now) <= COUNT_WINDOW_DAYS
 }
 
 /** Does a countable item fall under this stop of the filter? */
@@ -48,7 +51,8 @@ export function matchesCountAge(p: any, age: CountAge, now = Date.now()): boolea
   if (age === 'all') return true
   if (age === 'never') return !p?.last_stock_confirmed_at
   const d = countAgeDays(p, now)
-  return age === '1m' ? d > COUNT_WINDOW_DAYS : age === '3m' ? d > 90 : d > 180
+  if (age === '1m') return !isConfirmed(p, now)   // ⊇ 3 mo+ ⊇ 6 mo+, and ⊇ Never
+  return age === '3m' ? d > 90 : d > 180
 }
 
 /** How many items sit under each stop (countable items only). */
@@ -67,19 +71,19 @@ export type CoverageSummary = {
   pctNotConfirmed: number   // 0–100, one decimal
   pctConfirmed: number      // 0–100, whole
   remind: boolean
-  older: { m1to3: number; m3to6: number; m6plus: number }
+  // splits notConfirmed exactly: never counted / counted 1–6 months ago / 6+
+  older: { never: number; m1to6: number; m6plus: number }
 }
 
 export function coverageSummary(products: any[], now = Date.now()): CoverageSummary {
-  let total = 0, notConfirmed = 0, m1to3 = 0, m3to6 = 0, m6plus = 0
+  let total = 0, notConfirmed = 0, never = 0, m1to6 = 0, m6plus = 0
   for (const p of products) {
     if (!isCountable(p)) continue
     total++
-    const d = countAgeDays(p, now)
-    if (d <= COUNT_WINDOW_DAYS) continue
+    if (isConfirmed(p, now)) continue
     notConfirmed++
-    if (d <= 90) m1to3++
-    else if (d <= 180) m3to6++
+    if (!p.last_stock_confirmed_at) never++
+    else if (countAgeDays(p, now) <= 180) m1to6++
     else m6plus++
   }
   const pct = total ? (notConfirmed / total) * 100 : 0
@@ -88,7 +92,7 @@ export function coverageSummary(products: any[], now = Date.now()): CoverageSumm
     pctNotConfirmed: Math.round(pct * 10) / 10,
     pctConfirmed: total ? Math.floor(((total - notConfirmed) / total) * 100) : 100,
     remind: pct > REMIND_PCT,
-    older: { m1to3, m3to6, m6plus },
+    older: { never, m1to6, m6plus },
   }
 }
 
@@ -135,7 +139,7 @@ export function coverageByLocation(products: any[], now = Date.now()): CoverageR
     }
     r.total++
     const d = countAgeDays(p, now)
-    if (d > COUNT_WINDOW_DAYS) {
+    if (!isConfirmed(p, now)) {
       r.notConfirmed++
       if (!p.last_stock_confirmed_at) r.neverCounted++
       r.oldestDays = Math.max(r.oldestDays, Number.isFinite(d) ? Math.floor(d) : 0)
