@@ -13,6 +13,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { generateProductSlug } from '@/lib/slug'
 import { isLooseCount } from '@/lib/looseCount'
 import { getRemainingLayers, refreshProductCost } from '@/lib/fifoCost'
+import { locationCanonicalizer } from '@/lib/locations'
 
 // cost_vat_rate from a form or CSV: a 0–100 number, else left unset. Sets
 // cost_includes_vat false with it — the cost typed is the net figure.
@@ -239,6 +240,8 @@ export async function POST(req: NextRequest) {
   if (action === 'create') {
     const { data: pd } = body
     const sku = pd.sku?.trim() || generateSKU()
+    // One spelling per shelf location (src/lib/locations.ts)
+    const locs = await locationCanonicalizer(admin, vendor.id)({ loc_store: pd.loc_store, loc_floor: pd.loc_floor, loc_sub1: pd.loc_sub1, loc_sub2: pd.loc_sub2 })
 
     // Generate slug — try clean first, fall back to slug+sku if already taken
     const baseSlug = generateProductSlug(pd.name, pd.make, pd.model, pd.condition || 'Reconditioned')
@@ -259,8 +262,7 @@ export async function POST(req: NextRequest) {
       // 0 must stay 0 (GRN pre-creates at zero stock) — only ABSENT quantity defaults to 1
       show_price: pd.show_price !== false, quantity: Number.isFinite(parseInt(pd.quantity)) ? Math.max(0, parseInt(pd.quantity)) : 1,
       added_date: pd.added_date || null, is_active: true, slug,
-      loc_store: pd.loc_store || null, loc_floor: pd.loc_floor || null,
-      loc_sub1: pd.loc_sub1 || null, loc_sub2: pd.loc_sub2 || null,
+      ...locs,
       // Tyre-specific fields
       product_type: pd.product_type || 'part',
       tyre_width:   pd.tyre_width   ? parseInt(pd.tyre_width)   : null,
@@ -325,6 +327,7 @@ export async function POST(req: NextRequest) {
     const toInsert: any[] = []
     const toUpdate: any[] = []
     const skipped: string[] = []
+    const canonLocs = locationCanonicalizer(admin, vendor.id)   // cached per name
 
     for (const item of items) {
       const sku = item.sku?.trim() || generateSKU()
@@ -341,8 +344,7 @@ export async function POST(req: NextRequest) {
         show_price: item.show_price !== false,
         quantity: parseInt(item.quantity) || 1,
         added_date: item.added_date || null, is_active: true,
-        loc_store: item.loc_store || null, loc_floor: item.loc_floor || null,
-        loc_sub1: item.loc_sub1 || null, loc_sub2: item.loc_sub2 || null,
+        ...(await canonLocs({ loc_store: item.loc_store, loc_floor: item.loc_floor, loc_sub1: item.loc_sub1, loc_sub2: item.loc_sub2 })),
         product_type: item.product_type || (item.tyre_width ? 'tyre' : 'part'),
         tyre_width:   item.tyre_width   ? parseInt(item.tyre_width)   : null,
         tyre_profile: item.tyre_profile ? parseInt(item.tyre_profile) : null,
@@ -433,7 +435,9 @@ export async function POST(req: NextRequest) {
     const { productId, data: updateData } = body
     const { data: existing } = await admin.from('products').select('vendor_id, slug, sku, cost, quantity').eq('id', productId).single()
     if (!existing || existing.vendor_id !== vendor.id) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 })
-    const { error } = await admin.from('products').update(updateData).eq('id', productId)
+    // Quick Assign and the Edit form save locations here — one spelling each
+    const tidyData = updateData && typeof updateData === 'object' ? await locationCanonicalizer(admin, vendor.id)(updateData) : updateData
+    const { error } = await admin.from('products').update(tidyData).eq('id', productId)
     if (error) return NextResponse.json({ success: false, error: error.message }, { status: 400 })
 
     // A quantity that arrives here is a count changed by hand with no reason

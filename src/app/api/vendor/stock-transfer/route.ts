@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
+import { locationCanonicalizer } from '@/lib/locations'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
@@ -108,10 +109,10 @@ async function landAtDestination(
     ...fields,
     // Where the RECEIVER is putting it, if they said. Blank otherwise, which
     // correctly reads as "not shelved yet".
-    loc_store: location?.loc_store || null,
-    loc_floor: location?.loc_floor || null,
-    loc_sub1:  location?.loc_sub1  || null,
-    loc_sub2:  location?.loc_sub2  || null,
+    ...(await locationCanonicalizer(admin, toVendorId)({
+      loc_store: location?.loc_store, loc_floor: location?.loc_floor,
+      loc_sub1: location?.loc_sub1, loc_sub2: location?.loc_sub2,
+    })),
     last_stock_confirmed_at: null,
     vendor_id: toVendorId,
     quantity:  qty,
