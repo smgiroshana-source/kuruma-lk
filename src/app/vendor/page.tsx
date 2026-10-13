@@ -36,6 +36,9 @@ import TabPOSLkTax from './_lk_tax/TabPOS'
 import TabPOSStandard from './_standard/TabPOS'
 import type { PendingDraft } from './_lk_tax/TabPOS'
 import IncomingTransfers from './_shared/IncomingTransfers'
+import CountReminder from './_shared/CountReminder'
+import CountCoverage from './_shared/CountCoverage'
+import type { CountAge, LocationFilter } from '@/lib/countCoverage'
 import TabCredit from './_shared/TabCredit'
 import ProductThumb from '@/components/ProductThumb'
 import { ProductSheet, PartOutPanel } from './_shared/ProductSheet'
@@ -569,6 +572,9 @@ export default function VendorDashboard() {
   // Deep-link a sub-view when arriving from the dashboard (e.g. Receive Stock →
   // stocktake's 'receive' view). Consumed + cleared by the target tab on mount.
   const [stockInitialView, setStockInitialView] = useState<string | null>(null)
+  // Stock count reminder → Browse & Count, already filtered (2026-10-13)
+  const [countPreset, setCountPreset] = useState<{ filter: LocationFilter | null; age: CountAge } | null>(null)
+  const [showCountCoverage, setShowCountCoverage] = useState(false)
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [productsLoading, setProductsLoading] = useState(true)
@@ -2695,11 +2701,25 @@ ${(adjustmentsList || []).length > 0 ? (() => {
 
       <main className={isLkTax ? 'px-3 sm:px-6 py-6 pb-24 md:pb-6 md:ml-[220px]' : 'max-w-7xl mx-auto px-4 py-6'}>
 
+        {/* Stock count reminder — every staff login, both shops (2026-10-13).
+            The dashboard shows the full card; Stock has its own progress. */}
+        {tab !== 'overview' && tab !== 'stocktake' && (
+          <CountReminder variant="strip" products={data?.products || []} canCount
+            onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })} />
+        )}
+        {showCountCoverage && (
+          <CountCoverage products={data?.products || []} onClose={() => setShowCountCoverage(false)}
+            onPick={(filter, age) => { setShowCountCoverage(false); startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') }) }} />
+        )}
+
         {/* OVERVIEW — WHEEL MART uses TabOverview, Sakura keeps inline */}
         {tab === 'overview' && isLkTax && (
           <>
           {/* Stock the other shop has sent — answered here, where the shop
               actually looks, not only inside the Transfer Stock tab. */}
+          <CountReminder variant="card" products={data?.products || []} canCount
+            onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })}
+            onCoverage={() => setShowCountCoverage(true)} />
           <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
           <TabOverview
             vendor={vendor}
@@ -2721,6 +2741,9 @@ ${(adjustmentsList || []).length > 0 ? (() => {
         )}
         {tab === 'overview' && !isLkTax && (<div>
           <h1 className="text-2xl font-black text-slate-900 mb-6">Dashboard</h1>
+          <CountReminder variant="card" products={data?.products || []} canCount
+            onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })}
+            onCoverage={() => setShowCountCoverage(true)} />
           <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
           <div className="grid grid-cols-3 gap-4 mb-8">
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-orange-500">{stats.totalProducts}</p><p className="text-xs text-slate-400 mt-1">Products</p></div>
@@ -5001,6 +5024,8 @@ ${(adjustmentsList || []).length > 0 ? (() => {
             onDataChanged={fetchData}
             initialView={stockInitialView}
             onInitialViewConsumed={() => setStockInitialView(null)}
+            countPreset={countPreset}
+            onCountPresetConsumed={() => setCountPreset(null)}
             staffRole={staffRole}
             onNavigate={(t) => startTransition(() => setTab(t as VendorTab))}
           />
@@ -5012,6 +5037,8 @@ ${(adjustmentsList || []).length > 0 ? (() => {
             vendorSettings={vendorSettings}
             showToast={showToast}
             onDataChanged={fetchData}
+            countPreset={countPreset}
+            onCountPresetConsumed={() => setCountPreset(null)}
           />
         )}
 
