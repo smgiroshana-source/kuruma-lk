@@ -1,6 +1,6 @@
 'use client'
 // ── Shared by BOTH vendors (Sakura + WHEEL MART) — keep vendor-neutral ────────
-// Browse & Count's "not confirmed since" control: one row of five stops, each
+// Browse & Count's "not confirmed since" control: one row of four stops, each
 // with how many items sit under it, so staff see where the old stock is
 // before they tap. Rules: src/lib/countCoverage.ts.
 import { COUNT_AGE_STOPS, type CountAge } from '@/lib/countCoverage'
@@ -13,7 +13,7 @@ export default function CountAgeFilter({ value, counts, onChange }: {
   return (
     <div>
       <p className="text-xs font-bold text-slate-400 uppercase mb-1.5">Not confirmed since</p>
-      <div role="radiogroup" aria-label="Not confirmed since" className="grid grid-cols-5 gap-[3px] p-[3px] rounded-xl bg-slate-200">
+      <div role="radiogroup" aria-label="Not confirmed since" className="grid grid-cols-4 gap-[3px] p-[3px] rounded-xl bg-slate-200">
         {COUNT_AGE_STOPS.map(s => {
           const on = s.v === value
           return (

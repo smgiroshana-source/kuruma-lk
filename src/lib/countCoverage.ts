@@ -7,9 +7,9 @@
 // just had it in hand. So an item never counted is timed from when it entered
 // the system (created_at; added_date is free text in mixed formats and can't
 // be trusted) and only becomes due 30 days later.
-// "Never" = due AND never counted since it was added — so every stop sits
-// inside "1 mo+", which is always the largest. (Counting every never-counted
-// item there, new ones included, made "Never" 48 against "1 mo+" 15.)
+// No "Never" stop (owner, 2026-10-13): at Sakura it was the same items as
+// "(No location)" (2,826 of 2,861) and at WHEEL MART 7 items already in
+// "1 mo+". Each card and the printed sheet still say "Never counted".
 //
 // Every staff login sees a reminder while more than REMIND_PCT of the shop's
 // stock is not confirmed. No dismiss button, by the owner's choice: it clears
@@ -23,14 +23,13 @@ export const REMIND_PCT = 20
 
 const DAY = 86_400_000
 
-export type CountAge = 'all' | '1m' | '3m' | '6m' | 'never'
+export type CountAge = 'all' | '1m' | '3m' | '6m'
 
 export const COUNT_AGE_STOPS: { v: CountAge; label: string; long: string }[] = [
   { v: 'all',   label: 'All',    long: 'All' },
   { v: '1m',    label: '1 mo+',  long: 'Not counted in 1 month+' },
   { v: '3m',    label: '3 mo+',  long: 'Not counted in 3 months+' },
   { v: '6m',    label: '6 mo+',  long: 'Not counted in 6 months+' },
-  { v: 'never', label: 'Never',  long: 'Never counted' },
 ]
 
 /** Physical stock that ought to be counted: active, on hand, not a service. */
@@ -51,15 +50,14 @@ export function isConfirmed(p: any, now = Date.now()): boolean {
 /** Does a countable item fall under this stop of the filter? */
 export function matchesCountAge(p: any, age: CountAge, now = Date.now()): boolean {
   if (age === 'all') return true
-  if (age === 'never') return !p?.last_stock_confirmed_at && !isConfirmed(p, now)
   const d = countAgeDays(p, now)
-  if (age === '1m') return !isConfirmed(p, now)   // ⊇ 3 mo+ ⊇ 6 mo+, and ⊇ Never
+  if (age === '1m') return !isConfirmed(p, now)   // ⊇ 3 mo+ ⊇ 6 mo+
   return age === '3m' ? d > 90 : d > 180
 }
 
 /** How many items sit under each stop (countable items only). */
 export function countAgeCounts(products: any[], now = Date.now()): Record<CountAge, number> {
-  const out: Record<CountAge, number> = { all: 0, '1m': 0, '3m': 0, '6m': 0, never: 0 }
+  const out: Record<CountAge, number> = { all: 0, '1m': 0, '3m': 0, '6m': 0 }
   for (const p of products) {
     if (!isCountable(p)) continue
     for (const s of COUNT_AGE_STOPS) if (matchesCountAge(p, s.v, now)) out[s.v]++
@@ -73,19 +71,20 @@ export type CoverageSummary = {
   pctNotConfirmed: number   // 0–100, one decimal
   pctConfirmed: number      // 0–100, whole
   remind: boolean
-  // splits notConfirmed exactly: never counted / counted 1–6 months ago / 6+
-  older: { never: number; m1to6: number; m6plus: number }
+  // splits notConfirmed exactly by how long it has waited (the filter's stops)
+  older: { m1to3: number; m3to6: number; m6plus: number }
 }
 
 export function coverageSummary(products: any[], now = Date.now()): CoverageSummary {
-  let total = 0, notConfirmed = 0, never = 0, m1to6 = 0, m6plus = 0
+  let total = 0, notConfirmed = 0, m1to3 = 0, m3to6 = 0, m6plus = 0
   for (const p of products) {
     if (!isCountable(p)) continue
     total++
     if (isConfirmed(p, now)) continue
     notConfirmed++
-    if (!p.last_stock_confirmed_at) never++
-    else if (countAgeDays(p, now) <= 180) m1to6++
+    const d = countAgeDays(p, now)
+    if (d <= 90) m1to3++
+    else if (d <= 180) m3to6++
     else m6plus++
   }
   const pct = total ? (notConfirmed / total) * 100 : 0
@@ -94,7 +93,7 @@ export function coverageSummary(products: any[], now = Date.now()): CoverageSumm
     pctNotConfirmed: Math.round(pct * 10) / 10,
     pctConfirmed: total ? Math.floor(((total - notConfirmed) / total) * 100) : 100,
     remind: pct > REMIND_PCT,
-    older: { never, m1to6, m6plus },
+    older: { m1to3, m3to6, m6plus },
   }
 }
 
