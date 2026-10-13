@@ -1,9 +1,41 @@
-// ── Shared by BOTH vendors — printable count sheet (owner, 2026-10-13) ──────
+// ── Shared by BOTH vendors — count sheet: print / PDF and Excel (2026-10-13) ─
 // The items Browse & Count is showing, with a blank "Actual" column to fill
 // in on the shelf — the same shape as the paper sheet staff already use.
-// Results are entered back on Browse & Count, which records each change.
+// Print opens the browser's print dialog (Save as PDF lives there); Excel
+// downloads a real .xlsx (src/lib/xlsx.ts). Results are entered back on
+// Browse & Count, which records each change.
 import { escapeHtml } from '@/lib/escapeHtml'
-import { lastCountedLabel } from '@/lib/countCoverage'
+import { lastCountedLabel, countAgeDays } from '@/lib/countCoverage'
+import { downloadXlsx } from '@/lib/xlsx'
+
+export function downloadCountSheetXlsx({ shopName, heading, products }: {
+  shopName: string
+  heading: string
+  products: any[]
+}): boolean {
+  const now = Date.now()
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })   // YYYY-MM-DD
+  const rows = products.map((p, i) => {
+    const d = countAgeDays(p, now)
+    return [
+      i + 1, p.sku || '', p.name || '',
+      p.loc_store || '', p.loc_floor || '', p.loc_sub1 || '', p.loc_sub2 || '',
+      Number(p.quantity) || 0,
+      p.last_stock_confirmed_at
+        ? new Date(p.last_stock_confirmed_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+        : 'Never counted',
+      Number.isFinite(d) ? Math.floor(d) : null,
+      '',
+    ]
+  })
+  return downloadXlsx({
+    name: 'Count sheet',
+    title: [`${shopName} — Stock count sheet`, `${heading} · ${products.length} item${products.length !== 1 ? 's' : ''} · ${today}`],
+    header: ['#', 'Stock no', 'Part', 'Store', 'Floor', 'Sub location 1', 'Sub location 2', 'System qty', 'Last counted', 'Days waiting', 'Actual'],
+    rows,
+    widths: [5, 12, 46, 14, 12, 15, 15, 10, 14, 12, 10],
+  }, `Count sheet ${shopName} ${heading} ${today}.xlsx`)
+}
 
 export function printCountSheet({ shopName, heading, products }: {
   shopName: string
