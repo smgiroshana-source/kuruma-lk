@@ -6,6 +6,13 @@ import { useState, useEffect, useRef } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
 import { useIncomingTransferCount } from '../_shared/useIncomingTransfers'
 import DamageSheet from '../_shared/DamageSheet'
+import CountAgeFilter from '../_shared/CountAgeFilter'
+import CountCoverage from '../_shared/CountCoverage'
+import { printCountSheet } from '../_shared/countSheet'
+import {
+  COUNT_AGE_STOPS, NO_LOCATION, countAgeCounts, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
+  type CountAge, type LocationFilter,
+} from '@/lib/countCoverage'
 
 const CATEGORIES = ['Engine Parts','Transmission & Drivetrain','Suspension & Steering','Brake System','Electrical & Electronics','Body Parts','Lighting','Interior Parts','A/C & Radiator','Wheels & Tires','Exhaust System','Filters & Fluids','Accessories','Hybrid & EV Parts','Other','Windscreen','Beading Belts & Rubber','Audio & Video','Safety']
 const CONDITIONS = ['New-Genuine','New-Other','Reconditioned','Damaged']
@@ -36,6 +43,9 @@ interface TabStockLkTaxProps {
   // once on arrival, then cleared via onInitialViewConsumed.
   initialView?: string | null
   onInitialViewConsumed?: () => void
+  // From the stock count reminder: open Browse & Count on a spot + age filter
+  countPreset?: { filter: LocationFilter | null; age: CountAge } | null
+  onCountPresetConsumed?: () => void
   // Reducing stock past the small-correction limit is a manager decision —
   // the server enforces it too, this only shapes what the screen offers.
   staffRole?: string
@@ -80,7 +90,7 @@ const DROP_REASONS: { v: string; l: string }[] = [
 ]
 type DropPrompt = { id: string; name: string; units: number; oldQty: number; newQty: number; value: number; tooBig: boolean; reason: string }
 
-export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed, staffRole, onNavigate }: TabStockLkTaxProps) {
+export default function TabStockLkTax({ vendor, products, vendorSettings, showToast, onDataChanged, initialView, onInitialViewConsumed, countPreset, onCountPresetConsumed, staffRole, onNavigate }: TabStockLkTaxProps) {
   const mayWriteDown = staffRole === 'owner' || staffRole === 'manager'
   const [stockMainView, setStockMainView] = useState<StockMainView>('stocktake')
   // Stock sent by the other shop waits for an answer here — say so on the tab,
@@ -98,6 +108,20 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [stockView, setStockView] = useState<'browse' | 'assign'>('browse')
   const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [stocktakeSearch, setStocktakeSearch] = useState('')
+  // "Not confirmed since" filter + coverage sheet (src/lib/countCoverage.ts)
+  const [countAge, setCountAge] = useState<CountAge>('all')
+  const [showCoverage, setShowCoverage] = useState(false)
+  // Arriving from the stock count reminder: Browse & Count on that spot
+  useEffect(() => {
+    if (!countPreset) return
+    setStockMainView('stocktake')
+    setStockView('browse')
+    setStockFilter(countPreset.filter || { store: '', floor: '', sub1: '', sub2: '' })
+    setStocktakeSearch('')
+    setCountAge(countPreset.age)
+    onCountPresetConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [countPreset])
   const [stockQtyEdits, setStockQtyEdits] = useState<Record<string, number>>({})
   const [stockConfirmSet, setStockConfirmSet] = useState<Set<string>>(new Set())
   const [stocktakeSaving, setStocktakeSaving] = useState(false)
@@ -640,16 +664,27 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
 
   // ── filter products by active filters + search ──
   const searchLower = stocktakeSearch.toLowerCase()
-  const browseProducts = allProducts.filter((p: any) => {
-    if (stockFilter.store && p.loc_store !== stockFilter.store) return false
-    if (stockFilter.floor && p.loc_floor !== stockFilter.floor) return false
-    if (stockFilter.sub1  && p.loc_sub1  !== stockFilter.sub1)  return false
-    if (stockFilter.sub2  && p.loc_sub2  !== stockFilter.sub2)  return false
+  const placeProducts = allProducts.filter((p: any) => {
+    if (!matchesLocation(p, stockFilter)) return false
     if (searchLower) return p.name?.toLowerCase().includes(searchLower) || (p.sku || '').toLowerCase().includes(searchLower)
     return true
   })
+  // Counts under each "not confirmed since" stop, for this spot + search
+  const countAgeHere = countAgeCounts(placeProducts)
+  // A time filter shows only stock on hand, longest-waiting first
+  const browseProducts = countAge === 'all' ? placeProducts
+    : placeProducts.filter((p: any) => isCountable(p) && matchesCountAge(p, countAge))
+        .sort((a: any, b: any) => countAgeDays(b) - countAgeDays(a))
+  const hasUnplaced = allProducts.some((p: any) => isCountable(p) && hasNoLocation(p))
+  const countPlaceText = stockFilter.store === NO_LOCATION ? 'No location set'
+    : [stockFilter.store, stockFilter.floor, stockFilter.sub1, stockFilter.sub2].filter(Boolean).join(' · ') || 'Whole shop'
+  function printSheet() {
+    const age = COUNT_AGE_STOPS.find(s => s.v === countAge)
+    const heading = countAge === 'all' ? countPlaceText : `${countPlaceText} — ${(age?.long || '').toLowerCase()}`
+    if (!printCountSheet({ shopName: vendor?.name || 'Stock', heading, products: browseProducts })) showToast('Allow pop-ups to print the count sheet')
+  }
 
-  const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch
+  const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch || countAge !== 'all'
   const pendingCount = Object.keys(stockQtyEdits).length + stockConfirmSet.size
 
   // ── quick assign: search results ──
@@ -1808,12 +1843,20 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         <div>
           {/* 4-level filter row */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
+            <CountAgeFilter value={countAge} counts={countAgeHere} onChange={setCountAge} />
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowCoverage(true)}
+                className="flex-1 min-h-11 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50">📍 By location</button>
+              <button type="button" onClick={printSheet} disabled={browseProducts.length === 0}
+                className="flex-1 min-h-11 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50 disabled:opacity-40">🖨 Print sheet</button>
+            </div>
             <p className="text-xs font-bold text-slate-400 uppercase">Filter by Location</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 *:min-w-0">
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 mb-1">Store</label>
                 <select value={stockFilter.store} onChange={e => setStockFilter(f => ({...f, store: e.target.value, floor: '', sub1: '', sub2: ''}))} className={dropdownCls}>
                   <option value="">All Stores</option>
+                  {hasUnplaced && <option value={NO_LOCATION}>(No location)</option>}
                   {allStores.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
@@ -1847,7 +1890,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
               {stocktakeSearch && <button onClick={() => setStocktakeSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">×</button>}
             </div>
             {anyFilter && (
-              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch('') }}
+              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all') }}
                 className="text-xs font-bold text-orange-500 hover:text-orange-700">✕ Clear all filters</button>
             )}
           </div>
@@ -1863,7 +1906,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
             <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
               <p className="text-3xl mb-3">🔍</p>
               <p className="text-slate-500 font-semibold">No products match these filters</p>
-              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch('') }} className="mt-3 text-sm text-orange-500 font-bold">Clear filters</button>
+              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all') }} className="mt-3 text-sm text-orange-500 font-bold">Clear filters</button>
             </div>
           ) : (
             <div className="space-y-2 pb-24 sm:pb-4">
@@ -2235,6 +2278,12 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       {/* ── TRANSFER STOCK ── */}
       {stockMainView === 'transfer' && (
         <StockTransfer vendor={vendor} products={products} showToast={showToast} onDataChanged={onDataChanged} />
+      )}
+
+      {/* ── Count coverage by location (stock count reminder, 2026-10-13) ── */}
+      {showCoverage && (
+        <CountCoverage products={allProducts} onClose={() => setShowCoverage(false)}
+          onPick={(f, a) => { setShowCoverage(false); setStockFilter(f); setStocktakeSearch(''); setCountAge(a) }} />
       )}
 
       {/* ── Damage capture sheet (from stock count) ── */}
