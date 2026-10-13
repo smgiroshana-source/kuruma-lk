@@ -2,36 +2,33 @@
 // ── Shared by BOTH vendors (Sakura + WHEEL MART) — keep vendor-neutral ────────
 // Stock count reminder (owner, 2026-10-13): every staff login sees it while
 // more than REMIND_PCT of the shop's stock has not been confirmed within the
-// shop's window (countWindowDays: WHEEL MART 30 days, Sakura 90). No dismiss button, by the owner's choice — it clears only
+// shop's window (countRules: WHEEL MART 30 days, Sakura 90). No dismiss button, by the owner's choice — it clears only
 // by counting. The dashboard shows the card; every other tab the one-line
 // strip. Cashiers (POS only) see it without a "count" action they can't open.
 // Rules: src/lib/countCoverage.ts.
 import { useMemo } from 'react'
 import {
   coverageSummary, coverageByLocation, dueStop, REMIND_PCT,
-  type CountAge, type LocationFilter,
+  type CountAge, type CountRules, type LocationFilter,
 } from '@/lib/countCoverage'
 
 type Props = {
   products: any[]
-  windowDays: number
+  rules: CountRules
   variant: 'card' | 'strip'
   canCount: boolean
   onCount?: (filter: LocationFilter | null, age: CountAge) => void
   onCoverage?: () => void
 }
 
-export default function CountReminder({ products, windowDays, variant, canCount, onCount, onCoverage }: Props) {
-  const sum = useMemo(() => coverageSummary(products, windowDays), [products, windowDays])
-  const top = useMemo(() => (variant === 'card' && sum.remind ? coverageByLocation(products, windowDays).filter(r => r.notConfirmed > 0).slice(0, 3) : []), [products, windowDays, variant, sum.remind])
+export default function CountReminder({ products, rules, variant, canCount, onCount, onCoverage }: Props) {
+  const sum = useMemo(() => coverageSummary(products, rules), [products, rules])
+  const top = useMemo(() => (variant === 'card' && sum.remind ? coverageByLocation(products, rules.windowDays).filter(r => r.notConfirmed > 0).slice(0, 3) : []), [products, rules, variant, sum.remind])
   if (!sum.remind) return null
-  const due = dueStop(windowDays)
-  // Only the age bands an overdue item can fall in under this window
-  const tiles: [string, number, boolean][] = [
-    ...(windowDays < 90 ? [['1–3 months', sum.older.m1to3, false] as [string, number, boolean]] : []),
-    ...(windowDays < 180 ? [['3–6 months', sum.older.m3to6, false] as [string, number, boolean]] : []),
-    ['6 months+', sum.older.m6plus, true],
-  ]
+  const due = dueStop(rules)
+  const windowDays = rules.windowDays
+  // How long the waiting items have waited, along the shop's stops
+  const tiles: [string, number, boolean][] = sum.bands.map(b => [b.label, b.n, b.oldest])
   const pct = Math.round(sum.pctNotConfirmed)
   const goal = 100 - REMIND_PCT
 

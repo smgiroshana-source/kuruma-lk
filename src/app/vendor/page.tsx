@@ -38,7 +38,7 @@ import type { PendingDraft } from './_lk_tax/TabPOS'
 import IncomingTransfers from './_shared/IncomingTransfers'
 import CountReminder from './_shared/CountReminder'
 import CountCoverage from './_shared/CountCoverage'
-import { countWindowDays, type CountAge, type LocationFilter } from '@/lib/countCoverage'
+import { countRules, type CountAge, type LocationFilter } from '@/lib/countCoverage'
 import TabCredit from './_shared/TabCredit'
 import ProductThumb from '@/components/ProductThumb'
 import { ProductSheet, PartOutPanel } from './_shared/ProductSheet'
@@ -2704,11 +2704,11 @@ ${(adjustmentsList || []).length > 0 ? (() => {
         {/* Stock count reminder — every staff login, both shops (2026-10-13).
             The dashboard shows the full card; Stock has its own progress. */}
         {tab !== 'overview' && tab !== 'stocktake' && (
-          <CountReminder variant="strip" products={data?.products || []} windowDays={countWindowDays(isLkTax)} canCount
+          <CountReminder variant="strip" products={data?.products || []} rules={countRules(isLkTax)} canCount
             onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })} />
         )}
         {showCountCoverage && (
-          <CountCoverage products={data?.products || []} windowDays={countWindowDays(isLkTax)} onClose={() => setShowCountCoverage(false)}
+          <CountCoverage products={data?.products || []} rules={countRules(isLkTax)} onClose={() => setShowCountCoverage(false)}
             onPick={(filter, age) => { setShowCountCoverage(false); startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') }) }} />
         )}
 
@@ -2717,7 +2717,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
           <>
           {/* Stock the other shop has sent — answered here, where the shop
               actually looks, not only inside the Transfer Stock tab. */}
-          <CountReminder variant="card" products={data?.products || []} windowDays={countWindowDays(isLkTax)} canCount
+          <CountReminder variant="card" products={data?.products || []} rules={countRules(isLkTax)} canCount
             onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })}
             onCoverage={() => setShowCountCoverage(true)} />
           <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
@@ -2741,7 +2741,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
         )}
         {tab === 'overview' && !isLkTax && (<div>
           <h1 className="text-2xl font-black text-slate-900 mb-6">Dashboard</h1>
-          <CountReminder variant="card" products={data?.products || []} windowDays={countWindowDays(isLkTax)} canCount
+          <CountReminder variant="card" products={data?.products || []} rules={countRules(isLkTax)} canCount
             onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })}
             onCoverage={() => setShowCountCoverage(true)} />
           <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />

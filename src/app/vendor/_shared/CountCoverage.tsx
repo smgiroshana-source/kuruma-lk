@@ -8,18 +8,18 @@
 import { useEffect, useMemo } from 'react'
 import {
   coverageSummary, coverageByLocation, dueStop, REMIND_PCT,
-  type CountAge, type LocationFilter,
+  type CountAge, type CountRules, type LocationFilter,
 } from '@/lib/countCoverage'
 
-export default function CountCoverage({ products, windowDays, onClose, onPick, canCount = true }: {
+export default function CountCoverage({ products, rules, onClose, onPick, canCount = true }: {
   products: any[]
-  windowDays: number          // countWindowDays(): WHEEL MART 30, Sakura 90
+  rules: CountRules           // countRules(): WHEEL MART 30 days, Sakura 90
   onClose: () => void
   onPick?: (filter: LocationFilter, age: CountAge) => void
   canCount?: boolean
 }) {
-  const sum = useMemo(() => coverageSummary(products, windowDays), [products, windowDays])
-  const rows = useMemo(() => coverageByLocation(products, windowDays), [products, windowDays])
+  const sum = useMemo(() => coverageSummary(products, rules), [products, rules])
+  const rows = useMemo(() => coverageByLocation(products, rules.windowDays), [products, rules])
   const goal = 100 - REMIND_PCT
 
   useEffect(() => {
@@ -36,7 +36,7 @@ export default function CountCoverage({ products, windowDays, onClose, onPick, c
         <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3 bg-white border-b border-slate-200">
           <div>
             <h3 className="text-lg font-black text-slate-900">Count coverage</h3>
-            <p className="text-xs text-slate-500">Confirmed = counted in the last {windowDays} days</p>
+            <p className="text-xs text-slate-500">Confirmed = counted in the last {rules.windowDays} days</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="w-11 h-11 -mr-1 rounded-xl flex items-center justify-center text-slate-500 active:bg-slate-100">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -77,7 +77,7 @@ export default function CountCoverage({ products, windowDays, onClose, onPick, c
                 </>
               )
               return canCount && onPick && r.notConfirmed > 0 ? (
-                <button key={r.key} type="button" onClick={() => onPick(r.filter, dueStop(windowDays))}
+                <button key={r.key} type="button" onClick={() => onPick(r.filter, dueStop(rules))}
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 active:bg-orange-50 active:border-orange-300">{body}</button>
               ) : (
                 <div key={r.key} className="bg-white border border-slate-200 rounded-xl px-3 py-2.5">{body}</div>

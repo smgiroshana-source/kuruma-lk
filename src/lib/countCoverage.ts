@@ -2,16 +2,18 @@
 //
 // Both shops. An item is "confirmed" when someone counted it on Browse & Count
 // (confirm or correct) or placed it with Quick Assign — both stamp
-// products.last_stock_confirmed_at. It goes stale after the shop's window:
-// WHEEL MART 30 days, Sakura 90 (owner, 2026-10-13 — Sakura's yard is
-// thousands of slow-moving body parts). countWindowDays() is the only place
-// that says so.
+// products.last_stock_confirmed_at. It goes stale after the shop's window,
+// and each shop has its own filter stops (owner, 2026-10-13 — Sakura's yard
+// is thousands of slow-moving body parts):
+//   WHEEL MART  confirmed 30 days · stops 1 / 3 / 6 months
+//   Sakura      confirmed 90 days · stops 3 / 6 / 12 months
+// countRules() is the only place that says so.
 // Adding an item counts as its first confirmation (owner, 2026-10-13): someone
 // just had it in hand. So an item never counted is timed from when it entered
 // the system (created_at; added_date is free text in mixed formats and can't
 // be trusted) and only becomes due a window later.
-// The filter's stops are plain ages (1 / 3 / 6 months), the same in both
-// shops; the reminder and the coverage list use the shop's window.
+// A stop is a plain age ("not counted in 6 months+"); the first stop is the
+// shop's window, so it shows exactly what the reminder counts.
 // No "Never" stop (owner, 2026-10-13): at Sakura it was the same items as
 // "(No location)" (2,826 of 2,861) and at WHEEL MART 7 items already in
 // "1 mo+". Each card and the printed sheet still say "Never counted".
@@ -25,26 +27,37 @@
 
 export const REMIND_PCT = 20
 
-/** Days an item stays confirmed after a count: WHEEL MART 30, Sakura 90. */
-export function countWindowDays(isLkTax: boolean): number {
-  return isLkTax ? 30 : 90
+export type CountAge = 'all' | '1m' | '3m' | '6m' | '12m'
+const AGE_DAYS: Record<Exclude<CountAge, 'all'>, number> = { '1m': 30, '3m': 90, '6m': 180, '12m': 365 }
+const AGE_MONTHS: Record<Exclude<CountAge, 'all'>, number> = { '1m': 1, '3m': 3, '6m': 6, '12m': 12 }
+
+export type CountRules = { windowDays: number; stops: Exclude<CountAge, 'all'>[] }
+
+// Each shop's count rules — the ONLY place they live. Fixed objects, so a
+// component's useMemo on them doesn't recompute every render.
+const WHEEL_MART_RULES: CountRules = { windowDays: 30, stops: ['1m', '3m', '6m'] }
+const SAKURA_RULES: CountRules = { windowDays: 90, stops: ['3m', '6m', '12m'] }
+export function countRules(isLkTax: boolean): CountRules {
+  return isLkTax ? WHEEL_MART_RULES : SAKURA_RULES
 }
 
-/** The filter stop that shows exactly the items due under this window. */
-export function dueStop(windowDays: number): CountAge {
-  return windowDays >= 180 ? '6m' : windowDays >= 90 ? '3m' : '1m'
+/** The filter stop that shows exactly what the reminder counts. */
+export function dueStop(rules: CountRules): CountAge {
+  return rules.stops[0]
+}
+
+export function countAgeStops(rules: CountRules): { v: CountAge; label: string; long: string }[] {
+  return [
+    { v: 'all', label: 'All', long: 'All' },
+    ...rules.stops.map(v => {
+      const m = AGE_MONTHS[v]
+      return { v, label: `${m} mo+`, long: `Not counted in ${m} month${m === 1 ? '' : 's'}+` }
+    }),
+  ]
 }
 
 const DAY = 86_400_000
 
-export type CountAge = 'all' | '1m' | '3m' | '6m'
-
-export const COUNT_AGE_STOPS: { v: CountAge; label: string; long: string }[] = [
-  { v: 'all',   label: 'All',    long: 'All' },
-  { v: '1m',    label: '1 mo+',  long: 'Not counted in 1 month+' },
-  { v: '3m',    label: '3 mo+',  long: 'Not counted in 3 months+' },
-  { v: '6m',    label: '6 mo+',  long: 'Not counted in 6 months+' },
-]
 
 /** Physical stock that ought to be counted: active, on hand, not a service. */
 export function isCountable(p: any): boolean {
@@ -64,16 +77,16 @@ export function isConfirmed(p: any, windowDays = 30, now = Date.now()): boolean 
 /** Does a countable item fall under this stop of the filter? */
 export function matchesCountAge(p: any, age: CountAge, now = Date.now()): boolean {
   if (age === 'all') return true
-  const d = countAgeDays(p, now)   // plain ages: 1 mo+ ⊇ 3 mo+ ⊇ 6 mo+
-  return age === '1m' ? d > 30 : age === '3m' ? d > 90 : d > 180
+  return countAgeDays(p, now) > AGE_DAYS[age]   // plain ages: each stop ⊇ the next
 }
 
 /** How many items sit under each stop (countable items only). */
-export function countAgeCounts(products: any[], now = Date.now()): Record<CountAge, number> {
-  const out: Record<CountAge, number> = { all: 0, '1m': 0, '3m': 0, '6m': 0 }
+export function countAgeCounts(products: any[], rules: CountRules, now = Date.now()): Record<string, number> {
+  const stops: CountAge[] = ['all', ...rules.stops]
+  const out: Record<string, number> = Object.fromEntries(stops.map(s => [s, 0]))
   for (const p of products) {
     if (!isCountable(p)) continue
-    for (const s of COUNT_AGE_STOPS) if (matchesCountAge(p, s.v, now)) out[s.v]++
+    for (const s of stops) if (matchesCountAge(p, s, now)) out[s]++
   }
   return out
 }
@@ -84,21 +97,28 @@ export type CoverageSummary = {
   pctNotConfirmed: number   // 0–100, one decimal
   pctConfirmed: number      // 0–100, whole
   remind: boolean
-  // splits notConfirmed exactly by how long it has waited (the filter's stops)
-  older: { m1to3: number; m3to6: number; m6plus: number }
+  // splits notConfirmed exactly by how long it has waited, along the shop's
+  // stops: WHEEL MART 1–3 / 3–6 / 6+ months, Sakura 3–6 / 6–12 / 12+
+  bands: { label: string; n: number; oldest: boolean }[]
 }
 
-export function coverageSummary(products: any[], windowDays = 30, now = Date.now()): CoverageSummary {
-  let total = 0, notConfirmed = 0, m1to3 = 0, m3to6 = 0, m6plus = 0
+export function coverageSummary(products: any[], rules: CountRules, now = Date.now()): CoverageSummary {
+  const edges = rules.stops.map(s => AGE_DAYS[s])
+  const months = rules.stops.map(s => AGE_MONTHS[s])
+  const bands = rules.stops.map((_, i) => ({
+    label: i < months.length - 1 ? `${months[i]}–${months[i + 1]} months` : `${months[i]} months+`,
+    n: 0, oldest: i === months.length - 1,
+  }))
+  let total = 0, notConfirmed = 0
   for (const p of products) {
     if (!isCountable(p)) continue
     total++
-    if (isConfirmed(p, windowDays, now)) continue
+    if (isConfirmed(p, rules.windowDays, now)) continue
     notConfirmed++
     const d = countAgeDays(p, now)
-    if (d <= 90) m1to3++
-    else if (d <= 180) m3to6++
-    else m6plus++
+    let i = edges.length - 1
+    while (i > 0 && d <= edges[i]) i--
+    bands[i].n++
   }
   const pct = total ? (notConfirmed / total) * 100 : 0
   return {
@@ -106,7 +126,7 @@ export function coverageSummary(products: any[], windowDays = 30, now = Date.now
     pctNotConfirmed: Math.round(pct * 10) / 10,
     pctConfirmed: total ? Math.floor(((total - notConfirmed) / total) * 100) : 100,
     remind: pct > REMIND_PCT,
-    older: { m1to3, m3to6, m6plus },
+    bands,
   }
 }
 
