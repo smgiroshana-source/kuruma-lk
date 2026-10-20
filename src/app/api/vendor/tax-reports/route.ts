@@ -403,7 +403,7 @@ export async function GET(req: NextRequest) {
     const windowStart = new Date(new Date(fromTs).getTime() - 800 * 86400000).toISOString() // ~26 months back
     const { data: grns, error: grnsError } = await admin
       .from('grns')
-      .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, net_cost, input_vat, total_cost, vat_claim_period, grn_series')
+      .select('id, grn_number, received_at, supplier_name, supplier_tin, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, tax_invoice_confirmed, net_cost, input_vat, doc_vat, total_cost, vat_claim_period, grn_series')
       .eq('vendor_id', vendor.id)
       .eq('status', 'posted')
       .gt('input_vat', 0)
@@ -444,9 +444,17 @@ export async function GET(req: NextRequest) {
         supplierVatRegistered: g.supplier_vat_registered ?? null,  // null = legacy GRN (pre-fix)
         supplierInvoiceNo: g.supplier_invoice_no || null,
         netCost: parseInt(g.net_cost || 0),
-        inputVat: parseInt(g.input_vat || 0),
+        // AS PRINTED on the supplier's tax invoice, to the cent — the figure
+        // Schedule 02 is filed from and the Filing Centre / VAT Summary use.
+        // Until 2026-10-20 this register summed the whole-rupee book figure:
+        // Sep 2026 read Rs.75,388 against the filed Rs.75,392.02.
+        inputVat: round2(exactOr(g.doc_vat, g.input_vat)),
+        bookVat: parseInt(g.input_vat || 0),
         totalCost: parseInt(g.total_cost || 0),
-        claimable: g.supplier_vat_registered !== false,  // true for legacy + VAT-reg
+        // Same rule as the Filing Centre: a VAT-registered supplier AND the
+        // invoice no., date, TIN and the operator's tick on record.
+        missingPaperwork: missingVatPaperwork(g),
+        claimable: g.supplier_vat_registered !== false && missingVatPaperwork(g).length === 0,
       }
     }
     // ── Import VAT (Schedule 03) — one row per Customs declaration ──
@@ -501,12 +509,13 @@ export async function GET(req: NextRequest) {
     const carriedForward = all
       .filter(r => r.claimable && r.claimPeriod > toMonth)
       .sort((a, b) => a.monthsLeft - b.monthsLeft)
-    const carriedTotal = carriedForward.reduce((s, r) => s + r.inputVat, 0)
+    const carriedTotal = round2(carriedForward.reduce((s, r) => s + r.inputVat, 0))
     const expiringSoon = carriedForward.filter(r => r.monthsLeft <= 3)
 
     // Aggregate by month
     const monthMap: Record<string, { netCost: number; inputVat: number; totalCost: number; count: number }> = {}
     for (const r of rows) {
+      if (!r.claimable) continue   // same footing as the totals and the Filing Centre
       const monthKey = r.claimPeriod
       if (!monthMap[monthKey]) monthMap[monthKey] = { netCost: 0, inputVat: 0, totalCost: 0, count: 0 }
       monthMap[monthKey].netCost   += r.netCost
@@ -518,6 +527,7 @@ export async function GET(req: NextRequest) {
     const months = Object.keys(monthMap).sort().map(month => ({
       month,
       ...monthMap[month],
+      inputVat: round2(monthMap[month].inputVat),
     }))
 
     const claimableRows    = rows.filter(r => r.claimable)
@@ -525,18 +535,18 @@ export async function GET(req: NextRequest) {
 
     const totals = {
       netCost:            claimableRows.reduce((s, r) => s + r.netCost,   0),
-      inputVat:           claimableRows.reduce((s, r) => s + r.inputVat,  0),
+      inputVat:           round2(claimableRows.reduce((s, r) => s + r.inputVat,  0)),
       totalCost:          claimableRows.reduce((s, r) => s + r.totalCost, 0),
       count:              claimableRows.length,
       nonClaimableCount:  nonClaimableRows.length,
-      nonClaimableVat:    nonClaimableRows.reduce((s, r) => s + r.inputVat, 0),
+      nonClaimableVat:    round2(nonClaimableRows.reduce((s, r) => s + r.inputVat, 0)),
     }
 
     return NextResponse.json({
       rows, months, totals, entity: lkTaxEntities[0].name, filing_valid: !branch, branch,
       carriedForward, carriedTotal, expiringSoonCount: expiringSoon.length,
       importRows, importCarried, importTotals,
-      grandTotalInputVat: totals.inputVat + importTotals.claimable,
+      grandTotalInputVat: round2(totals.inputVat + importTotals.claimable),
     })
   }
 
