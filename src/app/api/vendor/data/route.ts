@@ -3,6 +3,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows } from '@/lib/fetchAll'
 import { PAYROLL_FIRST_CYCLE_START } from '@/lib/payrollStart'
+import { taxObligationsDue } from '@/lib/taxDeadlines'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
@@ -313,7 +314,20 @@ export async function GET(req: NextRequest) {
       sample: (incomingRows as any[])[0].from_product_name || '',
     } : null
 
+    // VAT / SSCL deadlines within a week, or past, not yet ticked Done
+    // (src/lib/taxDeadlines.ts). Asked only when something is due — most days
+    // nothing is, and this costs no query.
+    let taxDue = taxObligationsDue(colToday)
+    if (taxDue.length > 0) {
+      const { data: doneRows, error: doneErr } = await admin.from('tax_obligations_done')
+        .select('kind, period').eq('vendor_id', vendor.id).in('period', [...new Set(taxDue.map(t => t.period))])
+      if (doneErr) console.error('tax_obligations_done:', doneErr.message)
+      const done = new Set((doneRows || []).map((r: any) => `${r.kind}|${r.period}`))
+      taxDue = taxDue.filter(t => !done.has(`${t.kind}|${t.period}`))
+    }
+
     dashboard = {
+      taxDue,
       todaySales, todayCount: (todaySalesRows || []).length,
       cashSession: cashSess ? { status: cashSess.status, expected: parseInt(cashSess.expected_cash ?? cashSess.opening_balance ?? 0), openedAt: cashSess.opened_at || null } : null,
       staleOpenSessionDate: staleOpen?.[0]?.session_date || null,

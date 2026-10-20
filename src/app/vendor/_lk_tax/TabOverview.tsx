@@ -19,6 +19,8 @@ import {
   CustomerCollectModal,
 } from './CashModals'
 import SupplierPayModal from './SupplierPayFlow'
+import TaxDoneDialog from './TaxDoneDialog'
+import { TAX_KIND_LABEL, type TaxDue } from '@/lib/taxDeadlines'
 
 type Dashboard = {
   todaySales: number
@@ -38,6 +40,7 @@ type Dashboard = {
   salaryRaisesDue?: number
   salaryRaiseName?: string
   payrollUnpaid?: { period: string; endDate: string; draft: boolean }[]
+  taxDue?: TaxDue[]
   recentActivity: { time: string; customer: string; amount: number; method: string }[]
 }
 
@@ -169,6 +172,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
     | { kind: 'paysupplier'; amount?: number }
     | { kind: 'collect'; amount?: number }
   const [popup, setPopup] = useState<Popup | null>(null)
+  const [taxDone, setTaxDone] = useState<TaxDue | null>(null)
   const [amtIn, setAmtIn] = useState('')
   const [amtOut, setAmtOut] = useState('')
 
@@ -308,7 +312,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
   const flowDone = flow.every(s => s.state === 'done')
 
   // ── Needs-attention queue (red = money leaking now, amber = drifting) ──
-  type Attn = { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string; open?: () => void; done?: { label: string; run: () => void; busy?: boolean } }
+  type Attn = { icon: string; tone: 'red' | 'amber'; text: string; cta: string; tab: string; sub?: string; open?: () => void; done?: { label: string; run: () => void; busy?: boolean; title?: string } }
   const attention: Attn[] = []
   if (!isCashier) {
     if (d.staleOpenSessionDate) {
@@ -403,6 +407,23 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
           icon: '🧾', tone: daysPast > 7 ? 'red' : 'amber',
           text: `${month} salaries not marked paid — cycle ended ${endLabel}` + (u.draft ? ' (draft saved)' : ' (payroll not started)'),
           cta: 'Payroll', tab: 'staff', sub: `payroll:${u.period}`,
+        })
+      }
+    }
+    // VAT / SSCL deadlines (owner, 2026-10-20; src/lib/taxDeadlines.ts) — the
+    // owner pays and files, so only the owner sees them. From a week before:
+    // amber; on the day and after: red, until ticked Done.
+    if (role === 'owner') {
+      for (const t of d.taxDue || []) {
+        const dueLabel = new Date(t.due + 'T00:00:00').toLocaleString('en-GB', { day: 'numeric', month: 'short' })
+        const when = t.daysLeft < 0 ? `was due ${dueLabel} — ${-t.daysLeft} day${t.daysLeft === -1 ? '' : 's'} late`
+          : t.daysLeft === 0 ? `due TODAY (${dueLabel})`
+          : `due ${dueLabel} — in ${t.daysLeft} day${t.daysLeft === 1 ? '' : 's'}`
+        attention.push({
+          icon: t.kind.startsWith('vat') ? '🏛️' : '📊', tone: t.daysLeft <= 0 ? 'red' : 'amber',
+          text: `${TAX_KIND_LABEL[t.kind]} for ${t.periodLabel} ${when}`,
+          cta: 'Filing Centre', tab: 'tax',
+          done: { label: t.kind.endsWith('_payment') ? 'Paid ✓' : 'Filed ✓', run: () => setTaxDone(t), title: 'Mark it done — the reminder clears' },
         })
       }
     }
@@ -557,7 +578,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
                 {a.done && (
                   <button
                     onClick={a.done.run} disabled={a.done.busy}
-                    title="I have looked at this — clear it until the next correction"
+                    title={a.done.title || 'I have looked at this — clear it until the next correction'}
                     className="shrink-0 mr-2 text-[11px] font-bold text-slate-600 bg-white border border-slate-300 hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50 px-2.5 py-1.5 rounded-lg"
                   >
                     {a.done.busy ? '…' : a.done.label}
@@ -871,6 +892,7 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
           initialAmount={popup.amount}
           openSessionId={sessOpen && flowSession?.id ? flowSession.id : null} />
       )}
+      {taxDone && <TaxDoneDialog item={taxDone} onClose={() => setTaxDone(null)} onSaved={() => { setTaxDone(null); onDataChanged?.() }} showToast={showToast} />}
     </div>
   )
 }
