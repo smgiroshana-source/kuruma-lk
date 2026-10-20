@@ -237,9 +237,16 @@ export async function GET(req: NextRequest) {
 
     // Get non-voided sales in range for lk_tax entities (paginated — turnover
     // would be understated if the period exceeds 1000 sales / line items)
+    // SSCL turnover EXCLUDES VAT — SSCL Act No. 25 of 2022, s.3(3)(b): turnover
+    // "shall not include … any Value Added Tax … paid for that relevant
+    // quarter". A tax invoice's line totals are VAT-inclusive, so each line is
+    // scaled by its own invoice's net ÷ total (matches the printed NET to the
+    // rupee, whatever the rate). Until 2026-10-20 the gross was summed:
+    // September 2026 read Rs.495,450 turnover / Rs.6,193 SSCL instead of
+    // Rs.419,872 / Rs.5,248.
     const sales = await fetchAllRows((from, to) => admin
       .from('sales')
-      .select('id, created_at')
+      .select('id, created_at, total, net_amount')
       .eq('vendor_id', vendor.id)
       .in('invoice_entity_id', entityIds)
       .neq('payment_status', 'voided')
@@ -250,7 +257,12 @@ export async function GET(req: NextRequest) {
 
     const saleIds = sales.map((s: any) => s.id)
     const saleDateMap: Record<string, string> = {}
-    for (const s of sales) saleDateMap[s.id] = s.created_at
+    const netRatio: Record<string, number> = {}   // VAT-exclusive share of each invoice
+    for (const s of sales) {
+      saleDateMap[s.id] = s.created_at
+      const total = Number(s.total) || 0, net = Number(s.net_amount)
+      netRatio[s.id] = total > 0 && Number.isFinite(net) && s.net_amount != null ? net / total : 1
+    }
 
     // Aggregate by month × stream
     const monthMap: Record<string, { PART: number; SVC: number }> = {}
@@ -267,7 +279,7 @@ export async function GET(req: NextRequest) {
         const monthKey = colomboMonth(saleDateMap[item.sale_id])
         if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
         const stream = (item.sscl_stream || 'PART') as 'PART' | 'SVC'
-        monthMap[monthKey][stream] += parseFloat(item.total || 0)
+        monthMap[monthKey][stream] += (parseFloat(item.total || 0) || 0) * (netRatio[item.sale_id] ?? 1)
       }
     }
 
@@ -275,7 +287,7 @@ export async function GET(req: NextRequest) {
     // (CLAUDE.md), per line-item stream. (paginated)
     const ssclCns = await fetchAllRows((from, to) => admin
       .from('credit_notes')
-      .select('issued_at, original_sale_id, items:credit_note_items(sscl_stream, total)')
+      .select('issued_at, original_sale_id, total, net_amount, items:credit_note_items(sscl_stream, total)')
       .eq('vendor_id', vendor.id)
       .in('invoice_entity_id', entityIds)
       .gte('issued_at', fromTs)
@@ -290,9 +302,12 @@ export async function GET(req: NextRequest) {
       if (ssclVoided.has(cn.original_sale_id)) continue
       const monthKey = colomboMonth(cn.issued_at)
       if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
+      // the credit note's own NET ÷ TOTAL — VAT credited is not turnover either
+      const cnTotal = Number(cn.total) || 0
+      const cnRatio = cnTotal > 0 && cn.net_amount != null ? Number(cn.net_amount) / cnTotal : 1
       for (const it of (cn.items || [])) {
         const stream = (it.sscl_stream || 'PART') as 'PART' | 'SVC'
-        monthMap[monthKey][stream] -= parseFloat(it.total || 0)
+        monthMap[monthKey][stream] -= (parseFloat(it.total || 0) || 0) * cnRatio
       }
     }
 
@@ -312,8 +327,9 @@ export async function GET(req: NextRequest) {
       for (const e of ssclBd) {
         const sh = shares[e.saleId] || { PART: 1, SVC: 0 }
         const tot = sh.PART + sh.SVC || 1
-        const partShare = Math.round(e.amount * sh.PART / tot)
-        const svcShare = e.amount - partShare
+        // the shortfall net of its VAT (the VAT part is bad-debt VAT relief)
+        const partShare = Math.round(e.netShare * sh.PART / tot)
+        const svcShare = e.netShare - partShare
         const monthKey = colomboMonth(e.at)
         if (!monthMap[monthKey]) monthMap[monthKey] = { PART: 0, SVC: 0 }
         const sign = e.kind === 'relief' ? -1 : 1
