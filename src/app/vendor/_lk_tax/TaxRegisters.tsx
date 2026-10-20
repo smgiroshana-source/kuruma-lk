@@ -517,7 +517,9 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
                         <td className="px-3 py-2 text-right font-semibold text-orange-600">Rs.{r.inputVat.toLocaleString()}</td>
                         <td className="px-3 py-2 text-right font-bold">Rs.{r.totalCost.toLocaleString()}</td>
                         <td className="px-3 py-2 text-center whitespace-nowrap text-[10px] text-slate-400">
-                          {r.deferred
+                          {!r.claimable
+                            ? <span className="font-black text-red-600" title={(r.missingPaperwork || []).length ? `Missing: ${r.missingPaperwork.join(', ')}` : 'Supplier not VAT-registered'}>not claimable yet</span>
+                            : r.deferred
                             ? <span className="font-black text-purple-600" title={`Purchased ${r.originMonth}, claimable until ${r.expiryMonth}`}>moved from {r.originMonth}</span>
                             : 'own month'}
                         </td>
