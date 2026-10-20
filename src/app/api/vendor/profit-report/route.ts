@@ -5,6 +5,7 @@ import { fetchAllRows } from '@/lib/fetchAll'
 import { netOfVat } from '@/lib/margin'
 import { netStockCost } from '@/lib/netCost'
 import { salaryCost, SALARY_WORKING_DAYS } from '@/lib/salaryCost'
+import { loadRateHistory, rateAsOf } from '@/lib/taxRates'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Profit report — the numbers behind the PDF.
@@ -101,6 +102,16 @@ export async function GET(req: NextRequest) {
   let realRev = 0, realCogs = 0, roughRev = 0, roughCogs = 0, serviceRev = 0, noCostRev = 0
   let noCostQty = 0
 
+  // SSCL — a real cost of the Pvt Ltd (owner, 2026-10-20). Until now profit
+  // never charged it. It is levied on each tax invoice's turnover NET of VAT
+  // (SSCL Act s.3(3)(b)), at the liable base for its stream (parts 50%,
+  // services 100%) and the rate in force that month — the same arithmetic as
+  // the SSCL report, charged in the period of the sales, whoever pays IRD and
+  // whenever. Paying it is never also booked as an expense (tax-deadlines).
+  const rateHist = isVatEntity ? await loadRateHistory(admin, caller.vendor.id) : null
+  let ssclCost = 0
+  const ssclTurnover = { PART: 0, SVC: 0 }
+
   // ── Revenue and profit by what was actually sold ──────────────────────────
   //
   // The owner wanted spare parts separated from the rest. Nothing new has to be
@@ -133,6 +144,14 @@ export async function GET(req: NextRequest) {
       if (qty <= 0) continue
       const gross = qty * parseFloat(i.unit_price || 0)
       const revenue = r0(net(gross, docType))
+
+      if (rateHist && docType === 'tax_invoice') {
+        const month = new Date(s.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }).slice(0, 7)
+        const stream = (i.sscl_stream || 'PART') === 'SVC' ? 'SVC' : 'PART'
+        const base = stream === 'SVC' ? rateAsOf(rateHist, 'liable_base_svc', month, 100) : rateAsOf(rateHist, 'liable_base_part', month, 50)
+        ssclTurnover[stream] += revenue
+        ssclCost += revenue * (base / 100) * (rateAsOf(rateHist, 'sscl_rate', month, 2.5) / 100)
+      }
 
       const prod: any = i.product_sku ? prodBySku.get(i.product_sku) : null
       const snap = i.unit_cost != null && parseInt(i.unit_cost) > 0 ? netCost(parseInt(i.unit_cost), prod) : null
@@ -315,7 +334,9 @@ export async function GET(req: NextRequest) {
       // Accrual basis: salary for the days worked in the window, whether or
       // not payday fell inside it. Cash salary paid inside the window is that
       // same cost, so it is not charged a second time.
-      netProfit: r0(grossProfit - expenseExclSalary - salaryAccrual - writeoffTotal + supplierCreditTotal),
+      ssclCost: r0(ssclCost),
+      ssclTurnover: r0(ssclTurnover.PART + ssclTurnover.SVC),
+      netProfit: r0(grossProfit - expenseExclSalary - salaryAccrual - writeoffTotal - ssclCost + supplierCreditTotal),
       // What share of the period's takings the profit figure cannot speak for
       coveragePct: totalRev > 0 ? Math.round((knownRev / totalRev) * 100) : null,
       saleCount: (sales || []).length,

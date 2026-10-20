@@ -57,6 +57,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
           ${row('Operating expenses' + (s.salaryPaidInWindow > 0 ? ' (excl. salary)' : ''), '− ' + money(s.expenseExclSalary), { bold: true })}
           ${s.salaryAccrual > 0 ? row(({ payroll: 'Salary (from paid payroll)', mixed: 'Salary (paid payroll + days worked)', estimated: 'Salary for days worked (estimated)' } as Record<string, string>)[data.salary?.basis] || 'Salary for days worked', '− ' + money(s.salaryAccrual), { bold: true }) : ''}
           ${s.writeoffTotal > 0 ? row('Stock written off', '− ' + money(s.writeoffTotal), { bold: true, color: '#b45309' }) : ''}
+          ${(s.ssclCost || 0) > 0 ? row(`SSCL (levy on Rs.${Number(s.ssclTurnover || 0).toLocaleString()} turnover excl. VAT)`, '− ' + money(s.ssclCost), { bold: true }) : ''}
           ${(data.adjustments?.downValue || 0) > 0 ? row(`Stock count corrections down (${data.adjustments.downUnits} units, not charged)`, money(data.adjustments.downValue), { indent: true, color: '#b45309' }) : ''}
           ${s.supplierCreditTotal > 0 ? row('Supplier discounts received', '+ ' + money(s.supplierCreditTotal), { bold: true, color: '#15803d' }) : ''}
           ${row('NET PROFIT', money(s.netProfit), { bold: true, color: s.netProfit >= 0 ? '#15803d' : '#dc2626' })}
@@ -336,7 +337,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
               { l: 'Revenue (with cost)', v: rs(s.knownRevenue) },
               { l: 'Cost of goods', v: rs(s.realCogs + s.roughCogs) },
               { l: `Gross profit${s.grossMarginPct != null ? ` · ${s.grossMarginPct}%` : ''}`, v: rs(s.grossProfit), hi: true },
-              { l: s.writeoffTotal > 0 ? 'Net after expenses & write-offs' : 'Net after expenses', v: rs(s.netProfit), hi: true },
+              { l: 'Net after expenses' + (s.writeoffTotal > 0 ? ', write-offs' : '') + ((s.ssclCost || 0) > 0 ? ' & SSCL' : ''), v: rs(s.netProfit), hi: true },
             ].map(c => (
               <div key={c.l} className="bg-white px-4 py-3">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">{c.l}</p>
