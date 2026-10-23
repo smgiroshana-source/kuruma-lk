@@ -100,7 +100,7 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
       ) : (
         <p className="text-sm text-amber-950">Ask a manager to plan a count — counting is done from the Stock tab.</p>
       )}
-      <p className="text-xs text-amber-800">Shows for every staff member while more than {100 - rules.goalPct}% of stock is not confirmed.</p>
+      <p className="text-xs text-amber-800">{rules.goalPct >= 100 ? 'Shows for every staff member until every item in stock is confirmed.' : `Shows for every staff member while more than ${100 - rules.goalPct}% of stock is not confirmed.`}</p>
     </section>
   )
 }

@@ -19,7 +19,7 @@
 // "1 mo+". Each card and the printed sheet still say "Never counted".
 //
 // Every staff login sees a reminder while the shop is below its goal of
-// confirmed stock (countRules().goalPct: WHEEL MART 80%, Sakura 90% — owner,
+// confirmed stock (countRules().goalPct: WHEEL MART 100%, Sakura 90% — owner,
 // 2026-10-23). No dismiss button, by the owner's choice: it clears
 // only by counting.
 //
@@ -35,7 +35,7 @@ export type CountRules = { windowDays: number; stops: Exclude<CountAge, 'all'>[]
 
 // Each shop's count rules — the ONLY place they live. Fixed objects, so a
 // component's useMemo on them doesn't recompute every render.
-const WHEEL_MART_RULES: CountRules = { windowDays: 30, stops: ['1m', '3m', '6m'], goalPct: 80 }
+const WHEEL_MART_RULES: CountRules = { windowDays: 30, stops: ['1m', '3m', '6m'], goalPct: 100 }   // owner, 2026-10-23: every item, every month
 const SAKURA_RULES: CountRules = { windowDays: 90, stops: ['3m', '6m', '12m'], goalPct: 90 }
 export function countRules(isLkTax: boolean): CountRules {
   return isLkTax ? WHEEL_MART_RULES : SAKURA_RULES
