@@ -1,7 +1,8 @@
 'use client'
 // ── Shared by BOTH vendors (Sakura + WHEEL MART) — keep vendor-neutral ────────
 // Browse & Count photo check (owner, 2026-10-23): tap a part's photo or name
-// to see every photo of it full screen, so staff can check the system's
+// to see every photo of it in a pop-up over the list (⤢ for full screen),
+// opening instantly on the card's own photo, so staff can check the system's
 // photos match the part in their hand — and fix them on the spot:
 //   📷 Add photo   camera or gallery (the phone offers both)
 //   ⭐ Make main   this photo leads, on the count card and the storefront
@@ -9,7 +10,7 @@
 //                  no review queue)
 // Uses /api/vendor/images (list / reorder / delete) and /api/vendor/upload.
 // Phone rules: big targets, no tiny text boxes, actions clear of the home bar.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { compressImage } from '@/lib/compressImage'
 
 type Img = { id: string; url: string; sort_order: number; is_damage?: boolean; damage_resolved_at?: string | null }
@@ -20,9 +21,18 @@ export default function CountPhotoViewer({ product, onClose, onChanged, showToas
   onChanged: () => void         // parent refreshes its product list
   showToast: (msg: string) => void
 }) {
-  const [images, setImages] = useState<Img[] | null>(null)
+  // Open instantly on the card's photo — the phone already has it (the list
+  // loads each product's main photo); the rest arrive a moment later.
+  const cover = product.images?.[0]
+  const [images, setImages] = useState<Img[] | null>(cover?.url ? [{ id: cover.id, url: cover.url, sort_order: 0 }] : null)
+  const [loaded, setLoaded] = useState(false)
+  const [full, setFull] = useState(false)
   const [i, setI] = useState(0)
   const [zoom, setZoom] = useState(false)
+  // The parent hands a new showToast every render; reading it through a ref
+  // keeps `load` stable, so the list isn't fetched again on every redraw.
+  const toastRef = useRef(showToast)
+  toastRef.current = showToast
   const [busy, setBusy] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [touchX, setTouchX] = useState<number | null>(null)
@@ -36,26 +46,28 @@ export default function CountPhotoViewer({ product, onClose, onChanged, showToas
         // the product's own photos first, damage photos after (as everywhere)
         .sort((a: Img, b: Img) => (a.is_damage ? 1 : 0) - (b.is_damage ? 1 : 0) || a.sort_order - b.sort_order)
       setImages(list)
+      setLoaded(true)
       setI(x => Math.min(x, Math.max(0, list.length - 1)))
       return list
-    } catch (e: any) { showToast('⚠ ' + e.message); setImages([]); return [] }
-  }, [product.id, showToast])
+    } catch (e: any) { toastRef.current('⚠ ' + e.message); setLoaded(true); setImages(x => x || []); return [] }
+  }, [product.id])
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') { if (full) setFull(false); else onClose() }
       if (e.key === 'ArrowRight') go(1)
       if (e.key === 'ArrowLeft') go(-1)
     }
     window.addEventListener('keydown', onKey)
     return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', onKey) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [images?.length])
+  }, [images?.length, full])
 
   const n = images?.length || 0
+  const shownCount = loaded ? n : Math.max(n, Number(product.image_count) || 0)
   const cur = images && n ? images[i] : null
   function go(d: number) { if (n > 1) { setI(x => (x + d + n) % n); setZoom(false); setConfirmDelete(false) } }
 
@@ -128,87 +140,104 @@ export default function CountPhotoViewer({ product, onClose, onChanged, showToas
   const btn = 'min-h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-40'
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black flex flex-col" role="dialog" aria-modal="true" aria-label={`Photos of ${product.name}`}>
-      {/* Header */}
-      <div className="flex items-start gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 bg-black/80 text-white">
-        <div className="flex-1 min-w-0">
-          <p className="font-bold leading-tight">{product.name}</p>
-          <p className="text-xs text-white/70 mt-0.5"><span className="font-mono">{product.sku}</span>{loc ? ` · 📍 ${loc}` : ''}</p>
-        </div>
-        <button onClick={onClose} aria-label="Close photos" className="w-11 h-11 -mr-1 rounded-xl flex items-center justify-center text-white active:bg-white/10">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
-      </div>
-
-      {/* Photo */}
-      <div className="relative flex-1 min-h-0"
-        onTouchStart={e => { if (!zoom) setTouchX(e.touches[0].clientX) }}
-        onTouchEnd={e => { if (touchX != null) { const dx = e.changedTouches[0].clientX - touchX; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); setTouchX(null) } }}>
-        {images === null ? (
-          <p className="absolute inset-0 flex items-center justify-center text-white/60 text-sm">Loading photos…</p>
-        ) : !cur ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/70 text-sm px-8 text-center">
-            <span className="text-4xl">📷</span>
-            <p>No photo of this part yet.</p>
-            <p className="text-white/50 text-xs">Take one with “Add photo” below.</p>
+    <div className={`fixed inset-0 z-[80] flex justify-center ${full ? 'bg-black' : 'bg-black/50 items-end sm:items-center sm:p-4'}`}
+      onClick={() => { if (!full) onClose() }}>
+      <div role="dialog" aria-modal="true" aria-label={`Photos of ${product.name}`} onClick={e => e.stopPropagation()}
+        className={full ? 'w-full h-full flex flex-col bg-black'
+          : 'w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl'}>
+        {/* Header */}
+        <div className={`flex items-start gap-2 px-4 pb-2 ${full ? 'pt-[max(0.75rem,env(safe-area-inset-top))] text-white' : 'pt-3 text-slate-900'}`}>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold leading-tight">{product.name}</p>
+            <p className={`text-xs mt-0.5 ${full ? 'text-white/70' : 'text-slate-500'}`}><span className="font-mono">{product.sku}</span>{loc ? ` · 📍 ${loc}` : ''}</p>
           </div>
-        ) : (
-          <div className={`absolute inset-0 ${zoom ? 'overflow-auto' : 'overflow-hidden flex items-center justify-center'}`}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={cur.url} alt={`${product.name} — photo ${i + 1} of ${n}`} onClick={() => setZoom(z => !z)}
-              className={zoom ? 'max-w-none w-[250%]' : 'max-w-full max-h-full object-contain'} />
-          </div>
-        )}
-        {cur?.is_damage && (
-          <span className="absolute top-3 left-3 bg-amber-500 text-white text-[11px] font-black px-2 py-1 rounded-md">{cur.damage_resolved_at ? 'BEFORE REPAIR' : 'DAMAGE'}</span>
-        )}
-        {i === 0 && cur && !cur.is_damage && n > 1 && <span className="absolute top-3 left-3 bg-white/90 text-slate-900 text-[11px] font-black px-2 py-1 rounded-md">MAIN</span>}
-        {n > 1 && !zoom && (
-          <>
-            <button onClick={() => go(-1)} aria-label="Previous photo" className="absolute left-2 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 text-white text-2xl flex items-center justify-center">‹</button>
-            <button onClick={() => go(1)} aria-label="Next photo" className="absolute right-2 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 text-white text-2xl flex items-center justify-center">›</button>
-            <span className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs font-bold px-2.5 py-1 rounded-full">{i + 1} / {n}</span>
-          </>
-        )}
-        {cur && <span className="absolute bottom-3 right-3 text-white/50 text-[10px]">{zoom ? 'tap to fit' : 'tap to zoom'}</span>}
-      </div>
-
-      {/* Thumbnails */}
-      {n > 1 && (
-        <div className="flex gap-2 px-4 py-2 overflow-x-auto bg-black/80">
-          {images!.map((im, k) => (
-            <button key={im.id} onClick={() => { setI(k); setZoom(false); setConfirmDelete(false) }} aria-label={`Photo ${k + 1}`}
-              className={`relative shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 ${k === i ? 'border-orange-500' : 'border-transparent opacity-70'}`}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={im.url} alt="" loading="lazy" className="w-full h-full object-cover" />
-              {im.is_damage && <span className="absolute bottom-0 inset-x-0 bg-amber-500 text-white text-[8px] font-black text-center">DAMAGE</span>}
+          {cur && (
+            <button onClick={() => { setFull(f => !f); setZoom(false) }} aria-label={full ? 'Exit full screen' : 'Full screen'}
+              className={`w-11 h-11 rounded-xl flex items-center justify-center ${full ? 'text-white active:bg-white/10' : 'text-slate-500 active:bg-slate-100'}`}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {full ? <path d="M9 3v6H3M15 3v6h6M9 21v-6H3M15 21v-6h6" /> : <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" />}
+              </svg>
             </button>
-          ))}
+          )}
+          <button onClick={onClose} aria-label="Close photos"
+            className={`w-11 h-11 -mr-1 rounded-xl flex items-center justify-center ${full ? 'text-white active:bg-white/10' : 'text-slate-600 bg-slate-100 active:bg-slate-200'}`}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
         </div>
-      )}
 
-      {/* Actions */}
-      <div className="bg-slate-900 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        {confirmDelete ? (
-          <div className="space-y-2">
-            <p className="text-white text-sm font-bold text-center">Remove this photo for good? It can&apos;t be undone.</p>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => setConfirmDelete(false)} disabled={!!busy} className={`${btn} bg-white/10 text-white`}>Cancel</button>
-              <button onClick={remove} disabled={!!busy} className={`${btn} bg-red-600 text-white`}>{busy === 'delete' ? 'Removing…' : 'Yes, remove'}</button>
+        {/* Photo */}
+        <div className={`relative bg-slate-900 ${full ? 'flex-1 min-h-0' : 'h-[52vh] sm:h-[420px] shrink-0'}`}
+          onTouchStart={e => { if (!zoom) setTouchX(e.touches[0].clientX) }}
+          onTouchEnd={e => { if (touchX != null) { const dx = e.changedTouches[0].clientX - touchX; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); setTouchX(null) } }}>
+          {images === null ? (
+            <p className="absolute inset-0 flex items-center justify-center text-white/60 text-sm">Loading photos…</p>
+          ) : !cur ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/70 text-sm px-8 text-center">
+              <span className="text-4xl">📷</span>
+              <p>No photo of this part yet.</p>
+              <p className="text-white/50 text-xs">Take one with “Add photo” below.</p>
             </div>
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-2">
-            <label className={`${btn} bg-orange-600 text-white cursor-pointer ${busy ? 'opacity-40 pointer-events-none' : ''}`}>
-              {busy === 'upload' ? 'Uploading…' : '📷 Add photo'}
-              <input type="file" accept="image/*" multiple className="hidden" onChange={e => { addPhotos(e.target.files); e.target.value = '' }} />
-            </label>
-            <button onClick={makeMain} disabled={!!busy || !cur || i === 0 || !!cur?.is_damage} className={`${btn} bg-white/10 text-white`}>
-              {busy === 'main' ? 'Saving…' : '⭐ Make main'}
-            </button>
-            <button onClick={() => setConfirmDelete(true)} disabled={!!busy || !cur} className={`${btn} bg-white/10 text-red-300`}>🗑 Remove</button>
+          ) : (
+            <div className={`absolute inset-0 ${zoom ? 'overflow-auto' : 'overflow-hidden flex items-center justify-center'}`}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={cur.url} alt={`${product.name} — photo ${i + 1} of ${shownCount}`} onClick={() => setZoom(z => !z)}
+                decoding="async" className={zoom ? 'max-w-none w-[250%]' : 'max-w-full max-h-full object-contain'} />
+            </div>
+          )}
+          {cur?.is_damage && (
+            <span className="absolute top-3 left-3 bg-amber-500 text-white text-[11px] font-black px-2 py-1 rounded-md">{cur.damage_resolved_at ? 'BEFORE REPAIR' : 'DAMAGE'}</span>
+          )}
+          {i === 0 && cur && !cur.is_damage && shownCount > 1 && <span className="absolute top-3 left-3 bg-white/90 text-slate-900 text-[11px] font-black px-2 py-1 rounded-md">MAIN</span>}
+          {n > 1 && !zoom && (
+            <>
+              <button onClick={() => go(-1)} aria-label="Previous photo" className="absolute left-2 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 text-white text-2xl flex items-center justify-center">‹</button>
+              <button onClick={() => go(1)} aria-label="Next photo" className="absolute right-2 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 text-white text-2xl flex items-center justify-center">›</button>
+            </>
+          )}
+          {shownCount > 1 && !zoom && <span className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs font-bold px-2.5 py-1 rounded-full">{i + 1} / {shownCount}</span>}
+          {cur && <span className="absolute bottom-3 right-3 text-white/60 text-[10px]">{zoom ? 'tap to fit' : 'tap to zoom'}</span>}
+        </div>
+
+        {/* Thumbnails */}
+        {n > 1 && (
+          <div className={`flex gap-2 px-4 py-2 overflow-x-auto shrink-0 ${full ? 'bg-black' : 'bg-white'}`}>
+            {images!.map((im, k) => (
+              <button key={im.id} onClick={() => { setI(k); setZoom(false); setConfirmDelete(false) }} aria-label={`Photo ${k + 1}`}
+                className={`relative shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 ${k === i ? 'border-orange-500' : 'border-transparent opacity-70'}`}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={im.url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                {im.is_damage && <span className="absolute bottom-0 inset-x-0 bg-amber-500 text-white text-[8px] font-black text-center">DAMAGE</span>}
+              </button>
+            ))}
           </div>
         )}
+        {!loaded && shownCount > 1 && <p className={`px-4 py-1 text-[11px] shrink-0 ${full ? 'text-white/60' : 'text-slate-400'}`}>Loading the other {shownCount - 1} photo{shownCount - 1 !== 1 ? 's' : ''}…</p>}
+
+        {/* Actions */}
+        <div className={`px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 ${full ? 'bg-black' : 'bg-white border-t border-slate-100'}`}>
+          {confirmDelete ? (
+            <div className="space-y-2">
+              <p className={`text-sm font-bold text-center ${full ? 'text-white' : 'text-slate-900'}`}>Remove this photo for good? It can&apos;t be undone.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => setConfirmDelete(false)} disabled={!!busy} className={`${btn} ${full ? 'bg-white/10 text-white' : 'border-2 border-slate-200 text-slate-700'}`}>Cancel</button>
+                <button onClick={remove} disabled={!!busy} className={`${btn} bg-red-600 text-white`}>{busy === 'delete' ? 'Removing…' : 'Yes, remove'}</button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2">
+              <label className={`${btn} bg-orange-600 text-white cursor-pointer ${busy || !loaded ? 'opacity-40 pointer-events-none' : ''}`}>
+                {busy === 'upload' ? 'Uploading…' : '📷 Add photo'}
+                <input type="file" accept="image/*" multiple className="hidden" onChange={e => { addPhotos(e.target.files); e.target.value = '' }} />
+              </label>
+              <button onClick={makeMain} disabled={!!busy || !loaded || !cur || i === 0 || !!cur?.is_damage}
+                className={`${btn} ${full ? 'bg-white/10 text-white' : 'border-2 border-slate-200 text-slate-700'}`}>
+                {busy === 'main' ? 'Saving…' : '⭐ Make main'}
+              </button>
+              <button onClick={() => setConfirmDelete(true)} disabled={!!busy || !loaded || !cur}
+                className={`${btn} ${full ? 'bg-white/10 text-red-300' : 'border-2 border-red-200 text-red-700'}`}>🗑 Remove</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
