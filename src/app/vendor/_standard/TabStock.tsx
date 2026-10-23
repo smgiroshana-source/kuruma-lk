@@ -6,6 +6,7 @@ import DamageSheet from '../_shared/DamageSheet'
 import CountAgeFilter from '../_shared/CountAgeFilter'
 import CountCoverage from '../_shared/CountCoverage'
 import CountPhotoViewer from '../_shared/CountPhotoViewer'
+import CountProgress, { CountProgressBar } from '../_shared/CountProgress'
 import { printCountSheet, downloadCountSheetXlsx } from '../_shared/countSheet'
 import {
   countAgeStops, countRules, NO_LOCATION, countAgeCounts, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
@@ -48,6 +49,9 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   // Photo check while counting (2026-10-23): tap a card's photo or name
   const [photoProduct, setPhotoProduct] = useState<any>(null)
   const [noPhotoOnly, setNoPhotoOnly] = useState(false)
+  // Count progress for staff — not confirmed in 3 months, % vs the 90% goal,
+  // the last 10 days day by day (owner, 2026-10-23)
+  const [showProgress, setShowProgress] = useState(false)
   // Arriving from the stock count reminder: Browse & Count on that spot
   useEffect(() => {
     if (!countPreset) return
@@ -403,6 +407,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
       {/* ══════════════════════════════════════════ */}
       {stockView === 'browse' && (
         <div>
+          <CountProgressBar products={allProducts} rules={countRules(false)} onOpen={() => setShowProgress(true)} />
           {/* 4-level filter row */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
             <CountAgeFilter rules={countRules(false)} value={countAge} counts={countAgeHere} onChange={setCountAge} />
@@ -788,6 +793,8 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
       {stockView === 'transfer' && (
         <StockTransfer vendor={vendor} products={products} showToast={showToast} onDataChanged={onDataChanged} />
       )}
+
+      {showProgress && <CountProgress products={allProducts} rules={countRules(false)} onClose={() => setShowProgress(false)} />}
 
       {/* ── Photo check while counting (2026-10-23) ── */}
       {photoProduct && (
