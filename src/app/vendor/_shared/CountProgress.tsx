@@ -11,10 +11,28 @@ import { coverageSummary, dailyConfirmations, type CountRules } from '@/lib/coun
 const monthsOf = (days: number) => Math.round(days / 30)
 
 /** One line on Browse & Count: still to confirm, % vs goal, today, and a Progress button. */
-export function CountProgressBar({ products, rules, onOpen }: { products: any[]; rules: CountRules; onOpen: () => void }) {
+export function CountProgressBar({ products, rules, onOpen, compact = false }: { products: any[]; rules: CountRules; onOpen: () => void; compact?: boolean }) {
   const sum = useMemo(() => coverageSummary(products, rules), [products, rules])
   const today = useMemo(() => dailyConfirmations(products, 1)[0]?.count || 0, [products])
   const good = sum.pctConfirmed >= rules.goalPct
+  // Phones (Sakura, 2026-10-23): today's count big, the bar, the button — the
+  // "not confirmed" figure already sits on the 3 mo+ stop right below.
+  if (compact) return (
+    <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3 flex items-center gap-3">
+      <div className="shrink-0 text-center px-1">
+        <p className="text-3xl font-black text-emerald-700 tabular-nums leading-none">{today.toLocaleString()}</p>
+        <p className="text-[11px] font-bold text-slate-500 uppercase mt-1">Today</p>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="relative h-2.5 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true">
+          <div className={`absolute inset-y-0 left-0 ${good ? 'bg-emerald-600' : 'bg-orange-600'}`} style={{ width: `${sum.pctConfirmed}%` }} />
+          <div className="absolute inset-y-0 w-0.5 bg-slate-900" style={{ left: `${rules.goalPct}%` }} />
+        </div>
+        <p className="text-[11px] font-bold text-slate-500 mt-1.5">{sum.pctConfirmed}% confirmed · goal {rules.goalPct}%</p>
+      </div>
+      <button type="button" onClick={onOpen} aria-label="Count progress" className="shrink-0 min-h-11 px-3 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-700 active:bg-slate-50">📈</button>
+    </div>
+  )
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3">
       <div className="flex items-center gap-3">

@@ -6,8 +6,9 @@
 // tap. Rules: src/lib/countCoverage.ts.
 import { countAgeStops, type CountAge, type CountRules } from '@/lib/countCoverage'
 
-export default function CountAgeFilter({ rules, value, counts, onChange }: {
+export default function CountAgeFilter({ rules, value, counts, onChange, allLast = false }: {
   rules: CountRules
+  allLast?: boolean            // phones: the stops first, All at the far right (Sakura, 2026-10-23)
   value: CountAge
   counts: Record<string, number>
   onChange: (v: CountAge) => void
@@ -16,7 +17,7 @@ export default function CountAgeFilter({ rules, value, counts, onChange }: {
     <div>
       <p className="text-xs font-bold text-slate-400 uppercase mb-1.5">Not confirmed since</p>
       <div role="radiogroup" aria-label="Not confirmed since" className="grid grid-cols-4 gap-[3px] p-[3px] rounded-xl bg-slate-200">
-        {countAgeStops(rules).map(s => {
+        {(allLast ? [...countAgeStops(rules).slice(1), countAgeStops(rules)[0]] : countAgeStops(rules)).map(s => {
           const on = s.v === value
           return (
             <button key={s.v} type="button" role="radio" aria-checked={on} aria-label={`${s.long}: ${counts[s.v] ?? 0}`}
