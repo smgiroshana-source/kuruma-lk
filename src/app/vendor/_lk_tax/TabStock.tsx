@@ -45,7 +45,7 @@ interface TabStockLkTaxProps {
   initialView?: string | null
   onInitialViewConsumed?: () => void
   // From the stock count reminder: open Browse & Count on a spot + age filter
-  countPreset?: { filter: LocationFilter | null; age: CountAge } | null
+  countPreset?: { filter: LocationFilter | null; age: CountAge; search?: string } | null
   onCountPresetConsumed?: () => void
   // Reducing stock past the small-correction limit is a manager decision —
   // the server enforces it too, this only shapes what the screen offers.
@@ -121,8 +121,10 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     setStockMainView('stocktake')
     setStockView('browse')
     setStockFilter(countPreset.filter || { store: '', floor: '', sub1: '', sub2: '' })
-    setStocktakeSearch('')
+    // From the dashboard's item list: straight to that one item
+    setStocktakeSearch(countPreset.search || '')
     setCountAge(countPreset.age)
+    setNoPhotoOnly(false)
     onCountPresetConsumed?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [countPreset])
