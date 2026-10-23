@@ -9,7 +9,7 @@ import CountPhotoViewer from '../_shared/CountPhotoViewer'
 import CountProgress, { CountProgressBar } from '../_shared/CountProgress'
 import { printCountSheet, downloadCountSheetXlsx } from '../_shared/countSheet'
 import {
-  countAgeStops, countRules, NO_LOCATION, countAgeCounts, isOnHand, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
+  countAgeStops, countRules, dueStop, NO_LOCATION, countAgeCounts, isOnHand, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
   type CountAge, type LocationFilter,
 } from '@/lib/countCoverage'
 import { colomboToday } from '@/lib/dates'
@@ -45,6 +45,23 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   const [stocktakeSearch, setStocktakeSearch] = useState('')
   // "Not confirmed since" filter + coverage sheet (src/lib/countCoverage.ts)
   const [countAge, setCountAge] = useState<CountAge>('all')
+  // Phones (owner, 2026-10-23): open on the first stop (3 mo+), All last, and
+  // leave out No-photo, By location, Print and Excel — those stay on a computer
+  const [narrow, setNarrow] = useState(false)
+  const narrowStarted = useRef(false)
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)')
+    const apply = () => setNarrow(mq.matches)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
+  useEffect(() => {
+    if (narrow && !narrowStarted.current) {
+      narrowStarted.current = true
+      setCountAge(c => (c === 'all' ? dueStop(countRules(false)) : c))
+    }
+  }, [narrow])
   const [showCoverage, setShowCoverage] = useState(false)
   // Photo check while counting (2026-10-23): tap a card's photo or name
   const [photoProduct, setPhotoProduct] = useState<any>(null)
@@ -196,6 +213,8 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   // Browsing shows stock on hand only (matches the "All" count). Sold-out
   // items appear when searched for, so a part found on the shelf can still
   // be counted back in (owner, 2026-10-13: 1,900+ sold-out rows at Sakura).
+  // Where Browse & Count starts: 3 mo+ on a phone, All on a computer
+  const homeAge: CountAge = narrow ? dueStop(countRules(false)) : 'all'
   const placeProducts = allProducts.filter((p: any) => {
     if (!matchesLocation(p, stockFilter)) return false
     if (searchLower) return p.name?.toLowerCase().includes(searchLower) || (p.sku || '').toLowerCase().includes(searchLower)
@@ -209,7 +228,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
         .sort((a: any, b: any) => countAgeDays(b) - countAgeDays(a))
   // Stock on hand with no photo at all — photograph it while counting
   const noPhotoHere = agedProducts.filter((p: any) => isCountable(p) && !(Number(p.image_count) > 0)).length
-  const browseProducts = noPhotoOnly ? agedProducts.filter((p: any) => isCountable(p) && !(Number(p.image_count) > 0)) : agedProducts
+  const browseProducts = noPhotoOnly && !narrow ? agedProducts.filter((p: any) => isCountable(p) && !(Number(p.image_count) > 0)) : agedProducts
   const hasUnplaced = allProducts.some((p: any) => isCountable(p) && hasNoLocation(p))
   const countPlaceText = stockFilter.store === NO_LOCATION ? 'No location set'
     : [stockFilter.store, stockFilter.floor, stockFilter.sub1, stockFilter.sub2].filter(Boolean).join(' · ') || 'Whole shop'
@@ -224,7 +243,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
     if (!downloadCountSheetXlsx({ shopName: vendor?.name || 'Stock', heading, products: browseProducts })) showToast('Could not create the Excel file')
   }
 
-  const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch || countAge !== 'all' || noPhotoOnly
+  const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch || countAge !== homeAge || noPhotoOnly
   const pendingCount = Object.keys(stockQtyEdits).length + stockConfirmSet.size
 
   // ── quick assign: search results ──
@@ -407,19 +426,19 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
       {/* ══════════════════════════════════════════ */}
       {stockView === 'browse' && (
         <div>
-          <CountProgressBar products={allProducts} rules={countRules(false)} onOpen={() => setShowProgress(true)} />
+          <CountProgressBar products={allProducts} rules={countRules(false)} onOpen={() => setShowProgress(true)} compact={narrow} />
           {/* 4-level filter row */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
-            <CountAgeFilter rules={countRules(false)} value={countAge} counts={countAgeHere} onChange={setCountAge} />
-            <div className="grid grid-cols-3 gap-2">
+            <CountAgeFilter rules={countRules(false)} value={countAge} counts={countAgeHere} onChange={setCountAge} allLast={narrow} />
+            {!narrow && <div className="grid grid-cols-3 gap-2">
               <button type="button" onClick={() => setShowCoverage(true)}
                 className="min-h-11 px-1 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50">📍 By location</button>
               <button type="button" onClick={printSheet} disabled={browseProducts.length === 0} title="Print the count sheet, or choose Save as PDF in the print window"
                 className="min-h-11 px-1 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50 disabled:opacity-40">🖨 Print / PDF</button>
               <button type="button" onClick={excelSheet} disabled={browseProducts.length === 0} title="Download the count sheet as an Excel file"
                 className="min-h-11 px-1 rounded-lg border-2 border-emerald-200 bg-white text-sm font-bold text-emerald-800 active:bg-emerald-50 disabled:opacity-40">📊 Excel</button>
-            </div>
-            {(noPhotoHere > 0 || noPhotoOnly) && (
+            </div>}
+            {!narrow && (noPhotoHere > 0 || noPhotoOnly) && (
               <label className="flex items-center gap-2.5 min-h-11 px-3 rounded-lg border-2 border-slate-200 bg-white cursor-pointer">
                 <input type="checkbox" checked={noPhotoOnly} onChange={e => setNoPhotoOnly(e.target.checked)} className="w-5 h-5 accent-orange-600" />
                 <span className="text-sm font-bold text-slate-700">📷 No photo only <span className="font-semibold text-slate-500">({noPhotoHere})</span></span>
@@ -465,7 +484,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
               {stocktakeSearch && <button onClick={() => setStocktakeSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">×</button>}
             </div>
             {anyFilter && (
-              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all'); setNoPhotoOnly(false) }}
+              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge(homeAge); setNoPhotoOnly(false) }}
                 className="text-xs font-bold text-orange-500 hover:text-orange-700">✕ Clear all filters</button>
             )}
           </div>
@@ -481,7 +500,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
             <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
               <p className="text-3xl mb-3">🔍</p>
               <p className="text-slate-500 font-semibold">No products match these filters</p>
-              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all'); setNoPhotoOnly(false) }} className="mt-3 text-sm text-orange-500 font-bold">Clear filters</button>
+              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge(homeAge); setNoPhotoOnly(false) }} className="mt-3 text-sm text-orange-500 font-bold">Clear filters</button>
             </div>
           ) : (
             <div className="space-y-2 pb-24 sm:pb-4">
@@ -511,7 +530,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                         </div>
                         <button type="button" onClick={() => setPhotoProduct(p)} className="block text-left font-bold text-slate-900 leading-tight underline decoration-slate-300 underline-offset-2 active:text-orange-700">{p.name}</button>
                         {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model}</p>}
-                        {loc && !anyFilter && <p className="text-[10px] font-semibold text-amber-700 mt-0.5">📍 {loc}</p>}
+                        {loc && !(stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2) && <p className="text-[10px] font-semibold text-amber-700 mt-0.5">📍 {loc}</p>}
                         {changed && <p className="text-[10px] font-bold text-orange-600 mt-0.5">Was {p.quantity} → now {curQty}</p>}
                       </div>
                       <div className="flex flex-col items-end gap-1.5 shrink-0">
