@@ -8,7 +8,7 @@
 // Rules: src/lib/countCoverage.ts.
 import { useMemo } from 'react'
 import {
-  coverageSummary, coverageByLocation, dueStop,
+  coverageSummary, coverageByLocation, dueStop, isCountable, isConfirmed, countAgeDays, lastCountedLabel,
   type CountAge, type CountRules, type LocationFilter,
 } from '@/lib/countCoverage'
 
@@ -19,11 +19,21 @@ type Props = {
   canCount: boolean
   onCount?: (filter: LocationFilter | null, age: CountAge) => void
   onCoverage?: () => void
+  // When this few items are due, the card lists them by name (WHEEL MART: 10,
+  // owner 2026-10-23); tapping one opens it on Browse & Count.
+  listUpTo?: number
+  onOpenItem?: (p: any) => void
 }
 
-export default function CountReminder({ products, rules, variant, canCount, onCount, onCoverage }: Props) {
+export default function CountReminder({ products, rules, variant, canCount, onCount, onCoverage, listUpTo, onOpenItem }: Props) {
   const sum = useMemo(() => coverageSummary(products, rules), [products, rules])
   const top = useMemo(() => (variant === 'card' && sum.remind ? coverageByLocation(products, rules.windowDays).filter(r => r.notConfirmed > 0).slice(0, 3) : []), [products, rules, variant, sum.remind])
+  const dueItems = useMemo(() => {
+    if (variant !== 'card' || !listUpTo || !sum.remind) return null
+    const now = Date.now()
+    const list = products.filter(p => isCountable(p) && !isConfirmed(p, rules.windowDays, now))
+    return list.length > 0 && list.length <= listUpTo ? list.sort((a, b) => countAgeDays(b, now) - countAgeDays(a, now)) : null
+  }, [products, rules, variant, listUpTo, sum.remind])
   if (!sum.remind) return null
   const due = dueStop(rules)
   const windowDays = rules.windowDays
@@ -80,7 +90,26 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
         ))}
       </div>
 
-      {canCount && top.length > 0 && (
+      {canCount && dueItems && (
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-black tracking-wider text-amber-800">{dueItems.length === 1 ? 'THE ITEM TO COUNT' : `THE ${dueItems.length} ITEMS TO COUNT`}</p>
+          {dueItems.map(p => {
+            const where = [p.loc_store, p.loc_floor, p.loc_sub1, p.loc_sub2].filter(Boolean).join(' › ')
+            return (
+              <button key={p.id} type="button" onClick={() => onOpenItem?.(p)}
+                className="w-full text-left min-h-11 px-3 py-2 bg-white rounded-lg active:bg-orange-50 flex items-center gap-3">
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm font-bold text-slate-900 leading-tight">{p.name}</span>
+                  <span className="block text-[11px] text-slate-500 mt-0.5"><span className="font-mono">{p.sku}</span> · {where ? `📍 ${where}` : 'No location'} · qty {Number(p.quantity) || 0}</span>
+                </span>
+                <span className="shrink-0 text-[11px] font-bold text-red-700 text-right">{lastCountedLabel(p)}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {canCount && !dueItems && top.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-black tracking-wider text-amber-800">START HERE</p>
           {top.map(r => (

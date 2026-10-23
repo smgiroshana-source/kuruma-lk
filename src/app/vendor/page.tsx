@@ -573,7 +573,7 @@ export default function VendorDashboard() {
   // stocktake's 'receive' view). Consumed + cleared by the target tab on mount.
   const [stockInitialView, setStockInitialView] = useState<string | null>(null)
   // Stock count reminder → Browse & Count, already filtered (2026-10-13)
-  const [countPreset, setCountPreset] = useState<{ filter: LocationFilter | null; age: CountAge } | null>(null)
+  const [countPreset, setCountPreset] = useState<{ filter: LocationFilter | null; age: CountAge; search?: string } | null>(null)
   const [showCountCoverage, setShowCountCoverage] = useState(false)
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -2727,7 +2727,9 @@ ${(adjustmentsList || []).length > 0 ? (() => {
               actually looks, not only inside the Transfer Stock tab. */}
           <CountReminder variant="card" products={data?.products || []} rules={countRules(isLkTax)} canCount
             onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })}
-            onCoverage={() => setShowCountCoverage(true)} />
+            onCoverage={() => setShowCountCoverage(true)}
+            listUpTo={10}
+            onOpenItem={(p: any) => startTransition(() => { setCountPreset({ filter: null, age: 'all', search: p.sku || p.name }); setTab('stocktake') })} />
           <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
           <TabOverview
             vendor={vendor}
