@@ -44,11 +44,12 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   const [stockFilter, setStockFilter] = useState({ store: '', floor: '', sub1: '', sub2: '' })
   const [stocktakeSearch, setStocktakeSearch] = useState('')
   // "Not confirmed since" filter + coverage sheet (src/lib/countCoverage.ts)
-  const [countAge, setCountAge] = useState<CountAge>('all')
-  // Phones (owner, 2026-10-23): open on the first stop (3 mo+), All last, and
-  // leave out No-photo, By location, Print and Excel — those stay on a computer
+  // Sakura opens on the first stop (3 mo+) with All last — phone and computer
+  // alike (owner, 2026-10-23)
+  const [countAge, setCountAge] = useState<CountAge>(dueStop(countRules(false)))
+  // Phones (owner, 2026-10-23): leave out No-photo, By location, Print and
+  // Excel — those stay on a computer
   const [narrow, setNarrow] = useState(false)
-  const narrowStarted = useRef(false)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 767px)')
     const apply = () => setNarrow(mq.matches)
@@ -56,12 +57,6 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
     mq.addEventListener('change', apply)
     return () => mq.removeEventListener('change', apply)
   }, [])
-  useEffect(() => {
-    if (narrow && !narrowStarted.current) {
-      narrowStarted.current = true
-      setCountAge(c => (c === 'all' ? dueStop(countRules(false)) : c))
-    }
-  }, [narrow])
   const [showCoverage, setShowCoverage] = useState(false)
   // Photo check while counting (2026-10-23): tap a card's photo or name
   const [photoProduct, setPhotoProduct] = useState<any>(null)
@@ -213,8 +208,8 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   // Browsing shows stock on hand only (matches the "All" count). Sold-out
   // items appear when searched for, so a part found on the shelf can still
   // be counted back in (owner, 2026-10-13: 1,900+ sold-out rows at Sakura).
-  // Where Browse & Count starts: 3 mo+ on a phone, All on a computer
-  const homeAge: CountAge = narrow ? dueStop(countRules(false)) : 'all'
+  // Where Browse & Count starts (and Clear returns to): 3 mo+
+  const homeAge: CountAge = dueStop(countRules(false))
   const placeProducts = allProducts.filter((p: any) => {
     if (!matchesLocation(p, stockFilter)) return false
     if (searchLower) return p.name?.toLowerCase().includes(searchLower) || (p.sku || '').toLowerCase().includes(searchLower)
@@ -429,7 +424,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
           <CountProgressBar products={allProducts} rules={countRules(false)} onOpen={() => setShowProgress(true)} compact={narrow} />
           {/* 4-level filter row */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-3">
-            <CountAgeFilter rules={countRules(false)} value={countAge} counts={countAgeHere} onChange={setCountAge} allLast={narrow} />
+            <CountAgeFilter rules={countRules(false)} value={countAge} counts={countAgeHere} onChange={setCountAge} allLast />
             {!narrow && <div className="grid grid-cols-3 gap-2">
               <button type="button" onClick={() => setShowCoverage(true)}
                 className="min-h-11 px-1 rounded-lg border-2 border-slate-200 bg-white text-sm font-bold text-slate-700 active:bg-slate-50">📍 By location</button>
