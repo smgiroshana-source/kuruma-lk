@@ -1016,8 +1016,16 @@ export default function VendorDashboard() {
       const fullPromise = fetch('/api/vendor/data', { cache: 'no-store' })
 
       // Phase 1: Quick load — vendor info + stats only (fast)
-      const quickR = await quickPromise
-      if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
+      let quickR = await quickPromise
+      // A single failed check is not a logout (2026-10-23: staff were thrown to
+      // /login "without pressing Log Out"). Ask once more before leaving; a 503
+      // means the connection blipped — stay put, the next refresh will work.
+      if (quickR.status === 401 || quickR.status === 403) {
+        await new Promise(r => setTimeout(r, 1500))
+        quickR = await fetch('/api/vendor/data?quick=1', { cache: 'no-store' })
+        if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
+      }
+      if (quickR.status === 503) showToast('⚠ Connection problem — your login is fine, the page will catch up')
       if (quickR.ok) {
         const quickData = await quickR.json()
         if (!guardVendorSession(quickData?.vendor?.id)) return

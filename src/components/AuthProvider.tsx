@@ -80,8 +80,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState({ user: null, role: 'customer', vendor: null, isAdmin: false, loading: false })
     // Clear server-side cookies via API
     await fetch('/api/auth/logout', { method: 'POST' })
-    // Clear client-side session
-    await supabase.auth.signOut()
+    // Clear client-side session — THIS device only. The default ('global')
+    // ended the login on every phone using it, so one Log Out threw every
+    // other staff device out within the hour (owner, 2026-10-23).
+    await supabase.auth.signOut({ scope: 'local' })
     signingOut.current = false
   }
 

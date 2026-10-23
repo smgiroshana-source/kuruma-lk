@@ -4,16 +4,25 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows } from '@/lib/fetchAll'
 import { PAYROLL_FIRST_CYCLE_START } from '@/lib/payrollStart'
 import { taxObligationsDue } from '@/lib/taxDeadlines'
+import { isTransientAuthError } from '@/lib/authTransient'
 
 export async function GET(req: NextRequest) {
   const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const { data: { user }, error: authErr } = await supabase.auth.getUser()
+  // A blip reaching Supabase Auth is not a logout — 503 keeps the person on
+  // the page (src/lib/authTransient.ts). Only a real missing session is 401.
+  if (!user) return isTransientAuthError(authErr)
+    ? NextResponse.json({ error: 'Connection problem — try again' }, { status: 503 })
+    : NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
 
   const admin = createAdminClient()
-  let { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
+  // .maybeSingle(): "no row" is an answer, a failed query is not — a database
+  // hiccup used to read as "no shop for this login" (403) and log staff out.
+  let { data: vendor, error: vErr } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').maybeSingle()
+  if (vErr) return NextResponse.json({ error: 'Connection problem — try again' }, { status: 503 })
   if (!vendor) {
-    const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
+    const { data: staffLink, error: sErr } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).maybeSingle()
+    if (sErr) return NextResponse.json({ error: 'Connection problem — try again' }, { status: 503 })
     if (staffLink?.vendor) vendor = staffLink.vendor
   }
   if (!vendor) return NextResponse.json({ error: 'No vendor found' }, { status: 403 })

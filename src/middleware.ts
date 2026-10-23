@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { isTransientAuthError } from '@/lib/authTransient'
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -24,7 +25,7 @@ export async function middleware(request: NextRequest) {
     }
   )
   // Refreshes the session cookie, and tells the page guard below who this is.
-  const { data: { user } } = await supabase.auth.getUser()
+  const { data: { user }, error: authErr } = await supabase.auth.getUser()
 
   // Shop data is never cacheable. Without an explicit header the browser is
   // free to heuristically cache a GET — Safari does it eagerly — so a screen
@@ -53,7 +54,9 @@ export async function middleware(request: NextRequest) {
   // ── Signed-out visitors do not get the app shell ───────────────────────
   // Every API route checks the session itself, so no data leaked; but the
   // vendor and admin pages rendered for anyone and then failed quietly.
-  if ((path.startsWith('/vendor') || path.startsWith('/admin')) && !user) {
+  // A blip reaching Supabase Auth (network, 5xx, 429) is not "signed out" —
+  // let the page load; its own data calls check the session again.
+  if ((path.startsWith('/vendor') || path.startsWith('/admin')) && !user && !isTransientAuthError(authErr)) {
     const login = request.nextUrl.clone()
     login.pathname = '/login'
     login.searchParams.set('next', path)
