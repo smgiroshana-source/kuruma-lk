@@ -18,25 +18,25 @@
 // "(No location)" (2,826 of 2,861) and at WHEEL MART 7 items already in
 // "1 mo+". Each card and the printed sheet still say "Never counted".
 //
-// Every staff login sees a reminder while more than REMIND_PCT of the shop's
-// stock is not confirmed. No dismiss button, by the owner's choice: it clears
+// Every staff login sees a reminder while the shop is below its goal of
+// confirmed stock (countRules().goalPct: WHEEL MART 80%, Sakura 90% — owner,
+// 2026-10-23). No dismiss button, by the owner's choice: it clears
 // only by counting.
 //
 // Pure functions over the products the vendor page already loads — no server
 // calls, so it costs nothing in Vercel usage.
 
-export const REMIND_PCT = 20
 
 export type CountAge = 'all' | '1m' | '3m' | '6m' | '12m'
 const AGE_DAYS: Record<Exclude<CountAge, 'all'>, number> = { '1m': 30, '3m': 90, '6m': 180, '12m': 365 }
 const AGE_MONTHS: Record<Exclude<CountAge, 'all'>, number> = { '1m': 1, '3m': 3, '6m': 6, '12m': 12 }
 
-export type CountRules = { windowDays: number; stops: Exclude<CountAge, 'all'>[] }
+export type CountRules = { windowDays: number; stops: Exclude<CountAge, 'all'>[]; goalPct: number }
 
 // Each shop's count rules — the ONLY place they live. Fixed objects, so a
 // component's useMemo on them doesn't recompute every render.
-const WHEEL_MART_RULES: CountRules = { windowDays: 30, stops: ['1m', '3m', '6m'] }
-const SAKURA_RULES: CountRules = { windowDays: 90, stops: ['3m', '6m', '12m'] }
+const WHEEL_MART_RULES: CountRules = { windowDays: 30, stops: ['1m', '3m', '6m'], goalPct: 80 }
+const SAKURA_RULES: CountRules = { windowDays: 90, stops: ['3m', '6m', '12m'], goalPct: 90 }
 export function countRules(isLkTax: boolean): CountRules {
   return isLkTax ? WHEEL_MART_RULES : SAKURA_RULES
 }
@@ -125,7 +125,7 @@ export function coverageSummary(products: any[], rules: CountRules, now = Date.n
     total, notConfirmed,
     pctNotConfirmed: Math.round(pct * 10) / 10,
     pctConfirmed: total ? Math.floor(((total - notConfirmed) / total) * 100) : 100,
-    remind: pct > REMIND_PCT,
+    remind: pct > 100 - rules.goalPct,
     bands,
   }
 }
@@ -198,4 +198,30 @@ export function lastCountedLabel(p: any, now = Date.now()): string {
   if (d === 0) return 'Counted today'
   if (d < 60) return `Last counted ${d}d ago`
   return `Last counted ${Math.round(d / 30)} months ago`
+}
+
+// ── Day by day (owner, 2026-10-23) ──────────────────────────────────────────
+// How many items were confirmed on each of the last `days` days, and where.
+// Only each product's LATEST confirmation is stored, so an item counted twice
+// shows on the later day — the list is "items whose last count was that day".
+export type CountDay = { date: string; count: number; places: { label: string; n: number }[] }
+
+export function dailyConfirmations(products: any[], days = 10, now = Date.now()): CountDay[] {
+  const colDay = (t: number) => new Date(t).toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })
+  const out: CountDay[] = []
+  const byDay = new Map<string, Map<string, number>>()
+  for (let k = days - 1; k >= 0; k--) { const d = colDay(now - k * DAY); byDay.set(d, new Map()); out.push({ date: d, count: 0, places: [] }) }
+  for (const p of products) {
+    if (!isCountable(p) || !p.last_stock_confirmed_at) continue
+    const m = byDay.get(colDay(Date.parse(p.last_stock_confirmed_at)))
+    if (!m) continue
+    const label = hasNoLocation(p) ? 'No location' : [p.loc_store, p.loc_floor, p.loc_sub1].filter(Boolean).join(' › ')
+    m.set(label, (m.get(label) || 0) + 1)
+  }
+  for (const d of out) {
+    const m = byDay.get(d.date)!
+    d.count = [...m.values()].reduce((a, b) => a + b, 0)
+    d.places = [...m.entries()].map(([label, n]) => ({ label, n })).sort((a, b) => b.n - a.n)
+  }
+  return out.reverse()   // today first
 }

@@ -7,7 +7,7 @@
 // Rules: src/lib/countCoverage.ts. Phone-first bottom sheet.
 import { useEffect, useMemo } from 'react'
 import {
-  coverageSummary, coverageByLocation, dueStop, REMIND_PCT,
+  coverageSummary, coverageByLocation, dueStop,
   type CountAge, type CountRules, type LocationFilter,
 } from '@/lib/countCoverage'
 
@@ -20,7 +20,7 @@ export default function CountCoverage({ products, rules, onClose, onPick, canCou
 }) {
   const sum = useMemo(() => coverageSummary(products, rules), [products, rules])
   const rows = useMemo(() => coverageByLocation(products, rules.windowDays), [products, rules])
-  const goal = 100 - REMIND_PCT
+  const goal = rules.goalPct
 
   useEffect(() => {
     const prev = document.body.style.overflow

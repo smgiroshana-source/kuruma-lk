@@ -1,14 +1,14 @@
 'use client'
 // ── Shared by BOTH vendors (Sakura + WHEEL MART) — keep vendor-neutral ────────
 // Stock count reminder (owner, 2026-10-13): every staff login sees it while
-// more than REMIND_PCT of the shop's stock has not been confirmed within the
+// the shop is below its goal (countRules().goalPct) of stock confirmed within the
 // shop's window (countRules: WHEEL MART 30 days, Sakura 90). No dismiss button, by the owner's choice — it clears only
 // by counting. The dashboard shows the card; every other tab the one-line
 // strip. Cashiers (POS only) see it without a "count" action they can't open.
 // Rules: src/lib/countCoverage.ts.
 import { useMemo } from 'react'
 import {
-  coverageSummary, coverageByLocation, dueStop, REMIND_PCT,
+  coverageSummary, coverageByLocation, dueStop,
   type CountAge, type CountRules, type LocationFilter,
 } from '@/lib/countCoverage'
 
@@ -30,7 +30,7 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
   // How long the waiting items have waited, along the shop's stops
   const tiles: [string, number, boolean][] = sum.bands.map(b => [b.label, b.n, b.oldest])
   const pct = Math.round(sum.pctNotConfirmed)
-  const goal = 100 - REMIND_PCT
+  const goal = rules.goalPct
 
   if (variant === 'strip') {
     const text = (
@@ -100,7 +100,7 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
       ) : (
         <p className="text-sm text-amber-950">Ask a manager to plan a count — counting is done from the Stock tab.</p>
       )}
-      <p className="text-xs text-amber-800">Shows for every staff member while more than {REMIND_PCT}% of stock is not confirmed.</p>
+      <p className="text-xs text-amber-800">Shows for every staff member while more than {100 - rules.goalPct}% of stock is not confirmed.</p>
     </section>
   )
 }
