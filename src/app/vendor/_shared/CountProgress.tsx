@@ -20,8 +20,8 @@ export function CountProgressBar({ products, rules, onOpen, compact = false }: {
   if (compact) return (
     <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3 flex items-center gap-3">
       <div className="shrink-0 text-center px-1">
-        <p className="text-3xl font-black text-emerald-700 tabular-nums leading-none">{today.toLocaleString()}</p>
-        <p className="text-[11px] font-bold text-slate-500 uppercase mt-1">Today</p>
+        <p className="text-4xl font-black text-emerald-700 tabular-nums leading-none">{today.toLocaleString()}</p>
+        <p className="text-xs font-black text-emerald-800 uppercase mt-1">Today</p>
       </div>
       <div className="flex-1 min-w-0">
         <div className="relative h-2.5 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true">
@@ -33,21 +33,28 @@ export function CountProgressBar({ products, rules, onOpen, compact = false }: {
       <button type="button" onClick={onOpen} aria-label="Count progress" className="shrink-0 min-h-11 px-3 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-700 active:bg-slate-50">📈</button>
     </div>
   )
+  // Computer (owner, 2026-10-23): both figures large — counted today, and
+  // what is still not confirmed — then the bar and the 10-day Progress.
+  const months = monthsOf(rules.windowDays)
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3">
-      <div className="flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-slate-700 leading-snug">
-            <b className={good ? 'text-emerald-700' : 'text-red-700'}>{sum.notConfirmed.toLocaleString()}</b> items not confirmed in {monthsOf(rules.windowDays)} month{monthsOf(rules.windowDays) !== 1 ? 's' : ''}
-            <span className="text-slate-400"> · </span>Today <b>{today.toLocaleString()}</b>
-          </p>
-          <div className="relative h-2 rounded-full bg-slate-200 overflow-hidden mt-1.5" aria-hidden="true">
+    <div className="bg-white border border-slate-200 rounded-xl p-4 mb-3">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div className="flex items-center gap-3">
+          <p className="text-5xl font-black text-emerald-700 tabular-nums leading-none">{today.toLocaleString()}</p>
+          <p className="text-xs font-black text-emerald-800 uppercase leading-tight">Confirmed<br />today</p>
+        </div>
+        <div className="flex items-center gap-3 sm:pl-6 sm:border-l-2 border-slate-100">
+          <p className={`text-4xl font-black tabular-nums leading-none ${good ? 'text-emerald-700' : 'text-red-700'}`}>{sum.notConfirmed.toLocaleString()}</p>
+          <p className="text-xs font-black text-slate-600 uppercase leading-tight">Not confirmed<br />in {months} month{months !== 1 ? 's' : ''}</p>
+        </div>
+        <div className="flex-1 min-w-[200px]">
+          <div className="relative h-3 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true">
             <div className={`absolute inset-y-0 left-0 ${good ? 'bg-emerald-600' : 'bg-orange-600'}`} style={{ width: `${sum.pctConfirmed}%` }} />
             <div className="absolute inset-y-0 w-0.5 bg-slate-900" style={{ left: `${rules.goalPct}%` }} />
           </div>
-          <p className="text-[11px] font-bold text-slate-500 mt-1">{sum.pctConfirmed}% confirmed · goal {rules.goalPct}%</p>
+          <p className="text-xs font-bold text-slate-500 mt-1.5">{sum.pctConfirmed}% confirmed · goal {rules.goalPct}%</p>
         </div>
-        <button type="button" onClick={onOpen} className="shrink-0 min-h-11 px-3 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-700 active:bg-slate-50">📈 Progress</button>
+        <button type="button" onClick={onOpen} className="shrink-0 min-h-11 px-4 rounded-lg border-2 border-slate-200 text-sm font-bold text-slate-700 hover:bg-slate-50 active:bg-slate-100">📈 Progress</button>
       </div>
     </div>
   )
