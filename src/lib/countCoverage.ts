@@ -59,9 +59,20 @@ export function countAgeStops(rules: CountRules): { v: CountAge; label: string; 
 const DAY = 86_400_000
 
 
-/** Physical stock that ought to be counted: active, on hand, not a service. */
-export function isCountable(p: any): boolean {
+/** On the shelf: active, quantity above zero, not a service. What Browse &
+ *  Count lists when browsing (sold-out items appear only when searched). */
+export function isOnHand(p: any): boolean {
   return !!p && p.is_active !== false && Number(p.quantity) > 0 && p.product_type !== 'service'
+}
+
+/** Physical stock that ought to be counted: active, on hand, not a service,
+ *  not a consumable. Consumables (valves, patches, weights, shims, nuts, cable
+ *  ties) are loose-counted by design — corrected at the next GRN — so they
+ *  stay out of the monthly count and its reminder (owner, 2026-10-23). They
+ *  still appear on Browse & Count under "All" and in search. */
+export function isCountable(p: any): boolean {
+  return !!p && p.is_active !== false && Number(p.quantity) > 0
+    && p.product_type !== 'service' && p.product_type !== 'consumable'
 }
 
 /** Days since the item was last confirmed (or added, if never counted). */
