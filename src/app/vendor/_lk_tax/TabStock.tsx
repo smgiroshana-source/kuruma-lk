@@ -11,7 +11,7 @@ import CountCoverage from '../_shared/CountCoverage'
 import CountPhotoViewer from '../_shared/CountPhotoViewer'
 import { printCountSheet, downloadCountSheetXlsx } from '../_shared/countSheet'
 import {
-  countAgeStops, countRules, NO_LOCATION, countAgeCounts, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
+  countAgeStops, countRules, NO_LOCATION, countAgeCounts, isOnHand, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
   type CountAge, type LocationFilter,
 } from '@/lib/countCoverage'
 
@@ -676,7 +676,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const placeProducts = allProducts.filter((p: any) => {
     if (!matchesLocation(p, stockFilter)) return false
     if (searchLower) return p.name?.toLowerCase().includes(searchLower) || (p.sku || '').toLowerCase().includes(searchLower)
-    return isCountable(p)
+    return isOnHand(p)
   })
   // Counts under each "not confirmed since" stop, for this spot + search
   const countAgeHere = countAgeCounts(placeProducts, countRules(true))
@@ -1957,7 +1957,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                         <div className="flex items-center gap-2 flex-wrap mb-0.5">
                           <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
                           {p.condition && <span className="text-[10px] font-semibold text-slate-400">{p.condition}</span>}
-                          {!isCountable(p) && <span className="text-[10px] font-bold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">{p.is_active === false ? 'Inactive' : 'Sold out'}</span>}
+                          {!isOnHand(p) && <span className="text-[10px] font-bold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">{p.is_active === false ? 'Inactive' : 'Sold out'}</span>}
                         </div>
                         <button type="button" onClick={() => setPhotoProduct(p)} className="block text-left font-bold text-slate-900 leading-tight underline decoration-slate-300 underline-offset-2 active:text-orange-700">{p.name}</button>
                         {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model}</p>}
