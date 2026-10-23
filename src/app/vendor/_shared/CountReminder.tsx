@@ -23,9 +23,12 @@ type Props = {
   // owner 2026-10-23); tapping one opens it on Browse & Count.
   listUpTo?: number
   onOpenItem?: (p: any) => void
+  // Just the figures: no Start-here list, no buttons, no footer (Sakura's
+  // dashboard — owner, 2026-10-23: staff count from the Stock tab)
+  minimal?: boolean
 }
 
-export default function CountReminder({ products, rules, variant, canCount, onCount, onCoverage, listUpTo, onOpenItem }: Props) {
+export default function CountReminder({ products, rules, variant, canCount, onCount, onCoverage, listUpTo, onOpenItem, minimal = false }: Props) {
   const sum = useMemo(() => coverageSummary(products, rules), [products, rules])
   const top = useMemo(() => (variant === 'card' && sum.remind ? coverageByLocation(products, rules.windowDays).filter(r => r.notConfirmed > 0).slice(0, 3) : []), [products, rules, variant, sum.remind])
   const dueItems = useMemo(() => {
@@ -95,7 +98,7 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
         Together <b>{sum.notConfirmed.toLocaleString()}</b> — the same as “{countAgeStops(rules).find(s => s.v === due)?.label}” on Browse &amp; Count.
       </p>
 
-      {canCount && dueItems && (
+      {canCount && !minimal && dueItems && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-black tracking-wider text-amber-800">{dueItems.length === 1 ? 'THE ITEM TO COUNT' : `THE ${dueItems.length} ITEMS TO COUNT`}</p>
           {dueItems.map(p => {
@@ -114,7 +117,7 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
         </div>
       )}
 
-      {canCount && !dueItems && top.length > 0 && (
+      {canCount && !minimal && !dueItems && top.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-black tracking-wider text-amber-800">START HERE</p>
           {top.map(r => (
@@ -126,7 +129,7 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
         </div>
       )}
 
-      {canCount ? (
+      {minimal ? null : canCount ? (
         <div className="flex gap-2">
           <button type="button" onClick={() => onCount?.(null, due)} className="flex-[1.4] min-h-12 rounded-xl bg-orange-700 active:bg-orange-800 text-white font-black text-[15px]">Start counting</button>
           <button type="button" onClick={onCoverage} className="flex-1 min-h-12 rounded-xl border-2 border-amber-500 bg-white text-amber-950 font-bold text-sm active:bg-amber-100">By location</button>
@@ -134,7 +137,7 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
       ) : (
         <p className="text-sm text-amber-950">Ask a manager to plan a count — counting is done from the Stock tab.</p>
       )}
-      <p className="text-xs text-amber-800">{rules.goalPct >= 100 ? 'Shows for every staff member until every item in stock is confirmed.' : `Shows for every staff member while more than ${100 - rules.goalPct}% of stock is not confirmed.`}</p>
+      {!minimal && <p className="text-xs text-amber-800">{rules.goalPct >= 100 ? 'Shows for every staff member until every item in stock is confirmed.' : `Shows for every staff member while more than ${100 - rules.goalPct}% of stock is not confirmed.`}</p>}
     </section>
   )
 }

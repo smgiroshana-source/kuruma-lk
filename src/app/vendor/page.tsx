@@ -2753,7 +2753,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
           <h1 className="text-2xl font-black text-slate-900 mb-6">Dashboard</h1>
           <CountReminder variant="card" products={data?.products || []} rules={countRules(isLkTax)} canCount
             onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })}
-            onCoverage={() => setShowCountCoverage(true)} />
+            onCoverage={() => setShowCountCoverage(true)} minimal />
           <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
           <div className="grid grid-cols-3 gap-4 mb-8">
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-orange-500">{stats.totalProducts}</p><p className="text-xs text-slate-400 mt-1">Products</p></div>
