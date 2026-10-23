@@ -7,6 +7,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { revalidatePath } from 'next/cache'
+
+// A photo deleted or moved to the front changes what customers see on that
+// product's page (24h cache) — refresh just that page. Deliberate single
+// actions only; bulk uploads never come through here.
+async function refreshProductPage(admin: any, productId: string) {
+  const { data } = await admin.from('products').select('slug').eq('id', productId).maybeSingle()
+  if (data?.slug) revalidatePath(`/product/${data.slug}`)
+  revalidatePath(`/product/${productId}`)
+}
 
 async function resolveVendor(admin: any, userId: string) {
   const { data: owner } = await admin.from('vendors').select('id').eq('user_id', userId).eq('status', 'approved').single()
@@ -36,14 +46,14 @@ export async function GET(req: NextRequest) {
   if (ids.length === 0) return NextResponse.json({ images: {} })
 
   const { data, error } = await admin.from('product_images')
-    .select('id, url, sort_order, product_id, product:products!inner(vendor_id)')
+    .select('id, url, sort_order, is_damage, damage_resolved_at, product_id, product:products!inner(vendor_id)')
     .in('product_id', ids).eq('product.vendor_id', vendor.id)
     .order('sort_order')
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   const grouped: Record<string, any[]> = {}
   for (const id of ids) grouped[id] = []
   for (const row of (data || []) as any[]) {
-    grouped[row.product_id].push({ id: row.id, url: row.url, sort_order: row.sort_order })
+    grouped[row.product_id].push({ id: row.id, url: row.url, sort_order: row.sort_order, is_damage: !!row.is_damage, damage_resolved_at: row.damage_resolved_at || null })
   }
   const res = NextResponse.json({ images: grouped })
   res.headers.set('Cache-Control', 'private, max-age=10')
@@ -105,6 +115,7 @@ export async function POST(req: NextRequest) {
     // Delete database record
     const { error } = await admin.from('product_images').delete().eq('id', imageId)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    await refreshProductPage(admin, image.product_id)
 
     return NextResponse.json({ success: true, message: 'Image deleted' })
   }
@@ -114,11 +125,20 @@ export async function POST(req: NextRequest) {
     if (!imageOrder || !Array.isArray(imageOrder))
       return NextResponse.json({ error: 'Missing image order' }, { status: 400 })
 
+    // Only photos of this shop's own products may be reordered — the ids come
+    // from the browser, so check them (this used to trust any id sent).
+    const { data: owned, error: ownErr } = await admin.from('product_images')
+      .select('id, product_id, product:products!inner(vendor_id)')
+      .in('id', imageOrder).eq('product.vendor_id', vendor.id)
+    if (ownErr) return NextResponse.json({ error: ownErr.message }, { status: 500 })
+    if ((owned || []).length !== imageOrder.length) return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
+
     for (let i = 0; i < imageOrder.length; i++) {
       await admin.from('product_images')
         .update({ sort_order: i })
         .eq('id', imageOrder[i])
     }
+    for (const pid of new Set((owned || []).map((o: any) => o.product_id))) await refreshProductPage(admin, pid as string)
     return NextResponse.json({ success: true, message: 'Images reordered' })
   }
 

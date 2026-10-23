@@ -5021,7 +5021,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
             products={data?.products || []}
             vendorSettings={vendorSettings}
             showToast={showToast}
-            onDataChanged={fetchData}
+            onDataChanged={() => fetchData(undefined, true)}
             initialView={stockInitialView}
             onInitialViewConsumed={() => setStockInitialView(null)}
             countPreset={countPreset}
@@ -5036,7 +5036,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
             products={data?.products || []}
             vendorSettings={vendorSettings}
             showToast={showToast}
-            onDataChanged={fetchData}
+            onDataChanged={() => fetchData(undefined, true)}
             countPreset={countPreset}
             onCountPresetConsumed={() => setCountPreset(null)}
           />
