@@ -20,8 +20,8 @@ export function CountProgressBar({ products, rules, onOpen, compact = false }: {
   if (compact) return (
     <div className="bg-white border border-slate-200 rounded-xl p-3 mb-3 flex items-center gap-3">
       <div className="shrink-0 text-center px-1">
-        <p className="text-4xl font-black text-emerald-700 tabular-nums leading-none">{today.toLocaleString()}</p>
-        <p className="text-xs font-black text-emerald-800 uppercase mt-1">Today</p>
+        <p className="text-3xl font-black text-emerald-700 tabular-nums leading-none">{today.toLocaleString()}</p>
+        <p className="text-[11px] font-bold text-slate-500 uppercase mt-1">Today</p>
       </div>
       <div className="flex-1 min-w-0">
         <div className="relative h-2.5 rounded-full bg-slate-200 overflow-hidden" aria-hidden="true">
