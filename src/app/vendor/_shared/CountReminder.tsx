@@ -62,6 +62,61 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
     )
   }
 
+  // Figures-only card (Sakura's dashboard) is an ALARM, not a note (owner,
+  // 2026-10-23: "make it more alarming"): red, the waiting count huge, what is
+  // still needed for the goal. The icon pulses only for motion-OK devices.
+  if (minimal) {
+    const goalItems = Math.ceil(sum.total * goal / 100)
+    const need = Math.max(0, goalItems - (sum.total - sum.notConfirmed))
+    return (
+      <section role="alert" aria-label="Stock count overdue"
+        className="bg-red-50 border-[3px] border-red-600 rounded-2xl p-4 sm:p-5 mb-5 space-y-4 shadow-[0_0_0_5px_rgba(220,38,38,0.12)]">
+        <div className="flex gap-3 items-center">
+          <div className="w-12 h-12 shrink-0 rounded-full bg-red-600 flex items-center justify-center motion-safe:animate-pulse">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-black text-red-700 uppercase tracking-wide leading-tight">Stock check overdue</h2>
+            <p className="text-sm font-bold text-red-900">Only {sum.pctConfirmed}% confirmed — goal {goal}%</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
+          <p className="text-5xl sm:text-6xl font-black text-red-700 tabular-nums leading-none">{sum.notConfirmed.toLocaleString()}</p>
+          <p className="text-base font-black text-red-900 leading-tight pb-1">items NOT confirmed<br />in the last {windowDays} days ({pct}%)</p>
+        </div>
+
+        <div>
+          <div className="relative h-4 rounded-full bg-red-200 overflow-hidden">
+            <div className="absolute inset-y-0 left-0 bg-emerald-700 rounded-full" style={{ width: `${sum.pctConfirmed}%` }} />
+            <div className="absolute inset-y-0 w-1 bg-red-950" style={{ left: `${goal}%` }} />
+          </div>
+          <div className="flex justify-between text-xs font-black text-red-900 mt-1.5">
+            <span>{sum.pctConfirmed}% confirmed</span><span>Goal {goal}%</span>
+          </div>
+        </div>
+
+        {need > 0 && (
+          <p className="bg-white border-2 border-red-300 rounded-xl px-3 py-2.5 text-sm sm:text-base font-bold text-red-900">
+            <b className="text-red-700 text-lg">{need.toLocaleString()}</b> more items must be counted to reach {goal}%.
+          </p>
+        )}
+
+        <div className={`grid gap-2 ${tiles.length === 3 ? 'grid-cols-3' : tiles.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {tiles.map(([l, n]) => (
+            <div key={l as string} className="bg-white border border-red-200 rounded-xl px-2.5 py-2">
+              <p className="text-xl font-black tabular-nums text-red-700">{(n as number).toLocaleString()}</p>
+              <p className="text-xs text-slate-700">not counted for {l as string}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs font-semibold text-red-900 -mt-1">
+          Together <b>{sum.notConfirmed.toLocaleString()}</b> — the same as “{countAgeStops(rules).find(s => s.v === due)?.label}” on Browse &amp; Count.
+        </p>
+      </section>
+    )
+  }
+
   return (
     <section aria-label="Stock count reminder" className="bg-amber-50 border-2 border-amber-500 rounded-2xl p-4 mb-5 space-y-3.5">
       <div className="flex gap-3 items-start">
