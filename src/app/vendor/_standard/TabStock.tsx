@@ -5,6 +5,7 @@ import { useIncomingTransferCount } from '../_shared/useIncomingTransfers'
 import DamageSheet from '../_shared/DamageSheet'
 import CountAgeFilter from '../_shared/CountAgeFilter'
 import CountCoverage from '../_shared/CountCoverage'
+import CountPhotoViewer from '../_shared/CountPhotoViewer'
 import { printCountSheet, downloadCountSheetXlsx } from '../_shared/countSheet'
 import {
   countAgeStops, countRules, NO_LOCATION, countAgeCounts, countAgeDays, hasNoLocation, isCountable, matchesCountAge, matchesLocation,
@@ -44,6 +45,9 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   // "Not confirmed since" filter + coverage sheet (src/lib/countCoverage.ts)
   const [countAge, setCountAge] = useState<CountAge>('all')
   const [showCoverage, setShowCoverage] = useState(false)
+  // Photo check while counting (2026-10-23): tap a card's photo or name
+  const [photoProduct, setPhotoProduct] = useState<any>(null)
+  const [noPhotoOnly, setNoPhotoOnly] = useState(false)
   // Arriving from the stock count reminder: Browse & Count on that spot
   useEffect(() => {
     if (!countPreset) return
@@ -196,9 +200,12 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   // Counts under each "not confirmed since" stop, for this spot + search
   const countAgeHere = countAgeCounts(placeProducts, countRules(false))
   // A time filter shows only stock on hand, longest-waiting first
-  const browseProducts = countAge === 'all' ? placeProducts
+  const agedProducts = countAge === 'all' ? placeProducts
     : placeProducts.filter((p: any) => isCountable(p) && matchesCountAge(p, countAge))
         .sort((a: any, b: any) => countAgeDays(b) - countAgeDays(a))
+  // Stock on hand with no photo at all — photograph it while counting
+  const noPhotoHere = agedProducts.filter((p: any) => isCountable(p) && !(Number(p.image_count) > 0)).length
+  const browseProducts = noPhotoOnly ? agedProducts.filter((p: any) => isCountable(p) && !(Number(p.image_count) > 0)) : agedProducts
   const hasUnplaced = allProducts.some((p: any) => isCountable(p) && hasNoLocation(p))
   const countPlaceText = stockFilter.store === NO_LOCATION ? 'No location set'
     : [stockFilter.store, stockFilter.floor, stockFilter.sub1, stockFilter.sub2].filter(Boolean).join(' · ') || 'Whole shop'
@@ -213,7 +220,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
     if (!downloadCountSheetXlsx({ shopName: vendor?.name || 'Stock', heading, products: browseProducts })) showToast('Could not create the Excel file')
   }
 
-  const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch || countAge !== 'all'
+  const anyFilter = stockFilter.store || stockFilter.floor || stockFilter.sub1 || stockFilter.sub2 || stocktakeSearch || countAge !== 'all' || noPhotoOnly
   const pendingCount = Object.keys(stockQtyEdits).length + stockConfirmSet.size
 
   // ── quick assign: search results ──
@@ -407,6 +414,12 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
               <button type="button" onClick={excelSheet} disabled={browseProducts.length === 0} title="Download the count sheet as an Excel file"
                 className="min-h-11 px-1 rounded-lg border-2 border-emerald-200 bg-white text-sm font-bold text-emerald-800 active:bg-emerald-50 disabled:opacity-40">📊 Excel</button>
             </div>
+            {(noPhotoHere > 0 || noPhotoOnly) && (
+              <label className="flex items-center gap-2.5 min-h-11 px-3 rounded-lg border-2 border-slate-200 bg-white cursor-pointer">
+                <input type="checkbox" checked={noPhotoOnly} onChange={e => setNoPhotoOnly(e.target.checked)} className="w-5 h-5 accent-orange-600" />
+                <span className="text-sm font-bold text-slate-700">📷 No photo only <span className="font-semibold text-slate-500">({noPhotoHere})</span></span>
+              </label>
+            )}
             <p className="text-xs font-bold text-slate-400 uppercase">Filter by Location</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div>
@@ -447,7 +460,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
               {stocktakeSearch && <button onClick={() => setStocktakeSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-lg">×</button>}
             </div>
             {anyFilter && (
-              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all') }}
+              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all'); setNoPhotoOnly(false) }}
                 className="text-xs font-bold text-orange-500 hover:text-orange-700">✕ Clear all filters</button>
             )}
           </div>
@@ -463,7 +476,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
             <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
               <p className="text-3xl mb-3">🔍</p>
               <p className="text-slate-500 font-semibold">No products match these filters</p>
-              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all') }} className="mt-3 text-sm text-orange-500 font-bold">Clear filters</button>
+              <button onClick={() => { setStockFilter({ store: '', floor: '', sub1: '', sub2: '' }); setStocktakeSearch(''); setCountAge('all'); setNoPhotoOnly(false) }} className="mt-3 text-sm text-orange-500 font-bold">Clear filters</button>
             </div>
           ) : (
             <div className="space-y-2 pb-24 sm:pb-4">
@@ -477,13 +490,21 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                   <div key={p.id} className={`bg-white rounded-xl border p-4 ${changed ? 'border-orange-300 bg-orange-50' : confirmed ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200'}`}>
                     {/* Top row: info + confirmed badge */}
                     <div className="flex items-start justify-between gap-2 mb-3">
+                      <button type="button" onClick={() => setPhotoProduct(p)} aria-label={`Photos of ${p.name}`}
+                        className="relative shrink-0 w-14 h-14 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 active:opacity-70">
+                        {p.images?.[0]?.url
+                          // eslint-disable-next-line @next/next/no-img-element
+                          ? <img src={p.images[0].url} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                          : <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-slate-400 text-center leading-tight">No<br />photo</span>}
+                        {Number(p.image_count) > 1 && <span className="absolute bottom-0 right-0 bg-black/60 text-white text-[9px] font-bold px-1 rounded-tl">{p.image_count}</span>}
+                      </button>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-0.5">
                           <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{p.sku}</span>
                           {p.condition && <span className="text-[10px] font-semibold text-slate-400">{p.condition}</span>}
                           {!isCountable(p) && <span className="text-[10px] font-bold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">{p.is_active === false ? 'Inactive' : 'Sold out'}</span>}
                         </div>
-                        <p className="font-bold text-slate-900 leading-tight">{p.name}</p>
+                        <button type="button" onClick={() => setPhotoProduct(p)} className="block text-left font-bold text-slate-900 leading-tight underline decoration-slate-300 underline-offset-2 active:text-orange-700">{p.name}</button>
                         {(p.make || p.model) && <p className="text-xs text-slate-400 mt-0.5">{p.make} {p.model}</p>}
                         {loc && !anyFilter && <p className="text-[10px] font-semibold text-amber-700 mt-0.5">📍 {loc}</p>}
                         {changed && <p className="text-[10px] font-bold text-orange-600 mt-0.5">Was {p.quantity} → now {curQty}</p>}
@@ -766,6 +787,11 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
       {/* ── TRANSFER STOCK ── */}
       {stockView === 'transfer' && (
         <StockTransfer vendor={vendor} products={products} showToast={showToast} onDataChanged={onDataChanged} />
+      )}
+
+      {/* ── Photo check while counting (2026-10-23) ── */}
+      {photoProduct && (
+        <CountPhotoViewer product={photoProduct} onClose={() => setPhotoProduct(null)} onChanged={() => onDataChanged()} showToast={showToast} />
       )}
 
       {/* ── Count coverage by location (stock count reminder, 2026-10-13) ── */}
