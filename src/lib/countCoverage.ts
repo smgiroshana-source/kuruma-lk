@@ -117,7 +117,7 @@ export function coverageSummary(products: any[], rules: CountRules, now = Date.n
   const edges = rules.stops.map(s => AGE_DAYS[s])
   const months = rules.stops.map(s => AGE_MONTHS[s])
   const bands = rules.stops.map((_, i) => ({
-    label: i < months.length - 1 ? `${months[i]}–${months[i + 1]} months` : `${months[i]} months+`,
+    label: i < months.length - 1 ? `${months[i]}–${months[i + 1]} months` : `${months[i]}+ months`,
     n: 0, oldest: i === months.length - 1,
   }))
   let total = 0, notConfirmed = 0

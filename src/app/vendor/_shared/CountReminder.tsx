@@ -8,7 +8,7 @@
 // Rules: src/lib/countCoverage.ts.
 import { useMemo } from 'react'
 import {
-  coverageSummary, coverageByLocation, dueStop, isCountable, isConfirmed, countAgeDays, lastCountedLabel,
+  coverageSummary, coverageByLocation, dueStop, countAgeStops, isCountable, isConfirmed, countAgeDays, lastCountedLabel,
   type CountAge, type CountRules, type LocationFilter,
 } from '@/lib/countCoverage'
 
@@ -85,10 +85,15 @@ export default function CountReminder({ products, rules, variant, canCount, onCo
         {tiles.map(([l, n, red]) => (
           <div key={l as string} className="bg-white rounded-xl px-2.5 py-2">
             <p className={`text-xl font-black tabular-nums ${red ? 'text-red-700' : 'text-slate-900'}`}>{(n as number).toLocaleString()}</p>
-            <p className="text-xs text-slate-600">{l as string}</p>
+            <p className="text-xs text-slate-600">not counted for {l as string}</p>
           </div>
         ))}
       </div>
+      {/* The boxes are separate slices; Browse & Count's stops each include
+          everything older — say how they meet (owner, 2026-10-23) */}
+      <p className="text-xs text-amber-900 -mt-1">
+        Together <b>{sum.notConfirmed.toLocaleString()}</b> — the same as “{countAgeStops(rules).find(s => s.v === due)?.label}” on Browse &amp; Count.
+      </p>
 
       {canCount && dueItems && (
         <div className="space-y-1.5">
