@@ -1,11 +1,12 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
 import { useIncomingTransferCount } from '../_shared/useIncomingTransfers'
 import DamageSheet from '../_shared/DamageSheet'
 import CountAgeFilter from '../_shared/CountAgeFilter'
 import CountCoverage from '../_shared/CountCoverage'
 import CountPhotoViewer from '../_shared/CountPhotoViewer'
+import { useIncremental } from '../_shared/useIncremental'
 import CountProgress, { CountProgressBar } from '../_shared/CountProgress'
 import { printCountSheet, downloadCountSheetXlsx } from '../_shared/countSheet'
 import {
@@ -210,21 +211,26 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
   // be counted back in (owner, 2026-10-13: 1,900+ sold-out rows at Sakura).
   // Where Browse & Count starts (and Clear returns to): 3 mo+
   const homeAge: CountAge = dueStop(countRules(false))
-  const placeProducts = allProducts.filter((p: any) => {
+  // Memoised (2026-10-24): these walk the whole product list, and used to run
+  // again on every + / − tap. Now only when the list or a filter changes.
+  const placeProducts = useMemo(() => allProducts.filter((p: any) => {
     if (!matchesLocation(p, stockFilter)) return false
     if (searchLower) return p.name?.toLowerCase().includes(searchLower) || (p.sku || '').toLowerCase().includes(searchLower)
     return isOnHand(p)
-  })
+  }), [allProducts, stockFilter, searchLower])
   // Counts under each "not confirmed since" stop, for this spot + search
-  const countAgeHere = countAgeCounts(placeProducts, countRules(false))
+  const countAgeHere = useMemo(() => countAgeCounts(placeProducts, countRules(false)), [placeProducts])
   // A time filter shows only stock on hand, longest-waiting first
-  const agedProducts = countAge === 'all' ? placeProducts
+  const agedProducts = useMemo(() => countAge === 'all' ? placeProducts
     : placeProducts.filter((p: any) => isCountable(p) && matchesCountAge(p, countAge))
-        .sort((a: any, b: any) => countAgeDays(b) - countAgeDays(a))
+        .sort((a: any, b: any) => countAgeDays(b) - countAgeDays(a)), [placeProducts, countAge])
   // Stock on hand with no photo at all — photograph it while counting
   const noPhotoHere = agedProducts.filter((p: any) => isCountable(p) && !(Number(p.image_count) > 0)).length
   const browseProducts = noPhotoOnly && !narrow ? agedProducts.filter((p: any) => isCountable(p) && !(Number(p.image_count) > 0)) : agedProducts
-  const hasUnplaced = allProducts.some((p: any) => isCountable(p) && hasNoLocation(p))
+  const hasUnplaced = useMemo(() => allProducts.some((p: any) => isCountable(p) && hasNoLocation(p)), [allProducts])
+  // Draw 60 cards, then the next 60 as the end scrolls near (2026-10-24)
+  const { visible: browseVisible, remaining: browseRemaining, showMore: browseMore, sentinelRef: browseSentinel } =
+    useIncremental(browseProducts, `${countAge}|${stockFilter.store}|${stockFilter.floor}|${stockFilter.sub1}|${stockFilter.sub2}|${stocktakeSearch}|${noPhotoOnly}`)
   const countPlaceText = stockFilter.store === NO_LOCATION ? 'No location set'
     : [stockFilter.store, stockFilter.floor, stockFilter.sub1, stockFilter.sub2].filter(Boolean).join(' · ') || 'Whole shop'
   function printSheet() {
@@ -499,7 +505,7 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
             </div>
           ) : (
             <div className="space-y-2 pb-24 sm:pb-4">
-              {browseProducts.map((p: any) => {
+              {browseVisible.map((p: any) => {
                 const curQty = stockQtyEdits[p.id] ?? p.quantity
                 const changed = stockQtyEdits[p.id] !== undefined
                 const confirmed = stockConfirmSet.has(p.id)
@@ -564,6 +570,13 @@ export default function TabStockStandard({ vendor, products, vendorSettings, sho
                   </div>
                 )
               })}
+              {browseRemaining > 0 && (
+                <div ref={browseSentinel} className="pt-1">
+                  <button type="button" onClick={browseMore} className="w-full min-h-12 rounded-xl border-2 border-slate-200 bg-white text-sm font-bold text-slate-600 active:bg-slate-50">
+                    Show more — {browseRemaining.toLocaleString()} left
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
