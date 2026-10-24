@@ -976,7 +976,7 @@ export default function VendorDashboard() {
         } else {
           showToast('Shop info updated!')
         }
-        fetchData()
+        fetchData(undefined, true)
       } else {
         showToast('Error: ' + (j.error || 'Failed'))
       }
@@ -1012,28 +1012,42 @@ export default function VendorDashboard() {
       // The route sends max-age=30 for cold loads. This function is also the
       // refresh after every action, and a refresh answered from the browser
       // cache showed a product without the photo that had just been uploaded.
-      const quickPromise = fetch('/api/vendor/data?quick=1', { cache: 'no-store' })
-      const fullPromise = fetch('/api/vendor/data', { cache: 'no-store' })
+      // A quiet refresh (after a sale, a count, a photo…) skips the quick load
+      // (2026-10-24): the page is already showing, the full load carries the
+      // same stats, and the quick reply REPLACED the product list with none
+      // until the full one arrived — lists emptied and redrew after every
+      // action. One server call per action instead of two.
+      const quickPromise = silent ? null : fetch('/api/vendor/data?quick=1', { cache: 'no-store' })
+      let fullPromise = fetch('/api/vendor/data', { cache: 'no-store' })
 
-      // Phase 1: Quick load — vendor info + stats only (fast)
-      let quickR = await quickPromise
       // A single failed check is not a logout (2026-10-23: staff were thrown to
       // /login "without pressing Log Out"). Ask once more before leaving; a 503
       // means the connection blipped — stay put, the next refresh will work.
-      if (quickR.status === 401 || quickR.status === 403) {
-        await new Promise(r => setTimeout(r, 1500))
-        quickR = await fetch('/api/vendor/data?quick=1', { cache: 'no-store' })
-        if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
-      }
-      if (quickR.status === 503) showToast('⚠ Connection problem — your login is fine, the page will catch up')
-      if (quickR.ok) {
-        const quickData = await quickR.json()
-        if (!guardVendorSession(quickData?.vendor?.id)) return
-        setData(quickData); if (!silent) setLoading(false)
+      if (quickPromise) {
+        // Phase 1: Quick load — vendor info + stats only (fast)
+        let quickR = await quickPromise
+        if (quickR.status === 401 || quickR.status === 403) {
+          await new Promise(r => setTimeout(r, 1500))
+          quickR = await fetch('/api/vendor/data?quick=1', { cache: 'no-store' })
+          if (quickR.status === 401 || quickR.status === 403) { window.location.href = '/login'; return }
+          fullPromise = fetch('/api/vendor/data', { cache: 'no-store' })
+        }
+        if (quickR.status === 503) showToast('⚠ Connection problem — your login is fine, the page will catch up')
+        if (quickR.ok) {
+          const quickData = await quickR.json()
+          if (!guardVendorSession(quickData?.vendor?.id)) return
+          setData(quickData); if (!silent) setLoading(false)
+        }
       }
 
       // Phase 2: Full load — already in flight, just await the result
-      const fullR = await fullPromise
+      let fullR = await fullPromise
+      if (!quickPromise && (fullR.status === 401 || fullR.status === 403)) {
+        await new Promise(r => setTimeout(r, 1500))
+        fullR = await fetch('/api/vendor/data', { cache: 'no-store' })
+        if (fullR.status === 401 || fullR.status === 403) { window.location.href = '/login'; return }
+      }
+      if (!quickPromise && fullR.status === 503) showToast('⚠ Connection problem — your login is fine, the page will catch up')
       if (fullR.ok) {
         const fullData = await fullR.json()
         if (!guardVendorSession(fullData?.vendor?.id)) return
@@ -1078,7 +1092,7 @@ export default function VendorDashboard() {
   // saveAllStockChanges and saveStocktakeWithCost moved into _lk_tax/TabStock and _standard/TabStock components
 
   async function productAction(action: string, productId: string, updateData?: any) {
-    setActionLoading(productId); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, productId, data: updateData }) }); const j = await r.json(); if (j.success) { showToast(j.message); await fetchData(); setEditingProduct(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setActionLoading(null)
+    setActionLoading(productId); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, productId, data: updateData }) }); const j = await r.json(); if (j.success) { showToast(j.message); await fetchData(undefined, true); setEditingProduct(null) } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setActionLoading(null)
   }
   // Returns the image records the server created, so a caller can show them at
   // once instead of waiting on a refetch the browser may answer from cache.
@@ -1147,7 +1161,7 @@ export default function VendorDashboard() {
       if (j.success) {
         showToast(j.message)
         if (j.blocked?.length) j.blocked.slice(0, 3).forEach((b: string) => showToast('⚠️ ' + b))
-        setSelectedProducts(new Set()); await fetchData()
+        setSelectedProducts(new Set()); await fetchData(undefined, true)
       }
       else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
@@ -1197,11 +1211,11 @@ export default function VendorDashboard() {
     setPrimaryChanges(new Map())
     setPrimaryMode(false)
     setActionLoading(null)
-    await fetchData()
+    await fetchData(undefined, true)
   }
 
   // Product handlers
-  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; if (isLkTax && parseInt(newProduct.cost) > 0 && newProduct.cost_vat_rate == null) { showToast('⚠️ Was there VAT on this cost? Choose under the cost'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'', product_type:'part', tyre_width:'', tyre_profile:'', tyre_rim:'', origin_country:'', cost_vat_rate: null as number | null }); setProductImages([]); setImagePreviews([]); await fetchData(); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
+  async function handleAddProduct(e: React.FormEvent) { e.preventDefault(); if (!newProduct.name.trim()) { showToast('Name required'); return }; if (isLkTax && parseInt(newProduct.cost) > 0 && newProduct.cost_vat_rate == null) { showToast('⚠️ Was there VAT on this cost? Choose under the cost'); return }; setAddLoading(true); const partId = newProduct.partId.trim() || generatePartId(); try { const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', data: { ...newProduct, sku: partId } }) }); const j = await r.json(); if (j.success && j.product) { if (productImages.length > 0) { showToast('Uploading images...'); await uploadImagesForProduct(j.product.id, productImages) }; showToast('Product added!'); setNewProduct({ partId:'', name:'', description:'', category:'Other', make:'', model:'', modelCode:'', year:'', condition:'Reconditioned', side:'', color:'', oemCode:'', cost:'', price:'', quantity:'1', show_price:true, loc_store:'', loc_floor:'', loc_sub1:'', loc_sub2:'', product_type:'part', tyre_width:'', tyre_profile:'', tyre_rim:'', origin_country:'', cost_vat_rate: null as number | null }); setProductImages([]); setImagePreviews([]); await fetchData(undefined, true); setTab('products') } else showToast('Error: ' + j.error) } catch { showToast('Network error') } setAddLoading(false) }
   function handleImageSelect(e: React.ChangeEvent<HTMLInputElement>) { const files = Array.from(e.target.files || []); setProductImages(p => [...p, ...files]); files.forEach(f => { const r = new FileReader(); r.onload = ev => setImagePreviews(p => [...p, ev.target?.result as string]); r.readAsDataURL(f) }) }
   function removeImage(i: number) { setProductImages(p => p.filter((_, x) => x !== i)); setImagePreviews(p => p.filter((_, x) => x !== i)) }
 
@@ -1343,7 +1357,7 @@ export default function VendorDashboard() {
       showToast(summary.join(', ') + ' — Import complete!')
 
       setBulkData([]); setBulkFile(''); setZipFiles([]); setZipSummary(null); setBulkDuplicates([]); setBulkCostVat(null)
-      await fetchData(); setTab('products')
+      await fetchData(undefined, true); setTab('products')
     } catch { showToast('Import failed') }
 
     setBulkLoading(false)
@@ -1399,7 +1413,7 @@ export default function VendorDashboard() {
 
       setBulkProgress({ current: totalSteps, total: totalSteps, phase: 'Complete!', detail: '' })
       showToast(`Uploaded ${imageCount} images for ${productsToRetry.length} products`)
-      await fetchData()
+      await fetchData(undefined, true)
     } catch { showToast('Retry failed') }
 
     setBulkLoading(false)
@@ -1479,7 +1493,7 @@ export default function VendorDashboard() {
           showToast('✅ Credit Note ' + j.creditNoteNo + ' issued')
           setIssuedCreditNote(j.creditNote)
           setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo(''); setRebillPaid('')
-          fetchSales(); fetchData()
+          fetchSales(); fetchData(undefined, true)
         } else {
           showToast('⚠️ ' + (j.error || 'Failed to issue credit note'))
         }
@@ -1491,7 +1505,7 @@ export default function VendorDashboard() {
         const j = await r.json()
         if (j.success) {
           showToast(j.message)
-          fetchSales(); fetchData()
+          fetchSales(); fetchData(undefined, true)
           setReturnModal(null); setReturnItems({}); setReturnReason(''); setReturnKind(''); setRebillInvoiceNo(''); setRebillPaid('')
         } else showToast('Error: ' + j.error)
       }
@@ -1645,7 +1659,7 @@ export default function VendorDashboard() {
         body: JSON.stringify({ action: 'reverse_promotion', saleId: reverseSale.id, reason: reverseReason }),
       })
       const j = await r.json()
-      if (j.success) { showToast('↩ ' + j.message); setReverseSale(null); fetchSales(); fetchData() }
+      if (j.success) { showToast('↩ ' + j.message); setReverseSale(null); fetchSales(); fetchData(undefined, true) }
       else showToast('⚠️ ' + (j.error || 'Could not reverse'))
     } catch { showToast('Network error') }
     setReversing(false)
@@ -1660,7 +1674,7 @@ export default function VendorDashboard() {
         body: JSON.stringify({ action: 'promote_to_tax_invoice', saleId: promoteSale.id, acknowledgeWarnings: true }),
       })
       const j = await r.json()
-      if (j.success) { showToast('✅ ' + j.message); setPromoteSale(null); fetchSales(); fetchData() }
+      if (j.success) { showToast('✅ ' + j.message); setPromoteSale(null); fetchSales(); fetchData(undefined, true) }
       else showToast('⚠️ ' + (j.error || 'Could not promote'))
     } catch { showToast('Network error') }
     setPromoting(false)
@@ -1671,7 +1685,7 @@ export default function VendorDashboard() {
     try {
       const r = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'void_sale', saleId, refundMethod }) })
       const j = await r.json()
-      if (j.success) { showToast(j.message); fetchSales(); fetchData() }
+      if (j.success) { showToast(j.message); fetchSales(); fetchData(undefined, true) }
       else showToast('Error: ' + j.error)
     } catch { showToast('Network error') }
   }
@@ -2730,7 +2744,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
             onCoverage={() => setShowCountCoverage(true)}
             listUpTo={10}
             onOpenItem={(p: any) => startTransition(() => { setCountPreset({ filter: null, age: 'all', search: p.sku || p.name }); setTab('stocktake') })} />
-          <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
+          <IncomingTransfers showToast={showToast} onDataChanged={() => fetchData(undefined, true)} />
           <TabOverview
             vendor={vendor}
             stats={stats}
@@ -2754,7 +2768,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
           <CountReminder variant="card" products={data?.products || []} rules={countRules(isLkTax)} canCount
             onCount={(filter, age) => startTransition(() => { setCountPreset({ filter, age }); setTab('stocktake') })}
             onCoverage={() => setShowCountCoverage(true)} minimal />
-          <IncomingTransfers showToast={showToast} onDataChanged={fetchData} />
+          <IncomingTransfers showToast={showToast} onDataChanged={() => fetchData(undefined, true)} />
           <div className="grid grid-cols-3 gap-4 mb-8">
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-orange-500">{stats.totalProducts}</p><p className="text-xs text-slate-400 mt-1">Products</p></div>
             <div className="bg-white rounded-xl border border-slate-200 p-4"><p className="text-2xl font-black text-emerald-500">{stats.activeProducts}</p><p className="text-xs text-slate-400 mt-1">Active</p></div>
@@ -2905,7 +2919,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                         {idx !== 0 && <button onClick={async () => {
                           const sorted = editProductImages.slice().sort((a: any, b: any) => (a.sort_order || 0) - (b.sort_order || 0))
                           const newOrder = [img.id, ...sorted.filter((x: any) => x.id !== img.id).map((x: any) => x.id)]
-                          try { const r = await fetch('/api/vendor/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reorder', imageOrder: newOrder }) }); const j = await r.json(); if (j.success) { showToast('Primary updated'); await fetchData(); setEditProductImages(prev => { const updated = prev.map((x: any) => ({ ...x, sort_order: newOrder.indexOf(x.id) })); return updated.sort((a: any, b: any) => a.sort_order - b.sort_order) }) } } catch {}
+                          try { const r = await fetch('/api/vendor/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'reorder', imageOrder: newOrder }) }); const j = await r.json(); if (j.success) { showToast('Primary updated'); await fetchData(undefined, true); setEditProductImages(prev => { const updated = prev.map((x: any) => ({ ...x, sort_order: newOrder.indexOf(x.id) })); return updated.sort((a: any, b: any) => a.sort_order - b.sort_order) }) } } catch {}
                         }} className="flex-1 bg-orange-50 text-orange-600 text-[10px] font-bold py-1.5 rounded active:bg-orange-100">Set Primary</button>}
                         <button onClick={() => deleteProductImage(img.id)} disabled={deletingImageId === img.id} className={(idx === 0 ? 'flex-1' : '') + ' bg-red-50 text-red-500 text-[10px] font-bold py-1.5 px-2 rounded active:bg-red-100'}>
                           {deletingImageId === img.id ? '...' : 'Delete'}
@@ -2924,7 +2938,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                 if (files.length === 0 || !editingProduct) return
                 showToast('Uploading...')
                 await uploadImagesForProduct(editingProduct.id, files)
-                await fetchData()
+                await fetchData(undefined, true)
                 showToast('Images uploaded!')
               }} className="w-full text-sm text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-600 hover:file:bg-orange-100" />
             </div>
@@ -3876,7 +3890,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                                         setReturningItem(item.id)
                                         const res = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'return_draft_item', saleId: draft.id, saleItemId: item.id }) })
                                         const j = await res.json()
-                                        if (j.success) { showToast(j.message || '↩ Item returned'); fetchSales(); fetchData() }
+                                        if (j.success) { showToast(j.message || '↩ Item returned'); fetchSales(); fetchData(undefined, true) }
                                         else showToast(j.error || 'Error')
                                         setReturningItem(null)
                                       }}
@@ -3913,7 +3927,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                                     setDraftReturning(draft.id)
                                     const res = await fetch('/api/vendor/sales', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'return_draft', saleId: draft.id }) })
                                     const j = await res.json()
-                                    if (j.success) { showToast('↩ All items returned'); fetchSales(); fetchData() }
+                                    if (j.success) { showToast('↩ All items returned'); fetchSales(); fetchData(undefined, true) }
                                     else showToast(j.error || 'Error')
                                     setDraftReturning(null)
                                   }}
@@ -4400,7 +4414,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
               products={data?.products || []}
               vendorSettings={vendorSettings}
               showToast={showToast}
-              onDataChanged={fetchData}
+              onDataChanged={() => fetchData(undefined, true)}
             />
           ) : (
             // Sakura / other vendors: customer credit & advances only
@@ -4409,7 +4423,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
               products={data?.products || []}
               vendorSettings={vendorSettings}
               showToast={showToast}
-              onDataChanged={fetchData}
+              onDataChanged={() => fetchData(undefined, true)}
             />
           )
         )}
@@ -4422,7 +4436,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
             products={data?.products || []}
             vendorSettings={vendorSettings}
             showToast={showToast}
-            onDataChanged={fetchData}
+            onDataChanged={() => fetchData(undefined, true)}
             mode={receivablesShowAll ? 'registry' : 'credit'}
           />
         )}
