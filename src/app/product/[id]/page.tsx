@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { isUUID } from '@/lib/slug'
 import ProductDetailClient from './ProductDetail'
 import { SITE_URL } from '@/lib/siteUrl'
+import { describeProduct } from '@/lib/productDescription'
 
 // Cache product pages for 24 hours — revalidated on-demand when product is updated via API
 export const revalidate = 86400
@@ -31,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const admin = createAdminClient()
     const { data: product } = await findProduct(
       admin, id,
-      'name, description, price, show_price, category, condition, make, model, model_code, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order, is_damage, damage_resolved_at)'
+      'name, description, price, show_price, category, condition, make, model, model_code, year, side, color, oem_code, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order, is_damage, damage_resolved_at)'
     )
 
     if (!product) {
@@ -66,14 +67,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       product.origin_country ? `Imported from ${product.origin_country}` : '',
       `Part ID ${product.sku}`,
     ].filter(Boolean).join(' · ')
-    const description = [
-      ownDesc ? ownDesc.slice(0, 150) + (ownDesc.length > 150 ? '…' : '') :
-        `${product.condition ? product.condition + ' ' : ''}${product.name}${vehicle ? ' for ' + vehicle : ''} available in Sri Lanka.`,
-      facts ? facts + '.' : '',
-      // Dynamic-pricing business — no fixed list prices; sell the freshness.
-      priceText ? `Price: ${priceText}.` : `Message the seller for today's best market price.`,
-      vendorName ? `Sold by ${vendorName}${vendorLocation ? ', ' + vendorLocation : ''}.` : '',
-    ].filter(Boolean).join(' ')
+    // No own text (96% of products): the written summary (src/lib/productDescription.ts)
+    const copy = describeProduct(product as any, product.vendor as any)
+    const ownText = copy.sellerNotes.replace(/\s+/g, ' ').trim()
+    const description = ownText
+      ? [ownText.slice(0, 150) + (ownText.length > 150 ? '…' : ''), facts ? facts + '.' : '',
+         priceText ? `Price: ${priceText}.` : `Message the seller for today's best market price.`,
+         vendorName ? `Sold by ${vendorName}${vendorLocation ? ', ' + vendorLocation : ''}.` : ''].filter(Boolean).join(' ')
+      : copy.summary
 
     return {
       title,
@@ -126,7 +127,7 @@ async function getProductJsonLd(idOrSlug: string) {
     const admin = createAdminClient()
     const { data: product } = await findProduct(
       admin, idOrSlug,
-      'name, description, price, show_price, category, condition, make, model, year, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order, is_damage, damage_resolved_at)'
+      'name, description, price, show_price, category, condition, make, model, model_code, year, side, color, oem_code, sku, slug, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location), images:product_images(url, sort_order, is_damage, damage_resolved_at)'
     )
 
     if (!product) return null
@@ -148,7 +149,7 @@ async function getProductJsonLd(idOrSlug: string) {
       '@context': 'https://schema.org',
       '@type': 'Product',
       name: product.name,
-      description: product.description || product.name,
+      description: (() => { const c = describeProduct(product as any, product.vendor as any); return [c.summary, ...c.paragraphs.slice(1, 2)].join(' ') })(),
       image: imageUrls.length > 0 ? imageUrls : undefined,
       sku: product.sku,
       brand: product.make ? { '@type': 'Brand', name: product.make } : undefined,
@@ -196,7 +197,7 @@ export default async function ProductPage({ params }: Props) {
   // the slug-existence check → proper 404 for unknown slugs).
   const { data: product } = await findProduct(
     admin, id,
-    'name, description, price, show_price, category, condition, make, model, model_code, year, sku, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location)'
+    'name, description, price, show_price, category, condition, make, model, model_code, year, side, color, oem_code, sku, quantity, product_type, tyre_width, tyre_profile, tyre_rim, origin_country, vendor:vendors(name, location)'
   )
   if (!product) notFound()
 
@@ -230,12 +231,16 @@ export default async function ProductPage({ params }: Props) {
   }
   const vendorName = (product.vendor as any)?.name || ''
   const vendorLocation = (product.vendor as any)?.location || ''
+  const copy = describeProduct(product as any, product.vendor as any)
   const specs: Array<[string, string]> = ([
     ['Part ID', product.sku],
     ['Condition', product.condition],
     ['Make', product.make],
     ['Model', [product.model, product.model_code ? `(${product.model_code})` : ''].filter(Boolean).join(' ')],
     ['Year', product.year],
+    (product as any).side ? ['Side', (product as any).side] : null,
+    (product as any).color ? ['Colour', (product as any).color] : null,
+    (product as any).oem_code ? ['Part number', (product as any).oem_code] : null,
     ['Category', product.category],
     tyreSize ? ['Tyre size', tyreSize] : null,
     product.origin_country ? ['Origin', product.origin_country] : null,
@@ -281,16 +286,29 @@ export default async function ProductPage({ params }: Props) {
               </div>
             ))}
           </dl>
-          <p className="text-sm text-slate-600 leading-relaxed">
-            This {product.condition ? product.condition.toLowerCase() + ' ' : ''}{product.name}
-            {vehicle ? ` fits ${vehicle} vehicles` : ''}
-            {tyreSize ? ` in size ${tyreSize}` : ''}
-            {product.origin_country ? `, imported from ${product.origin_country}` : ''}.
-            {vendorName ? ` It is listed by ${vendorName}${vendorLocation ? ` in ${vendorLocation}` : ''}, a verified seller on kuruma.lk.` : ''}
-            {' '}Quote part ID <strong>{product.sku}</strong> when contacting the seller to confirm fitment
-            {product.make ? ` for your exact ${product.make} variant` : ''}.
-            {!(product.show_price && product.price) && ' Prices follow the market, so ask the seller for today’s best price — quotes are quick and free.'}
-          </p>
+          {/* Written description (2026-10-25): facts on record + honest advice
+              for the part type — src/lib/productDescription.ts */}
+          <h3 className="text-base font-black text-slate-900 mb-2">About this part</h3>
+          <div className="space-y-2.5 text-sm text-slate-700 leading-relaxed">
+            {copy.paragraphs.map((t, i) => <p key={i}>{t}</p>)}
+          </div>
+          {copy.damage && (
+            <p className="mt-3 text-sm font-semibold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠ Damage noted by the seller: {copy.damage}</p>
+          )}
+          {copy.checks.length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-sm font-black text-slate-900 mb-1.5">Before you buy, check that</h3>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-slate-700">
+                {copy.checks.map((c, i) => <li key={i}>{c}</li>)}
+              </ul>
+            </div>
+          )}
+          {copy.sellerNotes && (
+            <div className="mt-4">
+              <h3 className="text-sm font-black text-slate-900 mb-1.5">Seller&apos;s notes</h3>
+              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">{copy.sellerNotes}</p>
+            </div>
+          )}
           {/* Hub links — flow link equity both ways between products and hubs */}
           <div className="flex flex-wrap gap-2 mt-4">
             {isTyre && (
