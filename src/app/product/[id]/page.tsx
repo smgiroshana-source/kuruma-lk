@@ -334,6 +334,13 @@ export default async function ProductPage({ params }: Props) {
           </div>
         </div>
       </section>
+
+      {/* Footer last — after the description (it used to close the client
+          part above, so the description sat below it) */}
+      <footer className="bg-slate-900 text-slate-400 text-xs py-6 text-center pb-24 md:pb-6">
+        <p className="font-bold text-white text-sm mb-0.5">kuruma.lk</p>
+        <p>Sri Lanka&apos;s Auto Parts Marketplace</p>
+      </footer>
     </>
   )
 }

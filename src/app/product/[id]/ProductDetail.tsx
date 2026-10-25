@@ -395,10 +395,8 @@ export default function ProductDetailPage() {
         </div>
       )}
 
-      <footer className="bg-slate-900 text-slate-400 text-xs py-6 text-center">
-        <p className="font-bold text-white text-sm mb-0.5">kuruma.lk</p>
-        <p>Sri Lanka&apos;s Auto Parts Marketplace</p>
-      </footer>
+      {/* The footer is rendered by page.tsx, AFTER the server-rendered part
+          details and description — here it sat above them (2026-10-25). */}
     </div>
   )
 }
