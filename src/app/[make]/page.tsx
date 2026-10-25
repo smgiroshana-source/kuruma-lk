@@ -5,11 +5,11 @@ import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows } from '@/lib/fetchAll'
 import MakePageClient from './MakePageClient'
+import { SITE_URL } from '@/lib/siteUrl'
 
 // Regenerate every hour — same cadence as homepage
 export const revalidate = 3600
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 type Props = { params: Promise<{ make: string }> }
 

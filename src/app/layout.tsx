@@ -4,11 +4,11 @@ import Script from 'next/script'
 import './globals.css'
 import { AuthProvider } from '@/components/AuthProvider'
 import ScrollToTop from '@/components/ScrollToTop'
+import { SITE_URL } from '@/lib/siteUrl'
 
 // Google tag (GA4 / Google Ads) — measurement IDs are public by design
 const GA_ID = 'G-5E9P59B4WZ'
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 export const viewport: Viewport = {
   width: 'device-width',

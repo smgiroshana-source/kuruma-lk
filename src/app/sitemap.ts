@@ -1,57 +1,52 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { fetchAllRows } from '@/lib/fetchAll'
 import type { MetadataRoute } from 'next'
+import { SITE_URL } from '@/lib/siteUrl'
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
+
+// Rebuilt once a day so new stock joins (it was built only at deploy time)
+export const revalidate = 86400
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const admin = createAdminClient()
 
-  // Static pages
-  const staticPages: MetadataRoute.Sitemap = [
-    {
-      url: SITE_URL,
-      lastModified: new Date(),
-      changeFrequency: 'daily',
-      priority: 1,
-    },
-    {
-      url: `${SITE_URL}/login`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.3,
-    },
-    {
-      url: `${SITE_URL}/register`,
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.3,
-    },
-  ]
-
-  // All active, in-stock products WITH a slug. UUID-only URLs are excluded:
-  // Search Console flagged them as soft-404/low-value entries, and each gains
-  // a slug (and joins the sitemap) on its next catalog fetch anyway.
-  const { data: products } = await admin
-    .from('products')
-    .select('id, slug, updated_at, created_at')
+  // Every in-stock product, read in pages (2026-10-25): the old single query
+  // stopped at 5,000 while 6,170 were live, and the hub counts below came
+  // from one unpaginated read. One read feeds the products AND the hubs.
+  const rows: any[] = await fetchAllRows((from, to) => (admin.from('products') as any)
+    .select('id, slug, updated_at, created_at, make, model, tyre_width, tyre_profile, tyre_rim')
     .eq('is_active', true)
     .gt('quantity', 0)
-    .not('slug', 'is', null)
     .order('created_at', { ascending: false })
-    .limit(5000)
+    .order('id')
+    .range(from, to))
+  const changed = (r: any) => new Date(r.updated_at || r.created_at)
+  const newest = rows.length ? new Date(Math.max(...rows.map(r => changed(r).getTime()))) : new Date()
 
-  const productPages: MetadataRoute.Sitemap = (products || []).map((p) => ({
+  // Home only. /login and /register were listed here while robots.txt
+  // blocks them — Search Console's "Blocked by robots.txt".
+  const staticPages: MetadataRoute.Sitemap = [
+    { url: SITE_URL, lastModified: newest, changeFrequency: 'daily', priority: 1 },
+  ]
+
+  // Products WITH a slug. UUID-only URLs are excluded: Search Console flagged
+  // them as soft-404/low-value entries, and each gains a slug on its next
+  // catalog fetch anyway.
+  const products = rows.filter(r => r.slug)
+
+  const productPages: MetadataRoute.Sitemap = products.map((p) => ({
     url: `${SITE_URL}/product/${p.slug}`,
-    lastModified: new Date(p.updated_at || p.created_at),
+    lastModified: changed(p),
     changeFrequency: 'weekly' as const,
     priority: 0.8,
   }))
 
-  // Make hub pages — /toyota, /honda, /nissan, etc.
-  const { data: makeRows } = await (admin.from('products') as any)
-    .select('make, model, tyre_width, tyre_profile, tyre_rim')
-    .eq('is_active', true)
-    .gt('quantity', 0)
+  // Make hub pages — /toyota, /honda, /nissan, etc. — from the same full read
+  const makeRows = rows
+  // A hub's "last changed" is its newest product, not "now" on every crawl
+  // (a lastmod that always says today teaches Google to ignore it)
+  const hubChanged = new Map<string, Date>()
+  const touch = (key: string, r: any) => { const d = changed(r); const cur = hubChanged.get(key); if (!cur || d > cur) hubChanged.set(key, d) }
 
   // Dedupe on the NORMALISED SLUG, not the raw string — "Toyota", "TOYOTA"
   // and "Toyota " all collapse to /toyota (Search Console showed duplicate
@@ -65,12 +60,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const slug = raw.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/^-+|-+$/g, '')
     if (slug.length < 2) continue
     slugCounts.set(slug, (slugCounts.get(slug) || 0) + 1)
+    touch(slug, row)
   }
   const makePages: MetadataRoute.Sitemap = [...slugCounts.entries()]
     .filter(([, count]) => count >= 2)
     .map(([slug]) => ({
       url: `${SITE_URL}/${slug}`,
-      lastModified: new Date(),
+      lastModified: hubChanged.get(slug) || newest,
       changeFrequency: 'daily' as const,
       priority: 0.9, // Higher than product pages — these rank for broad "Toyota parts Sri Lanka" queries
     }))
@@ -86,28 +82,30 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       if (mk.length >= 2 && md.length >= 1) {
         const key = `${mk}/${md}`
         modelCounts.set(key, (modelCounts.get(key) || 0) + 1)
+        touch(key, row)
       }
     }
     if (row.tyre_width && row.tyre_profile && row.tyre_rim) {
       const s = `${row.tyre_width}-${row.tyre_profile}-r${row.tyre_rim}`
       sizeCounts.set(s, (sizeCounts.get(s) || 0) + 1)
+      touch('tyres/' + s, row)
     }
   }
   const modelPages: MetadataRoute.Sitemap = [...modelCounts.entries()]
     .filter(([, count]) => count >= 3)
     .map(([path]) => ({
       url: `${SITE_URL}/${path}`,
-      lastModified: new Date(),
+      lastModified: hubChanged.get(path) || newest,
       changeFrequency: 'daily' as const,
       priority: 0.9,
     }))
 
   // Tyre pages — the /tyres hub plus one page per in-stock size
   const tyrePages: MetadataRoute.Sitemap = sizeCounts.size === 0 ? [] : [
-    { url: `${SITE_URL}/tyres`, lastModified: new Date(), changeFrequency: 'daily' as const, priority: 0.9 },
+    { url: `${SITE_URL}/tyres`, lastModified: newest, changeFrequency: 'daily' as const, priority: 0.9 },
     ...[...sizeCounts.keys()].map((size) => ({
       url: `${SITE_URL}/tyres/${size}`,
-      lastModified: new Date(),
+      lastModified: hubChanged.get('tyres/' + size) || newest,
       changeFrequency: 'daily' as const,
       priority: 0.85,
     })),

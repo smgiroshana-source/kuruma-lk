@@ -5,11 +5,11 @@ import { notFound, redirect } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isUUID } from '@/lib/slug'
 import ProductDetailClient from './ProductDetail'
+import { SITE_URL } from '@/lib/siteUrl'
 
 // Cache product pages for 24 hours — revalidated on-demand when product is updated via API
 export const revalidate = 86400
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 type Props = {
   params: Promise<{ id: string }>

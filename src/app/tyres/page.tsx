@@ -2,13 +2,13 @@ import type { Metadata } from 'next'
 import { safeJsonLd } from '@/lib/security'
 import Link from 'next/link'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { SITE_URL } from '@/lib/siteUrl'
 
 // Tyre hub — lists every size currently in stock, linking to /tyres/[size].
 // Sri Lankan tyre buyers search by size ("195/65R15 price in sri lanka");
 // this page + the size pages capture those queries.
 export const revalidate = 3600
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 export const metadata: Metadata = {
   title: 'Tyres Sri Lanka — All Sizes In Stock',

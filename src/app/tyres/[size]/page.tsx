@@ -4,12 +4,12 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import ProductThumb from '@/components/ProductThumb'
+import { SITE_URL } from '@/lib/siteUrl'
 
 // Tyre size landing pages — /tyres/195-65-r15 targets "195/65R15 price sri
 // lanka"-style queries, the dominant way tyre buyers search.
 export const revalidate = 3600
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://www.kuruma.lk'
 
 type Props = { params: Promise<{ size: string }> }
 
