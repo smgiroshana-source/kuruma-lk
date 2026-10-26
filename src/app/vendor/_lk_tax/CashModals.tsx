@@ -1173,6 +1173,7 @@ export function AttendanceModal({
       .then(j => {
         const emps = (j.employees || []).filter((e: any) => e.active !== false)
           .filter((e: any) => !e.join_date || e.join_date <= todayStr())
+          .filter((e: any) => !(e.left_on && e.left_on < todayStr()))
         setPeople(emps)
         const m: Record<string, string> = {}
         for (const e of emps) {

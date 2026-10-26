@@ -187,7 +187,9 @@ export default function TabOverview({ vendor, stats, dashboard, staffRole, produ
         if (r.ok) {
           const j = await r.json()
           const today = colomboToday()
-          const emps = (j.employees || []).filter((e: any) => e.active !== false && (!e.join_date || e.join_date <= today))
+          // A leaver stays active until their final pay, but stops being counted
+          // the day after left_on (Mohammad read as "3/4" a month after leaving)
+          const emps = (j.employees || []).filter((e: any) => e.active !== false && (!e.join_date || e.join_date <= today) && !(e.left_on && e.left_on < today))
           const ids = new Set(emps.map((e: any) => e.id))
           const marked = new Set((j.attendance || []).filter((a: any) => ids.has(a.employee_id)).map((a: any) => a.employee_id)).size
           setAttToday({ marked, total: emps.length })
