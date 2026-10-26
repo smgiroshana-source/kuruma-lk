@@ -77,6 +77,15 @@ function accessoryName(t: { l: string }, size: string, make: string): string {
   const already = new RegExp('\\b' + escaped + '\\b', 'i')
   return already.test(base) ? base : [base, t.l].filter(Boolean).join(' ')
 }
+// A tube or flap typed in by name (not through the Tube / Flap picker) kept
+// the default "Other" and read as a spare part in the Spare Parts and Profit
+// reports — 4 tubes created 8 Oct 2026, the 400R 8 Flap before them. A name
+// that says Tube / Flap files under Wheels & Tires unless the operator chose
+// another category; patches and valves are consumables, left alone.
+function tubeFlapCategory(name: string, category: string): string {
+  if (category && category !== 'Other') return category
+  return /\b(tube|flap)s?\b/i.test(name) && !/\b(patch|valve)\b/i.test(name) ? 'Wheels & Tires' : (category || 'Other')
+}
 
 // Mirrors the server rule in /api/vendor/products (adjust_stock). A count
 // correction may shrink stock a little; past either limit the goods are gone,
@@ -462,7 +471,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
               name:        row.name?.trim() || 'Unnamed',
               make:        row.make?.trim() || null,
               model:       row.model?.trim() || null,
-              category:    row.category?.trim() || 'Other',
+              category:    tubeFlapCategory(row.name?.trim() || '', row.category?.trim() || 'Other'),
               condition:   row.condition?.trim() || 'Used',
               color:       row.color?.trim() || null,
               price:       parseInt(row.price || '0') || null,
@@ -534,7 +543,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       const accName = acc ? accessoryName(acc, grnNewProduct.size || '', grnNewProduct.make || '') : ''
       const r = await fetch('/api/vendor/products', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create', data: {
-          name: acc ? accName : grnNewProduct.name, category: acc ? (acc.loose ? 'Other' : 'Wheels & Tires') : grnNewProduct.category,
+          name: acc ? accName : grnNewProduct.name, category: acc ? (acc.loose ? 'Other' : 'Wheels & Tires') : tubeFlapCategory(grnNewProduct.name, grnNewProduct.category),
           condition: grnNewProduct.condition, make: grnNewProduct.make,
           model: isTyre ? '' : grnNewProduct.model, price: grnNewProduct.price,
           quantity: 0, show_price: true,
