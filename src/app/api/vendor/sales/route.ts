@@ -546,7 +546,23 @@ export async function GET(req: NextRequest) {
       })
     })
   }
-  const totalReturnsAll = returnsInPeriod.reduce((s: number, c: any) => s + c.amount, 0)
+  // Each return payment gets the reason its sale_returns row recorded (same
+  // sale, same amount, written in the same request). A "Wrong invoice"
+  // (rebill) is a billing correction — no goods moved — and the Sales screen
+  // shows it apart from real returns (owner, 2026-10-29: SAK-01131's mis-keyed
+  // Rs.110,000 read as a return). The list stays whole for the daily report;
+  // totalReturns is real returns only, totalCorrections the rest.
+  {
+    const unmatched = [...saleReturnsInPeriod]
+    for (const r of returnsInPeriod) {
+      const t = new Date(r.created_at).getTime()
+      const i = unmatched.findIndex((x: any) => x.saleId === r.sale_id && Math.abs(x.amount - r.amount) < 1
+        && Math.abs(new Date(x.createdAt).getTime() - t) < 120000)
+      r.kind = i >= 0 ? unmatched.splice(i, 1)[0].kind : null
+    }
+  }
+  const totalCorrections = returnsInPeriod.filter((r: any) => r.kind === 'rebill').reduce((s: number, c: any) => s + c.amount, 0)
+  const totalReturnsAll = returnsInPeriod.filter((r: any) => r.kind !== 'rebill').reduce((s: number, c: any) => s + c.amount, 0)
 
   // ── What actually came back, from the stock record rather than the note ──
   //
@@ -586,7 +602,7 @@ export async function GET(req: NextRequest) {
         quantity: Number(l.returned_quantity) || 0,
       }))
       r.pieces = r.returnedItems.reduce((s: number, i: any) => s + i.quantity, 0)
-      totalPiecesReturned += r.pieces
+      if (r.kind !== 'rebill') totalPiecesReturned += r.pieces
     }
   }
 
@@ -698,7 +714,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     retroactive,
     sales: allSales,
-    stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections, totalReturns: totalReturnsAll, totalPiecesReturned },
+    stats: { totalRevenue, totalPaid, totalCredit, totalSales, totalItems, totalDiscount, avgSale: totalSales > 0 ? totalRevenue / totalSales : 0, totalCollections, totalReturns: totalReturnsAll, totalCorrections, totalPiecesReturned },
     collectionsToday: positiveCollections,
     advanceOffsets,
     returnsInPeriod,

@@ -656,6 +656,9 @@ export default function VendorDashboard() {
   // invoice therefore shows in the tile and nowhere else, and "2 return(s)"
   // gave no way to find out which two. Opening the tile answers it in place.
   const [returnsOpen, setReturnsOpen] = useState(false)
+  // "Wrong invoice" returns are billing corrections, not goods back — shown
+  // apart from Returns / Refunds (owner, 2026-10-29)
+  const [correctionsOpen, setCorrectionsOpen] = useState(false)
   // Correcting a mis-picked SKU in place. Without this the only way to fix one
   // was a return plus a re-bill, which is what tempted a staff member to
   // backdate the re-bill so the original day still balanced.
@@ -2116,7 +2119,10 @@ ${(() => {
     const totalSoldOn = filtered.reduce((s: number, sale: any) => s + (sale.sell_through_of_sale_id ? parseFloat(sale.total || 0) : 0), 0)
     const retKinds = { rebill: 0, goods_back: 0, faulty: 0 }
     periodReturns.forEach((r: any) => { const k = (r.kind === 'rebill' || r.kind === 'faulty') ? r.kind : 'goods_back'; retKinds[k as keyof typeof retKinds] += parseFloat(r.amount || 0) })
-    const retUnclassified = 0
+    // A "Wrong invoice" return is a billing correction, not goods back — its
+    // own line, apart from real returns (owner, 2026-10-29). Net is unchanged.
+    const totalCorrected = retKinds.rebill
+    const totalRealReturns = retKinds.goods_back + retKinds.faulty
 
     const methodTotals: Record<string, number> = { cash: 0, cheque: 0, bank: 0, card: 0, advance: 0 }
     filtered.forEach((sale: any) => {
@@ -2131,10 +2137,10 @@ ${(() => {
     })
 
     // Customer-wise breakdown — ALL customers sorted by total desc
-    const byCustomer: Record<string, { name: string; phone: string; invoices: number; total: number; paid: number; due: number; returned: number }> = {}
+    const byCustomer: Record<string, { name: string; phone: string; invoices: number; total: number; paid: number; due: number; returned: number; corrected: number }> = {}
     filtered.forEach((s: any) => {
       const id = s.customer_id || 'walkin-' + (s.customer_name || 'Unknown')
-      if (!byCustomer[id]) byCustomer[id] = { name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, due: 0, returned: 0 }
+      if (!byCustomer[id]) byCustomer[id] = { name: s.customer_name || 'Walk-in', phone: s.customer_phone || '', invoices: 0, total: 0, paid: 0, due: 0, returned: 0, corrected: 0 }
       byCustomer[id].invoices++
       byCustomer[id].total += parseFloat(s.total || 0)
       byCustomer[id].paid += parseFloat(s.paid_amount || 0)
@@ -2142,8 +2148,9 @@ ${(() => {
     })
     periodReturns.forEach((r: any) => {
       const id = r.customerId || 'walkin-' + (r.customerName || 'Unknown')
-      if (!byCustomer[id]) byCustomer[id] = { name: r.customerName || 'Walk-in', phone: '', invoices: 0, total: 0, paid: 0, due: 0, returned: 0 }
+      if (!byCustomer[id]) byCustomer[id] = { name: r.customerName || 'Walk-in', phone: '', invoices: 0, total: 0, paid: 0, due: 0, returned: 0, corrected: 0 }
       byCustomer[id].returned += parseFloat(r.amount || 0)
+      if (r.kind === 'rebill') byCustomer[id].corrected += parseFloat(r.amount || 0)
     })
     const customerRows = Object.values(byCustomer).sort((a, b) => (b.total - b.returned) - (a.total - a.returned))
 
@@ -2167,7 +2174,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 <div class="summary-box"><div class="val green">Rs.${totalPaid.toLocaleString()}</div><div class="lbl">Total Paid</div></div>
 <div class="summary-box"><div class="val red">Rs.${totalCredit.toLocaleString()}</div><div class="lbl">Balance Due</div></div>
 </div>
-<p style="font-size:11px;color:#94a3b8;margin:-8px 0 12px;text-align:center">${filtered.length} invoices${totalReturned > 0 ? ' · invoiced Rs.' + totalSales.toLocaleString() + ' less returns Rs.' + totalReturned.toLocaleString() + ' (' + [retKinds.rebill > 0 ? 're-billed ' + retKinds.rebill.toLocaleString() : '', retKinds.goods_back > 0 ? 'came back ' + retKinds.goods_back.toLocaleString() : '', retKinds.faulty > 0 ? 'faulty ' + retKinds.faulty.toLocaleString() : '', retUnclassified > 0 ? 'no reason ' + retUnclassified.toLocaleString() : ''].filter(Boolean).join(', ') + ')' : ''}${totalSoldOn > 0 ? ' · includes Rs.' + totalSoldOn.toLocaleString() + ' sold on at the other shop (no money here)' : ''}</p>
+<p style="font-size:11px;color:#94a3b8;margin:-8px 0 12px;text-align:center">${filtered.length} invoices${totalReturned > 0 ? ' · invoiced Rs.' + totalSales.toLocaleString() + (totalCorrected > 0 ? ' less billing corrections Rs.' + totalCorrected.toLocaleString() + ' (wrong invoices, nothing came back)' : '') + (totalRealReturns > 0 ? ' less returns Rs.' + totalRealReturns.toLocaleString() + ' (' + [retKinds.goods_back > 0 ? 'came back ' + retKinds.goods_back.toLocaleString() : '', retKinds.faulty > 0 ? 'faulty ' + retKinds.faulty.toLocaleString() : ''].filter(Boolean).join(', ') + ')' : '') : ''}${totalSoldOn > 0 ? ' · includes Rs.' + totalSoldOn.toLocaleString() + ' sold on at the other shop (no money here)' : ''}</p>
 
 <h3 style="font-size:13px;font-weight:800;color:#64748b;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Payment Methods</h3>
 <div class="method-grid">
@@ -2190,7 +2197,7 @@ ${customerRows.map(c => `<tr>
   <td><strong>${escapeHtml(c.name)}</strong></td>
   <td style="font-size:11px;color:#64748b">${escapeHtml(c.phone)}</td>
   <td class="text-right">${c.invoices}</td>
-  <td class="text-right"><strong>Rs.${(c.total - c.returned).toLocaleString()}</strong>${c.returned > 0 ? '<div style="font-size:10px;color:#b45309">after returns Rs.' + c.returned.toLocaleString() + '</div>' : ''}</td>
+  <td class="text-right"><strong>Rs.${(c.total - c.returned).toLocaleString()}</strong>${c.corrected > 0 ? '<div style="font-size:10px;color:#64748b">after billing corrections Rs.' + c.corrected.toLocaleString() + '</div>' : ''}${c.returned - c.corrected > 0 ? '<div style="font-size:10px;color:#b45309">after returns Rs.' + (c.returned - c.corrected).toLocaleString() + '</div>' : ''}</td>
   <td class="text-right" style="color:#16a34a">Rs.${c.paid.toLocaleString()}</td>
   <td class="text-right" style="color:${c.due > 0 ? '#dc2626' : '#94a3b8'};font-weight:${c.due > 0 ? '700' : '400'}">${c.due > 0 ? 'Rs.' + c.due.toLocaleString() : '—'}</td>
 </tr>`).join('')}
@@ -3745,9 +3752,14 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                   })()}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 mb-5">
                     <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
-                      <p className="text-lg sm:text-xl font-black text-green-600">Rs.{(salesData.stats.totalRevenue - (salesData.stats.totalReturns || 0)).toLocaleString()}</p>
+                      <p className="text-lg sm:text-xl font-black text-green-600">Rs.{(salesData.stats.totalRevenue - (salesData.stats.totalReturns || 0) - (salesData.stats.totalCorrections || 0)).toLocaleString()}</p>
                       <p className="text-[11px] text-slate-400 font-semibold">Net Revenue</p>
                       {salesData.stats.totalReturns > 0 && <p className="text-[10px] text-red-500 mt-0.5">Returns: -Rs.{salesData.stats.totalReturns.toLocaleString()}</p>}
+                      {salesData.stats.totalCorrections > 0 && (
+                        <button type="button" onClick={() => setCorrectionsOpen(o => !o)} className="text-[10px] text-slate-500 mt-0.5 underline decoration-dotted underline-offset-2 hover:text-slate-700 text-left">
+                          {(salesData.returnsInPeriod || []).filter((r: any) => r.kind === 'rebill').length} billing correction(s) · Rs.{salesData.stats.totalCorrections.toLocaleString()} {correctionsOpen ? '▴' : '▾'}
+                        </button>
+                      )}
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-3.5 sm:p-4">
                       <p className="text-lg sm:text-xl font-black text-emerald-600">Rs.{salesData.stats.totalPaid.toLocaleString()}</p>
@@ -3778,11 +3790,38 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                       <p className="text-lg sm:text-xl font-black text-red-600">Rs.{salesData.stats.totalReturns.toLocaleString()}</p>
                       <p className="text-[11px] text-slate-400 font-semibold">Returns / Refunds</p>
                       <p className="text-[10px] text-red-500 mt-0.5 font-semibold">
-                        {(salesData.returnsInPeriod || []).length} return(s) · {returnsOpen ? 'hide' : 'see which'} {returnsOpen ? '▴' : '▾'}
+                        {(salesData.returnsInPeriod || []).filter((r: any) => r.kind !== 'rebill').length} return(s) · {returnsOpen ? 'hide' : 'see which'} {returnsOpen ? '▴' : '▾'}
                       </p>
                     </button>
                     )}
                   </div>
+
+                  {/* ─── Billing corrections: "Wrong invoice" returns, no goods moved ── */}
+                  {correctionsOpen && salesData.stats.totalCorrections > 0 && (
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 sm:p-4 mb-5">
+                      <p className="text-[11px] font-bold text-slate-700 mb-2">
+                        Billing corrections in this period
+                        <span className="font-normal text-slate-500"> — a wrong line or amount taken off with "Wrong invoice". Nothing came back; Net Revenue is already after them.</span>
+                      </p>
+                      <div className="space-y-1.5">
+                        {[...(salesData.returnsInPeriod || [])].filter((r: any) => r.kind === 'rebill')
+                          .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+                          .map((r: any) => (
+                            <div key={r.id} className="bg-white rounded-lg border border-slate-200 px-3 py-2 flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                {(r.returnedItems || []).length > 0
+                                  ? (r.returnedItems || []).map((g: any, gi: number) => (
+                                      <p key={gi} className="text-xs font-bold text-slate-800 truncate">{g.name} <span className="text-slate-500">×{g.quantity}</span></p>
+                                    ))
+                                  : <p className="text-xs font-bold text-slate-800 truncate">{String(r.notes || '').includes(':') ? String(r.notes).slice(String(r.notes).indexOf(':') + 1).trim() : 'Corrected line'}</p>}
+                                <p className="text-[10px] text-slate-500 mt-0.5 truncate">{r.invoice_no || '(no invoice)'} · {r.customer_name || 'Unknown'} · {fmtColomboDateTime(r.created_at)}</p>
+                              </div>
+                              <p className="text-xs font-black text-slate-600 shrink-0">-Rs.{Number(r.amount || 0).toLocaleString()}</p>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* ─── Which returns, and when they were raised ───────────── */}
                   {returnsOpen && salesData.stats.totalReturns > 0 && (
@@ -3793,7 +3832,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                         <span className="font-normal text-red-600"> — listed by the day the return was raised, so a return against an older invoice still appears here</span>
                       </p>
                       <div className="space-y-1.5">
-                        {[...(salesData.returnsInPeriod || [])]
+                        {[...(salesData.returnsInPeriod || [])].filter((r: any) => r.kind !== 'rebill')
                           .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
                           .map((r: any) => {
                             // "RETURN (credit cancelled): Toyota FC ABS Actuator x1" —
