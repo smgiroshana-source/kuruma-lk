@@ -9,6 +9,15 @@
 // shown and the total shown can't disagree again. Tax invoices are left as
 // issued: a finalized gazette invoice never changes; its returns are credit
 // notes, a separate document.
+//
+// A "Wrong invoice" return (sale_returns.kind = 'rebill') is a billing mistake
+// put right — no goods moved (owner, 2026-10-29: SAK-01131's coolant line was
+// keyed by mistake, and "Subtotal 302,000 / Returned −110,000" on the
+// customer's bill was wrong). The bill drops it as if the line was never
+// there. Only goods that really came back (goods_back / faulty) print as
+// Returned. The sale_returns rows, stock and the Sales Report keep the
+// correction either way. With no returns rows loaded, everything shows as
+// Returned (the safe side: nothing hidden).
 
 const num = (v: unknown) => { const n = parseFloat(String(v ?? '')); return Number.isFinite(n) ? n : 0 }
 
@@ -17,16 +26,20 @@ export type BillTotals = { subtotal: number; discount: number; returned: number;
 export function billTotals(sale: any): BillTotals {
   const billed = num(sale?.total)
   const discount = num(sale?.discount)
-  const subtotal = num(sale?.subtotal) || billed + discount
-  let returned = 0
+  let subtotal = num(sale?.subtotal) || billed + discount
+  let returned = 0, corrected = 0
   if (sale?.document_type !== 'tax_invoice') {
     // returned_amount is what the return took off the bill; older rows only
     // carry returned_quantity on the lines
     returned = num(sale?.returned_amount) || (sale?.items || [])
       .reduce((t: number, i: any) => t + (Number(i.returned_quantity) || 0) * num(i.unit_price), 0)
     returned = Math.min(Math.max(0, returned), billed)
+    const rows: any[] = Array.isArray(sale?.returns) ? sale.returns : []
+    corrected = Math.min(returned, rows.filter(r => r?.kind === 'rebill').reduce((t, r) => t + num(r.amount), 0))
+    returned -= corrected
+    subtotal -= corrected
   }
-  return { subtotal, discount, returned, total: billed - returned }
+  return { subtotal, discount, returned, total: billed - corrected - returned }
 }
 
 const rs = (n: number) => 'Rs.' + n.toLocaleString()
