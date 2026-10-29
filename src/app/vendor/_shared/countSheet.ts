@@ -7,6 +7,7 @@
 import { escapeHtml } from '@/lib/escapeHtml'
 import { lastCountedLabel, countAgeDays } from '@/lib/countCoverage'
 import { downloadXlsx } from '@/lib/xlsx'
+import { addCloseBar } from '@/lib/printWindow'
 
 export function downloadCountSheetXlsx({ shopName, heading, products }: {
   shopName: string
@@ -79,6 +80,6 @@ export function printCountSheet({ shopName, heading, products }: {
 <div class="sign"><span>Counted by: ____________________</span><span>Date: ____________</span></div>
 <script>window.onload = () => window.print()</script>
 </body></html>`)
-  w.document.close()
+  w.document.close(); addCloseBar(w)
   return true
 }

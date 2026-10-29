@@ -6,6 +6,7 @@ import { saleStatusChip } from '@/lib/saleStatus'
 import { billTotalsHtml, billTotalsLines } from '@/lib/billTotals'
 import { gpPercent, isBelowCost, netOfVat, costIncVat, productCostIncVat, costHasVat } from '@/lib/margin'
 import { compressImage } from '@/lib/compressImage'
+import { addCloseBar } from '@/lib/printWindow'
 
 // "Business day" of a sale/return/collection = the Asia/Colombo calendar date it
 // actually occurred on. No evening cutoff: an 8 PM sale belongs to that day's
@@ -440,7 +441,7 @@ tbody tr:last-child td{border-bottom:1px solid #000}
 </body></html>`
 
   const win = window.open('', '_blank', 'width=960,height=1100')
-  if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 400) }
+  if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 400) }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -529,7 +530,7 @@ ${(() => {
 })()}
 ${termsHtml}
 <div class="footer"><p style="color:${isThermal ? '#000' : '#999'}">${footerText}</p><p style="margin-top:3px;font-size:${isThermal ? '8px' : '9px'};color:#ccc">Powered by kuruma.lk</p></div></body></html>`
-  const win = window.open('', '_blank', `width=${isThermal ? 350 : 900},height=700`); if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+  const win = window.open('', '_blank', `width=${isThermal ? 350 : 900},height=700`); if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 300) }
 }
 
 function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
@@ -1620,7 +1621,7 @@ export default function VendorDashboard() {
       <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1200)}</script>
     </body></html>`
     const w = window.open('', '_blank', 'width=800,height=700')
-    if (w) { w.document.write(html); w.document.close() }
+    if (w) { w.document.write(html); w.document.close(); addCloseBar(w) }
   }
 
   // ── Promote a proprietor receipt to a Pvt Ltd tax invoice ────────────────
@@ -2072,7 +2073,7 @@ ${(() => {
 <div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
 
     const win = window.open('', '_blank', 'width=850,height=700')
-    if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+    if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 300) }
   }
 
   async function openPeriodReport(from?: string, to?: string) {
@@ -2239,7 +2240,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
 <div class="footer"><p>Generated: ${new Date().toLocaleString('en-LK')}</p><p style="margin-top:4px;font-weight:700">Powered by kuruma.lk</p></div></body></html>`
 
     const win = window.open('', '_blank', 'width=900,height=700')
-    if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+    if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 300) }
   }
 
   function whatsAppDailyReport(salesList: any[], vendorInfo: any, reportDate: string, toPhone?: string) {
@@ -2537,7 +2538,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
       </body></html>`
 
       const w = window.open('', '_blank', 'width=1100,height=800')
-      if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500) }
+      if (w) { w.document.write(html); w.document.close(); addCloseBar(w); setTimeout(() => w.print(), 500) }
       showToast(`PDF ready — ${sales.length} invoices`)
       setShowExportModal(false)
     } catch { showToast('PDF generation failed') }

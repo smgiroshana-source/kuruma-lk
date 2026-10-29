@@ -3,6 +3,7 @@ import { toWhatsAppNumber } from '@/lib/constants'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { isValidSLPhone, PHONE_FORMAT_MSG } from '@/lib/phone'
 import { useState, useEffect } from 'react'
+import { addCloseBar } from '@/lib/printWindow'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
 const PAY_LABELS: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', bank: 'Bank Transfer', card: 'Card', advance: 'Advance', credit: 'Credit' }
@@ -327,7 +328,7 @@ ${advanceBalance > 0 ? `
 </div>
 </body></html>`
     const win = window.open('', '_blank', 'width=850,height=700')
-    if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+    if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 300) }
   }
 
   function sendWhatsAppCreditReport(customer: any, sales: any[], vendorInfo: any) {
