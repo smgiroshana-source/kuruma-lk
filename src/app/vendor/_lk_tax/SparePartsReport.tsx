@@ -11,6 +11,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { colomboToday } from '@/lib/dates'
 import { sparePartsPdfHtml } from './sparePartsPdf'
+import { addCloseBar } from '@/lib/printWindow'
 
 const rs = (n: any) => 'Rs.' + Math.round(Number(n) || 0).toLocaleString()
 
@@ -65,7 +66,7 @@ export default function SparePartsReport({ showToast }: { showToast: (m: string)
   function printPdf() {
     if (!data) return
     const w = window.open('', '_blank', 'width=900,height=1000')
-    if (w) { w.document.write(sparePartsPdfHtml(data, cat)); w.document.close() }
+    if (w) { w.document.write(sparePartsPdfHtml(data, cat)); w.document.close(); addCloseBar(w) }
   }
 
   return (

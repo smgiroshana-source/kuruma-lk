@@ -15,6 +15,7 @@
 // slip always agrees with what is actually paid.
 // ─────────────────────────────────────────────────────────────────────────────
 import { escapeHtml } from '@/lib/escapeHtml'
+import { addCloseBar } from '@/lib/printWindow'
 
 export type SlipDetail = {
   pay_type: 'daily' | 'monthly' | string
@@ -206,5 +207,5 @@ export function slipsDocument(company: string, cycle: { from: string; to: string
  * is blocked by the browser as a pop-up. */
 export function printSlips(company: string, cycle: { from: string; to: string }, items: { line: any; detail?: SlipDetail }[], target?: Window | null) {
   const w = target || window.open('', '_blank', 'width=820,height=900')
-  if (w) { w.document.open(); w.document.write(slipsDocument(company, cycle, items)); w.document.close() }
+  if (w) { w.document.open(); w.document.write(slipsDocument(company, cycle, items)); w.document.close(); addCloseBar(w) }
 }

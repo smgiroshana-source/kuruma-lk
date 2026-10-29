@@ -8,6 +8,7 @@ import { gpPercent, isBelowCost, netOfVat, costIncVat, productCostIncVat } from 
 import { useState, useEffect, useMemo } from 'react'
 import { isLooseCount } from '@/lib/looseCount'
 import { previewFifoCost, type CostLayer } from '@/lib/fifoCost'
+import { addCloseBar } from '@/lib/printWindow'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
 const PAY_LABELS: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', bank: 'Bank Transfer', card: 'Card', advance: 'Advance', credit: 'Credit' }
@@ -284,7 +285,7 @@ tbody tr:last-child td{border-bottom:1px solid #000}
 
 </body></html>`
   const win = window.open('', '_blank', 'width=960,height=1100')
-  if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 400) }
+  if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 400) }
 }
 
 function printInvoice(sale: any, vendor: any, format: 'a4' | 'thermal', settings?: any) {
@@ -335,7 +336,7 @@ ${(() => {
 ${termsHtml}
 <div class="footer"><p style="color:${isThermal ? '#000' : '#999'}">${footerText}</p><p style="margin-top:3px;font-size:${isThermal ? '8px' : '9px'};color:#ccc">Powered by kuruma.lk</p></div></body></html>`
   const win = window.open('', '_blank', `width=${isThermal ? 350 : 900},height=700`)
-  if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+  if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 300) }
 }
 
 function sendWhatsAppBill(sale: any, vendor: any, phone: string) {

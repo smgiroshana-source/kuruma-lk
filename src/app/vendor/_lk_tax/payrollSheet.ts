@@ -9,6 +9,7 @@
 // shown on screen.
 // ─────────────────────────────────────────────────────────────────────────────
 import { escapeHtml } from '@/lib/escapeHtml'
+import { addCloseBar } from '@/lib/printWindow'
 
 const r0 = (n: any) => Math.round(Number(n) || 0)
 const n = (v: any) => r0(v).toLocaleString('en-US')
@@ -141,5 +142,5 @@ export function payrollSheetHtml(company: string, cycleLabel: string, run: Run, 
 
 export function printPayrollSheet(company: string, cycleLabel: string, run: Run, lines: any[]) {
   const w = window.open('', '_blank', 'width=1100,height=760')
-  if (w) { w.document.write(payrollSheetHtml(company, cycleLabel, run, lines)); w.document.close() }
+  if (w) { w.document.write(payrollSheetHtml(company, cycleLabel, run, lines)); w.document.close(); addCloseBar(w) }
 }

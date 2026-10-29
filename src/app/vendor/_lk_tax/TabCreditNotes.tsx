@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { CommonTabProps } from '../_shared/TabCredit'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { addCloseBar } from '@/lib/printWindow'
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-LK', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -138,7 +139,7 @@ th{padding:7px 8px;text-align:left;font-size:9px;font-weight:700;text-transform:
 <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1200)}</script>
 </body></html>`
     const w = window.open('', '_blank', 'width=820,height=700')
-    if (w) { w.document.write(html); w.document.close() }
+    if (w) { w.document.write(html); w.document.close(); addCloseBar(w) }
   }
 
   return (

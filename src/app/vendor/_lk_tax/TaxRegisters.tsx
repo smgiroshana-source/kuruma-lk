@@ -11,6 +11,7 @@
 import { useState } from 'react'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { colomboToday } from '@/lib/dates'
+import { addCloseBar } from '@/lib/printWindow'
 
 export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }: {
   showToast: (m: string) => void
@@ -156,7 +157,7 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
       <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),1000)}</script>
       </body></html>`
     const w = window.open('', '_blank', 'width=1000,height=700')
-    if (w) { w.document.write(html); w.document.close() }
+    if (w) { w.document.write(html); w.document.close(); addCloseBar(w) }
   }
 
   return (

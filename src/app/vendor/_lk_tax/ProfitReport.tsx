@@ -13,6 +13,7 @@
 import { useState, useCallback } from 'react'
 import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
+import { addCloseBar } from '@/lib/printWindow'
 
 const rs = (n: any) => 'Rs.' + Math.round(Number(n) || 0).toLocaleString()
 
@@ -294,7 +295,7 @@ export default function ProfitReport({ showToast }: { showToast: (m: string) => 
       </body></html>`
 
     const w = window.open('', '_blank', 'width=1100,height=800')
-    if (w) { w.document.write(html); w.document.close() }
+    if (w) { w.document.write(html); w.document.close(); addCloseBar(w) }
   }
 
   const s = data?.summary

@@ -16,6 +16,7 @@ import PayrollRun from './PayrollRun'
 import StaffLeaving from './StaffLeaving'
 import StaffLoans from './StaffLoans'
 import StaffLogins from '../_shared/StaffLogins'
+import { addCloseBar } from '@/lib/printWindow'
 
 type PayItem = {
   id?: string; kind: string; label: string; amount: number | string
@@ -259,7 +260,7 @@ export default function TabStaff({ staffRole, vendorName, initialView, onInitial
       const w = window.open('', '_blank')
       if (!w) { tt('⚠️ Pop-ups blocked — allow pop-ups and try again'); setRepBusy(false); return }
       w.document.write(html)
-      w.document.close()
+      w.document.close(); addCloseBar(w)
     } catch (e: any) { tt('❌ ' + e.message) }
     setRepBusy(false)
   }
