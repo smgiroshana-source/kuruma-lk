@@ -1728,8 +1728,14 @@ export default function VendorDashboard() {
     // (the period model), but the reader has to be able to see the split — on
     // 4 Sep, Rs.116,000 "returned today" was Rs.36,000 of today's goods and
     // Rs.80,000 from an invoice dated 21 August.
-    const returnsOnTodaysSales = allReturns.filter((r: any) => r.sale_created_at && colomboBusinessDay(r.sale_created_at) === reportDate).reduce((s: number, r: any) => s + r.amount, 0)
-    const returnsOnEarlierSales = totalReturnAmount - returnsOnTodaysSales
+    // A "Wrong invoice" return (kind 'rebill', tagged by /api/vendor/sales) is a
+    // billing correction — nothing came back. It still comes off today's net,
+    // but under its own line, not "returned today" (owner, 2026-10-29).
+    const correctionAmount = allReturns.filter((r: any) => r.kind === 'rebill').reduce((s: number, r: any) => s + r.amount, 0)
+    const realReturns = allReturns.filter((r: any) => r.kind !== 'rebill')
+    const realReturnAmount = totalReturnAmount - correctionAmount
+    const returnsOnTodaysSales = realReturns.filter((r: any) => r.sale_created_at && colomboBusinessDay(r.sale_created_at) === reportDate).reduce((s: number, r: any) => s + r.amount, 0)
+    const returnsOnEarlierSales = realReturnAmount - returnsOnTodaysSales
 
     const totalSales = filtered.reduce((s: number, sale: any) => s + parseFloat(sale.total || 0), 0)
     const netSales = totalSales - totalReturnAmount
@@ -1775,7 +1781,7 @@ table{width:100%;border-collapse:collapse;margin:15px 0}th{background:#f1f5f9;te
 
 <div class="summary">
 <div class="summary-box">${totalReturnAmount > 0
-  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange">Rs.' + totalSales.toLocaleString() + '</div><div style="font-size:11px;color:#dc2626;font-weight:700;margin-top:6px">&minus; Rs.' + totalReturnAmount.toLocaleString() + ' returned today</div>' + (returnsOnEarlierSales > 0 ? '<div style="font-size:10px;color:#991b1b;margin-top:2px">Rs.' + returnsOnTodaysSales.toLocaleString() + ' from today\'s sales \u00b7 Rs.' + returnsOnEarlierSales.toLocaleString() + ' from earlier invoices</div>' : '')
+  ? '<div style="font-size:10px;color:#94a3b8;text-transform:uppercase;font-weight:700;letter-spacing:1px">Gross Sales</div><div class="val orange">Rs.' + totalSales.toLocaleString() + '</div>' + (correctionAmount > 0 ? '<div style="font-size:11px;color:#64748b;font-weight:700;margin-top:6px">&minus; Rs.' + correctionAmount.toLocaleString() + ' billing corrections</div><div style="font-size:10px;color:#94a3b8;margin-top:1px">wrong invoices put right — nothing came back</div>' : '') + (realReturnAmount > 0 ? '<div style="font-size:11px;color:#dc2626;font-weight:700;margin-top:6px">&minus; Rs.' + realReturnAmount.toLocaleString() + ' returned today</div>' : '') + (returnsOnEarlierSales > 0 ? '<div style="font-size:10px;color:#991b1b;margin-top:2px">Rs.' + returnsOnTodaysSales.toLocaleString() + ' from today\'s sales \u00b7 Rs.' + returnsOnEarlierSales.toLocaleString() + ' from earlier invoices</div>' : '')
   : '<div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div>'
 }</div>
 ${totalReturnAmount > 0 ? '<div class="summary-box" style="border:2px solid #ff6b35"><div class="val orange">Rs.' + netSales.toLocaleString() + '</div><div class="lbl">Net Sales</div></div>' : ''}
@@ -2043,7 +2049,7 @@ ${(() => {
       return '<h3 style="font-size:13px;font-weight:800;color:#dc2626;margin:15px 0 8px;text-transform:uppercase;letter-spacing:1px">Refunds (' + cashReturns.length + ') — Rs.' + totalReturnAmt.toLocaleString() + '</h3>' +
         '<div style="font-size:11px;color:#666;margin-bottom:6px">' + (cashPart > 0 ? 'Rs.' + cashPart.toLocaleString() + ' paid out in cash/bank' : '') + (cashPart > 0 && advPart > 0 ? ' \u00b7 ' : '') + (advPart > 0 ? 'Rs.' + advPart.toLocaleString() + ' credited to the customer\'s advance balance \u2014 no cash left the shop' : '') + '</div>' +
         '<table><thead><tr><th>Invoice</th><th>Customer</th><th>Method</th><th class="text-right">Refund</th></tr></thead><tbody>' +
-        cashReturns.map((r: any) => '<tr><td><strong>' + escapeHtml(r.invoice_no || '-') + '</strong></td><td>' + escapeHtml(r.customer_name) + '</td><td style="font-size:11px;color:#666">' + (String(r.payment_method || '').toLowerCase() === 'advance' ? 'TO ADVANCE BALANCE \u2014 no cash' : escapeHtml(String(r.payment_method || 'cash').toUpperCase())) + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + r.amount.toLocaleString() + '</td></tr>').join('') +
+        cashReturns.map((r: any) => '<tr><td><strong>' + escapeHtml(r.invoice_no || '-') + '</strong></td><td>' + escapeHtml(r.customer_name) + '</td><td style="font-size:11px;color:#666">' + (String(r.payment_method || '').toLowerCase() === 'advance' ? 'TO ADVANCE BALANCE \u2014 no cash' : escapeHtml(String(r.payment_method || 'cash').toUpperCase())) + (r.kind === 'rebill' ? '<div style="font-size:10px;color:#64748b">billing correction \u2014 money for a wrong invoice, nothing came back</div>' : '') + '</td><td class="text-right" style="color:#dc2626;font-weight:700">Rs.' + r.amount.toLocaleString() + '</td></tr>').join('') +
         '</tbody></table>'
     })()}
 
