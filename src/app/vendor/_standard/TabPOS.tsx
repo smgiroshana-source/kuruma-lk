@@ -4,6 +4,7 @@ import { colomboToday } from '@/lib/dates'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { billTotalsHtml, billTotalsLines } from '@/lib/billTotals'
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { addCloseBar } from '@/lib/printWindow'
 
 const PAY_METHODS = ['cash', 'cheque', 'bank', 'card']
 const PAY_LABELS: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', bank: 'Bank Transfer', card: 'Card', advance: 'Advance', credit: 'Credit' }
@@ -63,7 +64,7 @@ ${(() => {
 ${termsHtml}
 <div class="footer"><p style="color:${isThermal ? '#000' : '#999'}">${footerText}</p><p style="margin-top:3px;font-size:${isThermal ? '8px' : '9px'};color:#ccc">Powered by kuruma.lk</p></div></body></html>`
   const win = window.open('', '_blank', `width=${isThermal ? 350 : 900},height=700`)
-  if (win) { win.document.write(html); win.document.close(); setTimeout(() => win.print(), 300) }
+  if (win) { win.document.write(html); win.document.close(); addCloseBar(win); setTimeout(() => win.print(), 300) }
 }
 
 function sendWhatsAppBill(sale: any, vendor: any, phone: string) {
