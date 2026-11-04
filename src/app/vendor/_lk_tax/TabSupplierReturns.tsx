@@ -1,5 +1,6 @@
 'use client'
 import { colomboToday } from '@/lib/dates'
+import { returnLoss, CREDIT_NOTE_MONTHS, type NoteWindow } from '@/lib/supplierReturnVat'
 import { useState, useEffect, useRef } from 'react'
 
 type Props = {
@@ -34,6 +35,9 @@ type ReturnRecord = {
   credit_method?: 'invoice' | 'cash' | 'bank' | 'none' | null
   credit_reference?: string | null
   credit_recorded_at?: string | null
+  // Can the supplier still issue a VAT credit note? Only within 6 months of
+  // their invoice (accountant, 2026-11-04) — src/lib/supplierReturnVat.ts
+  note_window?: NoteWindow | null
 }
 
 type Supplier = {
@@ -519,7 +523,7 @@ function ReturnListView({
                       ) : ret.credit_recorded_at ? (() => {
                         const cost = Number(ret.cost_of_goods ?? ret.total_amount) || 0
                         const got = Number(ret.credit_amount) || 0
-                        const lost = cost - got
+                        const lost = returnLoss(ret)
                         return (
                           <button onClick={() => onSettle(ret)} className="text-left group">
                             <span className={'text-xs font-bold group-hover:underline ' + (lost > 0 ? 'text-amber-700' : 'text-emerald-700')}>
@@ -550,6 +554,12 @@ function ReturnListView({
                             {ret.supplier_credit_note_date} · VAT {formatRs(ret.credit_vat || 0)}
                           </span>
                         </button>
+                      ) : ret.note_window && !ret.note_window.open ? (
+                        // No note is possible — don't nag for one (accountant, 2026-11-04)
+                        <span className="block text-[11px] text-slate-400 leading-snug" title={ret.note_window.registered ? `Bought before ${ret.note_window.cutoff} (or opening stock) — over ${CREDIT_NOTE_MONTHS} months` : 'Supplier is not VAT-registered'}>
+                          {ret.note_window.registered ? `None possible — over ${CREDIT_NOTE_MONTHS} months` : 'No VAT — supplier not registered'}
+                          <button onClick={() => onCreditNote(ret)} className="block text-[10px] text-slate-400 underline hover:text-slate-600">they sent one anyway</button>
+                        </span>
                       ) : (
                         <button
                           onClick={() => onCreditNote(ret)}
@@ -920,6 +930,14 @@ function SettlementModal({
   const [invoiceId, setInvoiceId] = useState('')
   const [invoices, setInvoices] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
+  // A VAT credit note is possible only within 6 months of the supplier's
+  // invoice. Inside that window staff must say whether one is coming; outside
+  // it there is no VAT on the return at all (accountant, 2026-11-04).
+  const win = ret.note_window
+  const [vatNote, setVatNote] = useState<'' | 'yes' | 'no'>(ret.supplier_credit_note_no ? 'yes' : win?.open ? '' : 'no')
+  const [noteNo, setNoteNo] = useState(ret.supplier_credit_note_no || '')
+  const [noteDate, setNoteDate] = useState(ret.supplier_credit_note_date || todayStr())
+  const [noteVat, setNoteVat] = useState(String(ret.credit_vat ?? Math.round(cost * 0.18)))
 
   useEffect(() => {
     if (already) return
@@ -936,10 +954,24 @@ function SettlementModal({
   }, [ret.supplier_id, already])
 
   const credited = method === 'none' ? 0 : Math.max(0, Math.round(Number(amount) || 0))
-  const shortfall = Math.max(0, cost - credited)
-  const overCost = credited > cost
+  const withNote = vatNote === 'yes' && method !== 'none'
+  const noteVatRs = withNote ? Math.max(0, Math.round(Number(noteVat) || 0)) : 0
+  // Only the ex-VAT part of a VAT note recovers what the goods cost (ex-VAT)
+  const netAllowed = credited - noteVatRs
+  const shortfall = Math.max(0, cost - netAllowed)
+  const overCost = netAllowed > cost
+
+  function chooseVatNote(v: 'yes' | 'no') {
+    setVatNote(v)
+    // The note's total includes VAT — suggest the full cost + VAT the first time
+    if (v === 'yes' && Math.round(Number(amount) || 0) === cost) setAmount(String(cost + Math.round(cost * 0.18)))
+    if (v === 'no' && Math.round(Number(amount) || 0) === cost + Math.round(cost * 0.18)) setAmount(String(cost))
+  }
 
   async function save() {
+    if (win?.open && !vatNote && method !== 'none') { showToast('Say whether they will send a VAT credit note'); return }
+    if (withNote && (!noteNo.trim() || !noteDate)) { showToast('Credit note number and date — copy them off their note'); return }
+    if (withNote && noteVatRs >= credited) { showToast('The VAT must be less than the note total'); return }
     if (overCost) { showToast('They cannot credit more than the goods cost you'); return }
     if (method !== 'none' && credited <= 0) { showToast('Enter what they allowed, or choose "allowed nothing"'); return }
     if (method === 'invoice' && !invoiceId) { showToast('Choose which invoice the credit comes off'); return }
@@ -951,6 +983,7 @@ function SettlementModal({
           action: 'record_credit', returnId: ret.id, credit_amount: credited, method,
           supplierInvoiceId: method === 'invoice' ? invoiceId : undefined,
           reference: reference.trim() || undefined,
+          vat_note: withNote ? { no: noteNo.trim(), date: noteDate, vat: Math.round(Number(noteVat) * 100) / 100 } : undefined,
         }),
       })
       const j = await r.json()
@@ -980,7 +1013,7 @@ function SettlementModal({
         <div className="p-4 sm:p-5 border-b border-slate-100">
           <h3 className="text-lg font-bold text-slate-900">What did {ret.supplier_name} allow?</h3>
           <p className="text-xs text-slate-500 mt-1">
-            {ret.return_no} · goods cost you <span className="font-bold text-slate-700">{formatRs(cost)}</span>
+            {ret.return_no} · goods cost you <span className="font-bold text-slate-700">{formatRs(cost)}</span> before VAT
           </p>
         </div>
 
@@ -994,9 +1027,14 @@ function SettlementModal({
                 {SETTLE_LABEL[ret.credit_method || 'none']}
                 {ret.credit_reference ? ' · ' + ret.credit_reference : ''}
               </p>
-              {cost - (Number(ret.credit_amount) || 0) > 0 && (
+              {ret.supplier_credit_note_no && ret.credit_method !== 'none' && Number(ret.credit_vat) > 0 && (
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Their VAT credit note {ret.supplier_credit_note_no}: {formatRs((Number(ret.credit_amount) || 0) - Number(ret.credit_vat))} + VAT {formatRs(Number(ret.credit_vat))}
+                </p>
+              )}
+              {returnLoss(ret) > 0 && (
                 <p className="text-xs font-bold text-amber-700 mt-1.5">
-                  {formatRs(cost - (Number(ret.credit_amount) || 0))} written off as a loss
+                  {formatRs(returnLoss(ret))} written off as a loss
                 </p>
               )}
             </div>
@@ -1043,35 +1081,90 @@ function SettlementModal({
                 </div>
               )}
 
-              {method !== 'none' && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">How much did they allow?</label>
-                  <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-                    className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none ' + (overCost ? 'border-red-300' : 'border-slate-200 focus:border-blue-400')} />
-                  <div className="flex gap-1.5 mt-1.5">
-                    <button type="button" onClick={() => setAmount(String(cost))}
-                      className="px-2 py-1 rounded border border-slate-200 text-[10px] font-bold text-slate-600">Full {formatRs(cost)}</button>
-                    <button type="button" onClick={() => setAmount(String(Math.round(cost / 2)))}
-                      className="px-2 py-1 rounded border border-slate-200 text-[10px] font-bold text-slate-600">Half</button>
+              {/* VAT credit note — possible only within 6 months of their invoice */}
+              {method !== 'none' && win && win.registered && (win.open ? (
+                <div className="rounded-lg border-2 border-blue-200 bg-blue-50/60 px-3 py-2.5">
+                  <p className="text-xs font-bold text-slate-800">Will {ret.supplier_name} send a VAT credit note?</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    These goods came on their invoice of {win.newestPurchase} — inside the {CREDIT_NOTE_MONTHS}-month window, so they can.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    {(['yes', 'no'] as const).map(v => (
+                      <button key={v} type="button" onClick={() => chooseVatNote(v)}
+                        className={'px-3 py-2 rounded-lg border-2 text-xs font-bold ' + (vatNote === v ? 'border-blue-500 bg-white text-blue-700' : 'border-slate-200 bg-white text-slate-600')}>
+                        {v === 'yes' ? 'Yes — a credit note with VAT' : 'No credit note'}
+                      </button>
+                    ))}
                   </div>
-                  {overCost && <p className="text-[11px] font-bold text-red-600 mt-1">That is more than the goods cost you ({formatRs(cost)}).</p>}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  No VAT on this return: {win.newestPurchase ? `the goods came on their invoice of ${win.newestPurchase}` : 'opening stock, or no VAT purchase on record from them'} — over {CREDIT_NOTE_MONTHS} months, so no credit note is possible. Your input VAT claim stands.
+                  {vatNote !== 'yes' && <button type="button" onClick={() => chooseVatNote('yes')} className="block mt-1 underline text-slate-500">They sent one anyway</button>}
+                </p>
+              ))}
+
+              {withNote && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Credit note no.</label>
+                    <input value={noteNo} onChange={e => setNoteNo(e.target.value)} placeholder="As printed"
+                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-blue-400" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 mb-1">Date on note</label>
+                    <input type="date" value={noteDate} onChange={e => setNoteDate(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-blue-400" />
+                  </div>
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">
-                  Reference <span className="font-normal text-slate-400">(their credit note or slip number, optional)</span>
-                </label>
-                <input value={reference} onChange={e => setReference(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-blue-400" />
-              </div>
+              {method !== 'none' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">
+                    {withNote ? 'Credit note total (including VAT)' : 'How much did they allow?'}
+                  </label>
+                  <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
+                    className={'w-full px-3 py-2 rounded-lg border-2 text-sm outline-none ' + (overCost ? 'border-red-300' : 'border-slate-200 focus:border-blue-400')} />
+                  <div className="flex gap-1.5 mt-1.5">
+                    <button type="button" onClick={() => { setAmount(String(withNote ? cost + Math.round(cost * 0.18) : cost)); if (withNote) setNoteVat(String(Math.round(cost * 0.18))) }}
+                      className="px-2 py-1 rounded border border-slate-200 text-[10px] font-bold text-slate-600">
+                      Full {formatRs(withNote ? cost + Math.round(cost * 0.18) : cost)}{withNote ? ' incl VAT' : ''}
+                    </button>
+                    <button type="button" onClick={() => setAmount(String(Math.round((withNote ? cost * 1.18 : cost) / 2)))}
+                      className="px-2 py-1 rounded border border-slate-200 text-[10px] font-bold text-slate-600">Half</button>
+                  </div>
+                  {overCost && <p className="text-[11px] font-bold text-red-600 mt-1">That is more than the goods cost you ({formatRs(cost)}{withNote ? ' before VAT' : ''}).</p>}
+                </div>
+              )}
+
+              {withNote && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">VAT on the note <span className="font-normal text-slate-400">(as printed)</span></label>
+                  <input type="number" value={noteVat} onChange={e => setNoteVat(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono font-bold outline-none focus:border-blue-400" />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Before VAT: {formatRs(netAllowed)}. The VAT reduces your input VAT for the month on the note (Schedule 04).
+                  </p>
+                </div>
+              )}
+
+              {!withNote && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">
+                    Reference <span className="font-normal text-slate-400">(their slip or letter number, optional)</span>
+                  </label>
+                  <input value={reference} onChange={e => setReference(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-blue-400" />
+                </div>
+              )}
 
               <div className={'rounded-lg px-3 py-2.5 border ' + (shortfall > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200')}>
                 {shortfall > 0 ? (
                   <>
                     <p className="text-xs font-bold text-amber-800">{formatRs(shortfall)} will be recorded as a loss</p>
                     <p className="text-[11px] text-amber-700 mt-0.5">
-                      Goods cost {formatRs(cost)}, they allow {formatRs(credited)}. The difference becomes an expense today, so the profit report shows it.
+                      Goods cost {formatRs(cost)} before VAT, they allow {formatRs(netAllowed)}{withNote ? ' before VAT' : ''}. The difference becomes an expense today, so the profit report shows it.
                     </p>
                   </>
                 ) : (
@@ -1189,6 +1282,7 @@ function CreditNoteModal({
           </div>
           <p className="text-[10px] text-slate-400">
             Schedule 04 lists the invoice the credit note reverses — fill these in if the note names them.
+            {ret.credit_recorded_at ? ' The loss on this return is recalculated from the note’s value before VAT.' : ''}
           </p>
         </div>
 

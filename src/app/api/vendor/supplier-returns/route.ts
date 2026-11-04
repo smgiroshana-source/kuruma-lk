@@ -7,6 +7,8 @@ import { recomputeSessionForDate } from '@/lib/cash'
 import { recomputeSupplierInvoice } from '@/lib/supplierInvoice'
 import { round2 } from '@/lib/money2'
 import { consumeFifoCost } from '@/lib/fifoCost'
+import { creditNoteWindows, syncReturnShortfall } from '@/lib/supplierReturnVat'
+import { colomboToday } from '@/lib/dates'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -42,10 +44,15 @@ export async function GET(req: NextRequest) {
   const { data, error } = await query
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
+  // Whether the supplier can still issue a VAT credit note for these goods
+  // (6 months from their invoice) — decides what the screen asks
+  const windows = await creditNoteWindows(admin, vendor.id, (data || []).filter((r: any) => r.status === 'confirmed'))
+
   // Flatten supplier_name for convenience
   const returns = (data || []).map((r: any) => ({
     ...r,
     supplier_name: r.supplier?.name ?? null,
+    note_window: windows[r.id] || null,
   }))
 
   return NextResponse.json({ returns })
@@ -293,9 +300,12 @@ export async function POST(req: NextRequest) {
     // Clearing the note (supplier never sent one / entered by mistake)
     if (!credit_note_no) {
       const { error } = await admin.from('supplier_returns')
-        .update({ supplier_credit_note_no: null, supplier_credit_note_date: null, credit_vat: 0 })
+        .update({ supplier_credit_note_no: null, supplier_credit_note_date: null, credit_vat: 0, doc_credit_vat: null })
         .eq('id', returnId).eq('vendor_id', vendor.id)
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+      // Without the note, nothing of what they allowed is VAT — the loss moves
+      const sync = await syncReturnShortfall(admin, vendor.id, returnId, userId)
+      if (sync.error) return NextResponse.json({ error: 'Note removed, but the loss could not be updated: ' + sync.error }, { status: 500 })
       return NextResponse.json({ ok: true, cleared: true })
     }
 
@@ -323,6 +333,10 @@ export async function POST(req: NextRequest) {
       }
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
+    // The note's VAT is part of what they allowed, not recovered cost — if the
+    // allowance is already recorded, its loss is recalculated ex-VAT
+    const sync = await syncReturnShortfall(admin, vendor.id, returnId, userId)
+    if (sync.error) return NextResponse.json({ error: 'Note saved, but the loss could not be updated: ' + sync.error }, { status: 500 })
     return NextResponse.json({ ok: true })
   }
 
@@ -333,9 +347,12 @@ export async function POST(req: NextRequest) {
   // them or comes back as money; whatever is NOT allowed is a loss, and it
   // becomes an expense so the month shows it.
   if (action === 'record_credit') {
-    const { returnId, credit_amount, method, supplierInvoiceId, reference, credit_date } = body as {
+    const { returnId, credit_amount, method, supplierInvoiceId, reference, credit_date, vat_note } = body as {
       returnId: string; credit_amount: number; method: 'invoice' | 'cash' | 'bank' | 'none'
       supplierInvoiceId?: string; reference?: string; credit_date?: string
+      // The supplier's VAT credit note (inside the 6-month window): credit_amount
+      // is then its TOTAL incl VAT, and vat is the VAT printed on it
+      vat_note?: { no: string; date: string; vat: number; invoice_no?: string | null; invoice_date?: string | null }
     }
     if (!returnId) return NextResponse.json({ error: 'returnId required' }, { status: 400 })
     if (!['invoice', 'cash', 'bank', 'none'].includes(method)) {
@@ -356,15 +373,41 @@ export async function POST(req: NextRequest) {
     const cost = Math.round(Number(ret.cost_of_goods ?? ret.total_amount) || 0)
     const credited = method === 'none' ? 0 : Math.round(Number(credit_amount) || 0)
     if (credited < 0) return NextResponse.json({ error: 'Credit cannot be negative' }, { status: 400 })
-    if (credited > cost) {
-      return NextResponse.json({
-        error: `The supplier cannot credit more than the goods cost you (Rs.${cost.toLocaleString()}). Check the figure.`,
-      }, { status: 400 })
-    }
     if (method !== 'none' && credited === 0) {
       return NextResponse.json({ error: 'Enter what the supplier allowed, or choose "allowed nothing"' }, { status: 400 })
     }
-    const when = credit_date || new Date().toISOString().slice(0, 10)
+    // A VAT credit note's total includes VAT; only its ex-VAT part recovers cost
+    const withNote = !!vat_note && method !== 'none'
+    const docVat = withNote ? round2(Number(vat_note!.vat) || 0) : 0
+    const noteVat = Math.round(docVat)
+    if (withNote) {
+      if (!String(vat_note!.no || '').trim()) return NextResponse.json({ error: 'Credit note number required — copy it off their note' }, { status: 400 })
+      if (!vat_note!.date) return NextResponse.json({ error: 'Credit note date required' }, { status: 400 })
+      if (noteVat < 0 || noteVat >= credited) return NextResponse.json({ error: 'The VAT on the note must be less than its total — check the figures' }, { status: 400 })
+    }
+    if (credited - noteVat > cost) {
+      return NextResponse.json({
+        error: `The supplier cannot credit more than the goods cost you (Rs.${cost.toLocaleString()} before VAT). Check the figure.`,
+      }, { status: 400 })
+    }
+    const when = credit_date || colomboToday()
+
+    // The note goes on the return first: it is what Schedule 04 reads, and a
+    // duplicate number should stop everything before money rows are written
+    if (withNote) {
+      const { error: noteErr } = await admin.from('supplier_returns').update({
+        supplier_credit_note_no: String(vat_note!.no).trim(), supplier_credit_note_date: vat_note!.date,
+        supplier_invoice_no: vat_note!.invoice_no ? String(vat_note!.invoice_no).trim() : null,
+        supplier_invoice_date: vat_note!.invoice_date || null,
+        credit_vat: noteVat, doc_credit_vat: docVat,
+      }).eq('id', returnId).eq('vendor_id', vendor.id)
+      if (noteErr) {
+        if (String(noteErr.message).includes('supplier_returns_crn_uniq')) {
+          return NextResponse.json({ error: 'That credit note number is already recorded for this supplier' }, { status: 400 })
+        }
+        return NextResponse.json({ error: noteErr.message }, { status: 500 })
+      }
+    }
 
     let creditNoteId: string | null = null
     let movementId: string | null = null
@@ -392,7 +435,7 @@ export async function POST(req: NextRequest) {
       // separately on the return's own credit-note fields for Schedule 04.
       const { data: note, error: noteErr } = await admin.from('supplier_credit_notes').insert({
         vendor_id: vendor.id, supplier_id: ret.supplier_id, supplier_invoice_id: inv.id,
-        credit_note_no: (reference || ret.return_no).trim(), credit_note_date: when,
+        credit_note_no: (withNote ? String(vat_note!.no) : (reference || ret.return_no)).trim(), credit_note_date: when,
         reason: 'goods_returned', remarks: `Goods returned — ${ret.return_no}`,
         net_amount: credited, vat_amount: 0, total_amount: credited,
         created_by: userId,
@@ -423,31 +466,25 @@ export async function POST(req: NextRequest) {
     // A bank refund changes no drawer and no payable — it is recorded here and
     // shows on the return.
 
-    // The part the supplier would not allow is gone for good.
-    const shortfall = cost - credited
-    let expenseId: string | null = null
-    if (shortfall > 0) {
-      const { data: exp, error: expErr } = await admin.from('expenses').insert({
-        vendor_id: vendor.id, expense_date: when, category: 'supplier_return_loss',
-        description: `Not credited on returned goods — ${ret.return_no}${ret.reason ? ' (' + ret.reason + ')' : ''}`,
-        amount: shortfall, payment_method: 'none', reference: ret.return_no, created_by: userId,
-      }).select('id').single()
-      if (expErr) return NextResponse.json({ error: 'Could not record the shortfall: ' + expErr.message }, { status: 500 })
-      expenseId = exp.id
-    }
-
     const { error: upErr } = await admin.from('supplier_returns').update({
       credit_amount: credited, credit_method: method,
       credit_supplier_invoice_id: method === 'invoice' ? supplierInvoiceId : null,
-      credit_reference: (reference || '').trim() || null,
+      credit_reference: (withNote ? String(vat_note!.no) : (reference || '')).trim() || null,
       credit_recorded_at: new Date().toISOString(), credit_recorded_by: userId,
-      credit_note_id: creditNoteId, credit_movement_id: movementId, shortfall_expense_id: expenseId,
+      credit_note_id: creditNoteId, credit_movement_id: movementId, shortfall_expense_id: null,
     }).eq('id', returnId).eq('vendor_id', vendor.id)
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 })
+
+    // The part the supplier would not allow is gone for good — ex-VAT cost
+    // against the ex-VAT part of what they allowed (src/lib/supplierReturnVat.ts)
+    const sync = await syncReturnShortfall(admin, vendor.id, returnId, userId, when)
+    if (sync.error) return NextResponse.json({ error: 'Could not record the shortfall: ' + sync.error }, { status: 500 })
+    const shortfall = sync.shortfall
 
     return NextResponse.json({
       ok: true, credited, shortfall, cost,
       message: `${ret.return_no}: goods cost Rs.${cost.toLocaleString()}, supplier allowed Rs.${credited.toLocaleString()}`
+        + (noteVat > 0 ? ` (incl VAT Rs.${noteVat.toLocaleString()} on their credit note)` : '')
         + (shortfall > 0 ? ` — Rs.${shortfall.toLocaleString()} written off as a loss.` : ' — nothing lost.'),
     })
   }
