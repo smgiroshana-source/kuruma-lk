@@ -8,9 +8,20 @@ import ProductDetailClient from './ProductDetail'
 import { SITE_URL } from '@/lib/siteUrl'
 import { describeProduct } from '@/lib/productDescription'
 
-// Cache product pages for 24 hours — revalidated on-demand when product is updated via API
-export const revalidate = 86400
+// Product pages are cached (ISR) and refreshed on demand whenever the product,
+// its photos or its stock changes (revalidateProductPage, src/lib/stock.ts),
+// so the timed refresh is only a backstop. 7 days keeps ISR writes far under
+// the Vercel free quota even if Google crawls every page (6,300 pages).
+export const revalidate = 604800
 
+// No paths at build time — each page is rendered on its first visit, then
+// served from the cache. Without this Next.js rendered every product page on
+// every request and ignored `revalidate`: Vercel served them "no-store", a
+// function call and two database reads per view (security/speed check
+// 2026-11-04). The make and tyre pages already did this and were cached.
+export async function generateStaticParams() {
+  return []
+}
 
 type Props = {
   params: Promise<{ id: string }>

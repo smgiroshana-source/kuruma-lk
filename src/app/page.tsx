@@ -14,10 +14,16 @@ async function getStoreData() {
       .eq('is_active', true)
       .gt('quantity', 0)
       .order('created_at', { ascending: false })
-      .limit(2000),
+      // The newest 300 — what a visitor scrolls through before searching. The
+      // rest arrive from /api/store only when needed (HomeClient). Was 2,000:
+      // 2 MB of HTML per visit, almost all of it never shown.
+      .limit(300),
     admin
       .from('vendors')
-      .select('*')
+      // Was '*': every visitor's HTML carried each shop's user_id (its login
+      // account id), status and timestamps (security check 2026-11-04). Same
+      // shop-card columns as /api/store.
+      .select('id, name, slug, phone, whatsapp, location, address, description, logo_url, rating, review_count')
       .eq('status', 'approved')
       .order('name'),
     admin
@@ -35,7 +41,8 @@ async function getStoreData() {
 
   return {
     products,
-    vendors: vendorsRes.data || [],
+    // The shop-card columns only (the storefront never reads user_id/status)
+    vendors: (vendorsRes.data || []) as any[],
     synonyms: (synonymsRes.data || []).map((s: any) => s.keywords),
   }
 }

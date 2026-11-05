@@ -116,8 +116,20 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
   const handleSearch = useCallback((q: string) => { setSearch(q); setSearchDisplay(q) }, [])
   const handleSearchClear = useCallback(() => { setSearch(''); setSearchDisplay('') }, [])
 
-  // Background refresh — data comes pre-loaded from server, but refresh in background for freshness
-  useEffect(() => { (async () => {
+  // The full catalogue (5.5 MB, ~400 KB compressed) used to download on EVERY
+  // visit, in the background, even for someone who looked at the first row and
+  // left — the biggest share of the site's Vercel bandwidth (check 2026-11-04).
+  // The page now ships the newest 300 parts; the full feed is fetched once,
+  // the moment the visitor needs more than those: a search, a filter, a sort,
+  // a shop, the Shops tab, Saved, or scrolling near the end of what is loaded.
+  const [feedState, setFeedState] = useState<'idle' | 'loading' | 'done'>('idle')
+  const needsFullFeed = !!search || selectedCategory !== 'All' || conditionFilter !== 'All' || makeFilter !== 'All'
+    || !!selectedVendor || sortBy !== 'recommended' || activeTab === 'shops' || wishlistOpen
+    || visibleCount >= products.length - 60
+  useEffect(() => {
+    if (feedState !== 'idle' || !needsFullFeed) return
+    setFeedState('loading')
+    ;(async () => {
     try {
       const r = await fetch('/api/store')
       if (r.ok) {
@@ -137,7 +149,8 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
         setVendors(j.vendors); setSynonyms(j.synonyms || [])
       }
     } catch {}
-  })() }, [])
+    setFeedState('done')
+  })() }, [needsFullFeed, feedState])
   useEffect(() => { try { const s = localStorage.getItem('kuruma_wishlist'); if (s) setWishlist(new Set(JSON.parse(s))) } catch {} }, [])
 
   // Reset visible count when filters change
@@ -706,6 +719,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
 
           {/* Product Grid */}
           {loading ?(<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">{[...Array(8)].map((_,i)=>(<div key={i} className="bg-white rounded-2xl overflow-hidden border border-[#eee]"><div className="aspect-[4/3] bg-gradient-to-br from-[#f5f5f5] to-[#eee] animate-pulse"/><div className="p-3 space-y-2.5"><div className="h-5 w-16 bg-[#f0f0f0] rounded-md animate-pulse"/><div className="h-4 bg-[#f0f0f0] rounded animate-pulse"/><div className="h-3.5 bg-[#f0f0f0] rounded animate-pulse w-2/3"/></div></div>))}</div>
+          ) : filteredProducts.length===0 && feedState !== 'done' && needsFullFeed ? (<div className="text-center py-20 text-sm text-slate-400">Searching all parts…</div>
           ) : filteredProducts.length===0 ? (<div className="text-center py-20"><div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🔍</div><p className="font-bold text-[17px] text-[#333]">No parts found</p><p className="text-sm text-[#aaa] mt-1.5">Try adjusting your search or filters</p>{(search||selectedCategory!=='All'||activeFilterCount>0)&&<button onClick={clearAllFilters} className="mt-5 text-sm font-bold px-6 py-2.5 rounded-xl text-white shadow-[0_4px_12px_rgba(255,107,53,0.25)]" style={{background:'linear-gradient(135deg,#ff6b35,#ff8f65)'}}>Clear all filters</button>}{isVendorView&&<button onClick={clearVendor} className="mt-3 block mx-auto text-sm font-bold text-[#ff6b35] underline">Browse all shops</button>}</div>
           ) : (<div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-3">
             {filteredProducts.map((product, idx) => {
@@ -752,7 +766,7 @@ export default function HomePage({ initialProducts, initialVendors, initialSynon
               </button>
             </div>
           )}
-          {!hasMoreToShow && allFilteredProducts.length > 0 && !loading && (
+          {!hasMoreToShow && allFilteredProducts.length > 0 && !loading && feedState === 'done' && (
             <p className="text-center text-xs text-slate-300 py-6">Showing all {allFilteredProducts.length} products</p>
           )}
         </div>{/* end right column */}
