@@ -39,9 +39,15 @@ type Props = {
   products: any[]
   topCategories?: { name: string; count: number }[]
   faqs?: { q: string; a: string }[]
+  // 'Parts' for a car make; a tyre/tube brand is named for what it sells,
+  // with its in-stock sizes (src/lib/brandKind.ts)
+  noun?: 'Parts' | 'Tyres' | 'Tubes' | 'Tyres & Tubes'
+  sizes?: { label: string; slug: string; count: number }[]
 }
 
-export default function MakePageClient({ makeSlug, displayName, products, topCategories = [], faqs = [] }: Props) {
+export default function MakePageClient({ makeSlug, displayName, products, topCategories = [], faqs = [], noun = 'Parts', sizes = [] }: Props) {
+  const isParts = noun === 'Parts'
+  const lower = noun.toLowerCase()
   const [selectedCategory, setSelectedCategory] = useState('All')
   const [conditionFilter, setConditionFilter] = useState('All')
   const [sortBy, setSortBy] = useState('newest')
@@ -145,13 +151,14 @@ export default function MakePageClient({ makeSlug, displayName, products, topCat
           <nav className="text-xs text-[#aaa] mb-1.5">
             <a href="/" className="hover:text-[#ff6b35] transition-colors">Home</a>
             <span className="mx-1.5">›</span>
-            <span className="text-[#555] font-semibold">{displayName} Parts</span>
+            {!isParts && <><a href="/tyres" className="hover:text-[#ff6b35] transition-colors">Tyres</a><span className="mx-1.5">›</span></>}
+            <span className="text-[#555] font-semibold">{displayName} {noun}</span>
           </nav>
           <h1 className="text-[22px] sm:text-2xl font-black text-[#111] leading-tight">
-            {displayName} Parts <span className="text-[#aaa] font-semibold text-[18px]">Sri Lanka</span>
+            {displayName} {noun} <span className="text-[#aaa] font-semibold text-[18px]">Sri Lanka</span>
           </h1>
           <p className="text-sm text-[#888] mt-1">
-            {filteredProducts.length.toLocaleString()} part{filteredProducts.length !== 1 ? 's' : ''} available
+            {filteredProducts.length.toLocaleString()} {isParts ? `part${filteredProducts.length !== 1 ? 's' : ''}` : 'in stock'} available
             {selectedCategory !== 'All' ? ` · ${selectedCategory}` : ''}
             {conditionFilter !== 'All' ? ` · ${conditionFilter}` : ''}
           </p>
@@ -164,7 +171,7 @@ export default function MakePageClient({ makeSlug, displayName, products, topCat
           </svg>
           <input
             type="search"
-            placeholder={`Search ${displayName} parts, models…`}
+            placeholder={isParts ? `Search ${displayName} parts, models…` : `Search ${displayName} ${lower} by size…`}
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="w-full pl-10 pr-10 py-[11px] rounded-[14px] text-[15px] outline-none bg-[#f7f7f7] text-[#333] transition-all duration-200 border-2 border-transparent focus:bg-white focus:border-[#ff6b35] focus:shadow-[0_0_0_4px_rgba(255,107,53,0.08)]"
@@ -251,7 +258,7 @@ export default function MakePageClient({ makeSlug, displayName, products, topCat
         {visibleProducts.length === 0 ? (
           <div className="text-center py-20">
             <div className="w-[72px] h-[72px] rounded-full bg-[#f5f5f5] mx-auto mb-4 flex items-center justify-center text-[28px]">🔍</div>
-            <p className="font-bold text-[17px] text-[#333]">No {displayName} parts found</p>
+            <p className="font-bold text-[17px] text-[#333]">No {displayName} {lower} found</p>
             <p className="text-sm text-[#aaa] mt-1.5">Try adjusting your search or filters</p>
             {activeFilterCount > 0 && (
               <button
@@ -339,7 +346,7 @@ export default function MakePageClient({ makeSlug, displayName, products, topCat
         )}
         {!hasMore && visibleProducts.length > 0 && (
           <p className="text-center text-xs text-slate-300 py-6">
-            All {filteredProducts.length.toLocaleString()} {displayName} parts shown
+            All {filteredProducts.length.toLocaleString()} {displayName} {lower} shown
           </p>
         )}
       </main>
@@ -347,10 +354,30 @@ export default function MakePageClient({ makeSlug, displayName, products, topCat
       {/* ── SEO content: intro + popular categories + FAQ (server-rendered) ── */}
       <section className="max-w-[1200px] mx-auto px-4 sm:px-6 mt-4 mb-2">
         <div className="bg-white border border-[#eee] rounded-2xl p-5 sm:p-7">
+          {isParts ? (<>
           <h2 className="text-lg sm:text-xl font-black text-[#222] mb-2">{displayName} Spare Parts in Sri Lanka</h2>
           <p className="text-sm text-[#666] leading-relaxed max-w-3xl">
             Looking for {displayName} spare parts in Sri Lanka? kuruma.lk lists {products.length.toLocaleString()} {displayName} part{products.length === 1 ? '' : 's'} and accessories from trusted dealers — new-genuine, brand-new aftermarket and quality reconditioned. Compare options, check the condition and price on each listing, and contact the seller directly by WhatsApp or phone.
           </p>
+          </>) : (<>
+          <h2 className="text-lg sm:text-xl font-black text-[#222] mb-2">{displayName} {noun} in Sri Lanka</h2>
+          <p className="text-sm text-[#666] leading-relaxed max-w-3xl">
+            {products.length.toLocaleString()} {displayName} {lower} {products.length === 1 ? 'is' : 'are'} in stock on kuruma.lk. Tyre prices follow the market, so message the shop on WhatsApp for today&apos;s price — quotes are free. Match the size printed on your current tyre&apos;s sidewall.
+          </p>
+          {sizes.length > 0 && (
+            <div className="mt-5">
+              <h3 className="text-sm font-bold text-[#333] mb-2">{displayName} sizes in stock</h3>
+              <div className="flex flex-wrap gap-2">
+                {sizes.map(s => (
+                  <a key={s.slug} href={`/tyres/${s.slug}`}
+                    className="text-xs font-semibold text-[#444] bg-[#f5f5f5] hover:bg-[#ffe9df] hover:text-[#ff6b35] border border-[#eee] rounded-full px-3 py-1.5 transition">
+                    {s.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          </>)}
 
           {topCategories.length > 0 && (
             <div className="mt-5">

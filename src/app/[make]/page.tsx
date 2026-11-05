@@ -6,6 +6,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows } from '@/lib/fetchAll'
 import MakePageClient from './MakePageClient'
 import { SITE_URL } from '@/lib/siteUrl'
+import { brandKind } from '@/lib/brandKind'
+import { cache } from 'react'
 
 // Regenerate every hour — same cadence as homepage
 export const revalidate = 3600
@@ -53,20 +55,56 @@ export async function generateStaticParams() {
   }))
 }
 
+// ALL in-stock products for this make (paginated, id tiebreaker for stable
+// order). One read shared by the metadata and the page in the same render —
+// the metadata needs to know whether this is a car make or a tyre brand.
+const loadMake = cache(async (makeSlug: string) => {
+  const admin = createAdminClient()
+  return fetchAllRows((from, to) => (admin.from('products') as any)
+    .select(
+      'id, name, sku, category, make, model, year, condition, price, show_price, quantity, slug, created_at, ' +
+      'product_type, tyre_width, tyre_profile, tyre_rim, origin_country, ' +
+      'vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order, is_damage, damage_resolved_at)',
+    )
+    .ilike('make', slugToMakeQuery(makeSlug))
+    .eq('is_active', true)
+    .gt('quantity', 0)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(from, to))
+})
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { make: makeSlug } = await params
   const displayName = slugToDisplayName(makeSlug)
-  const makeQuery = slugToMakeQuery(makeSlug)
 
-  const admin = createAdminClient()
-  const { count } = await (admin.from('products') as any)
-    .select('id', { count: 'exact', head: true })
-    .ilike('make', makeQuery)
-    .eq('is_active', true)
-    .gt('quantity', 0)
-
+  const products = await loadMake(makeSlug)
+  const count = products?.length || 0
   if (!count) {
     return { title: 'Parts Not Found', robots: { index: false, follow: false } }
+  }
+
+  // A tyre/tube brand is named for what it sells (src/lib/brandKind.ts)
+  const kind = brandKind(products)
+  if (kind.isTyreBrand) {
+    const noun = kind.noun
+    const sizeList = kind.sizes.slice(0, 6).map(s => s.label).join(', ')
+    const title = `${displayName} ${noun} Sri Lanka — Price & Sizes`
+    const description =
+      `${count} ${displayName} ${noun.toLowerCase()} in stock in Sri Lanka` +
+      (sizeList ? `: ${sizeList}${kind.sizes.length > 6 ? ' and more' : ''}. ` : '. ') +
+      `Prices follow the market — message the shop on WhatsApp for today's price.`
+    return {
+      title,
+      description,
+      keywords: [
+        `${displayName} ${noun.toLowerCase()} Sri Lanka`, `${displayName} ${noun.toLowerCase()} price Sri Lanka`,
+        `${displayName} tyre price`, ...kind.sizes.slice(0, 4).map(s => `${displayName} ${s.label}`),
+      ],
+      openGraph: { title: `${title} | kuruma.lk`, description, url: `${SITE_URL}/${makeSlug}`, siteName: 'kuruma.lk', type: 'website', locale: 'en_LK' },
+      twitter: { card: 'summary_large_image', title: `${title} | kuruma.lk`, description },
+      alternates: { canonical: `${SITE_URL}/${makeSlug}` },
+    }
   }
 
   const title = `${displayName} Parts Sri Lanka`
@@ -106,25 +144,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function MakePage({ params }: Props) {
   const { make: makeSlug } = await params
-  const makeQuery = slugToMakeQuery(makeSlug)
   const displayName = slugToDisplayName(makeSlug)
 
-  const admin = createAdminClient()
-  // Load ALL in-stock parts for this make (paginated, id tiebreaker for stable
-  // order). The old .limit(500) both truncated browsing AND made the header
-  // read a flat "500" for any make with 500+ parts (Toyota 1819, Suzuki 2739…).
-  const products = await fetchAllRows((from, to) => (admin.from('products') as any)
-    .select(
-      'id, name, sku, category, make, model, year, condition, price, show_price, quantity, slug, created_at, ' +
-      'product_type, tyre_width, tyre_profile, tyre_rim, origin_country, ' +
-      'vendor:vendors(id, name, slug, phone, whatsapp), images:product_images(url, sort_order, is_damage, damage_resolved_at)',
-    )
-    .ilike('make', makeQuery)
-    .eq('is_active', true)
-    .gt('quantity', 0)
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
-    .range(from, to))
+  // ALL in-stock parts (the old .limit(500) truncated browsing AND made the
+  // header read a flat "500" for Toyota 1819, Suzuki 2739…)
+  const products = await loadMake(makeSlug)
 
   // No products → proper 404 (also blocks random slugs like /blahblah)
   if (!products || products.length === 0) notFound()
@@ -148,9 +172,31 @@ export default async function MakePage({ params }: Props) {
     .slice(0, 8)
     .map(([name, n]) => ({ name, count: n }))
 
+  const kind = brandKind(products)
+  const noun = kind.noun
+  const shops = [...new Set(products.map((p: any) => p.vendor?.name).filter(Boolean))] as string[]
+  const sizeList = kind.sizes.map(s => s.label)
+
   // FAQ shown on the page AND mirrored into FAQPage schema (Google requires the
-  // schema's text to be visible on the page).
-  const faqs = [
+  // schema's text to be visible on the page). Only facts on record.
+  const faqs = kind.isTyreBrand ? [
+    {
+      q: `Where can I buy ${displayName} ${noun.toLowerCase()} in Sri Lanka?`,
+      a: `${count} ${displayName} ${noun.toLowerCase()} ${count === 1 ? 'is' : 'are'} in stock on kuruma.lk${shops.length ? ` at ${shops.join(' and ')}` : ''}. Pick the size on this page and message the shop by WhatsApp or phone.`,
+    },
+    ...(sizeList.length ? [{
+      q: `Which ${displayName} tyre sizes are in stock?`,
+      a: `In stock now: ${sizeList.join(', ')}. Stock changes daily — the list on this page is always current.`,
+    }] : []),
+    {
+      q: `How much do ${displayName} ${noun.toLowerCase()} cost in Sri Lanka?`,
+      a: `Tyre and tube prices follow the market and change often, so most listings say "Ask Price". Message the shop for today's price — quotes are free.`,
+    },
+    {
+      q: `How do I find my tyre size?`,
+      a: `It is printed on the sidewall of your current tyre, for example 185/65R15: 185 mm wide, a sidewall 65% of the width, for a 15-inch rim. Match all three numbers.`,
+    },
+  ] : [
     {
       q: `Where can I buy ${displayName} spare parts in Sri Lanka?`,
       a: `kuruma.lk lists ${count} ${displayName} part${count === 1 ? '' : 's'} and accessories from verified Sri Lankan dealers. Browse the parts on this page, then contact the seller directly by WhatsApp or phone to buy.`,
@@ -172,15 +218,15 @@ export default async function MakePage({ params }: Props) {
   const jsonLd = {
     '@context': 'https://schema.org',
     '@type': 'CollectionPage',
-    name: `${displayName} Parts Sri Lanka`,
-    description: `${displayName} spare parts available in Sri Lanka on kuruma.lk`,
+    name: `${displayName} ${noun} Sri Lanka`,
+    description: kind.isTyreBrand ? `${displayName} ${noun.toLowerCase()} in stock in Sri Lanka on kuruma.lk` : `${displayName} spare parts available in Sri Lanka on kuruma.lk`,
     url: `${SITE_URL}/${makeSlug}`,
     numberOfItems: count,
     breadcrumb: {
       '@type': 'BreadcrumbList',
       itemListElement: [
         { '@type': 'ListItem', position: 1, name: 'Home', item: SITE_URL },
-        { '@type': 'ListItem', position: 2, name: `${displayName} Parts`, item: `${SITE_URL}/${makeSlug}` },
+        { '@type': 'ListItem', position: 2, name: `${displayName} ${noun}`, item: `${SITE_URL}/${makeSlug}` },
       ],
     },
   }
@@ -209,8 +255,10 @@ export default async function MakePage({ params }: Props) {
         makeSlug={makeSlug}
         displayName={displayName}
         products={normalizedProducts}
-        topCategories={topCategories}
+        topCategories={kind.isTyreBrand ? [] : topCategories}
         faqs={faqs}
+        noun={noun}
+        sizes={kind.sizes}
       />
     </>
   )
