@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import ProductThumb from '@/components/ProductThumb'
 import { SITE_URL } from '@/lib/siteUrl'
+import { safeJsonLd } from '@/lib/security'
 
 // Tyre size landing pages — /tyres/195-65-r15 targets "195/65R15 price sri
 // lanka"-style queries, the dominant way tyre buyers search.
@@ -119,8 +120,8 @@ export default async function TyreSizePage({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: safeJsonLd(faqJsonLd) }} />
       <div className="max-w-5xl mx-auto px-4 py-8">
         <nav className="text-xs text-slate-400 mb-3">
           <Link href="/" className="hover:text-orange-500">Home</Link> <span className="mx-1">›</span>
