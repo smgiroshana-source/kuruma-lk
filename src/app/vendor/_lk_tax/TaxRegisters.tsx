@@ -205,9 +205,13 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }
         {/* Quick range buttons */}
         <div className="flex gap-2 mt-3 flex-wrap">
           {[
-            {l:'This Month',fn:()=>{ const n=new Date(); setTaxReportFrom(new Date(n.getFullYear(),n.getMonth(),1).toISOString().slice(0,10)); setTaxReportTo(n.toISOString().slice(0,10)) }},
-            {l:'Last Month',fn:()=>{ const n=new Date(); const f=new Date(n.getFullYear(),n.getMonth()-1,1); const t=new Date(n.getFullYear(),n.getMonth(),0); setTaxReportFrom(f.toISOString().slice(0,10)); setTaxReportTo(t.toISOString().slice(0,10)) }},
-            {l:'This Quarter',fn:()=>{ const n=new Date(); const q=Math.floor(n.getMonth()/3); const f=new Date(n.getFullYear(),q*3,1); setTaxReportFrom(f.toISOString().slice(0,10)); setTaxReportTo(n.toISOString().slice(0,10)) }},
+            // Calendar maths on Colombo date strings. These used
+            // new Date(y, m, d).toISOString(), which in Sri Lanka (UTC+5:30)
+            // falls on the PREVIOUS day: "Last Month" ran Oct 1–30 and missed
+            // 31 Oct's two invoices (Rs.5,171 VAT) — owner, 2026-11-13.
+            {l:'This Month',fn:()=>{ const t=colomboToday(); setTaxReportFrom(t.slice(0,7)+'-01'); setTaxReportTo(t) }},
+            {l:'Last Month',fn:()=>{ const [y,m]=colomboToday().split('-').map(Number); const py=m===1?y-1:y, pm=m===1?12:m-1; const last=new Date(Date.UTC(py,pm,0)).getUTCDate(); setTaxReportFrom(`${py}-${String(pm).padStart(2,'0')}-01`); setTaxReportTo(`${py}-${String(pm).padStart(2,'0')}-${String(last).padStart(2,'0')}`) }},
+            {l:'This Quarter',fn:()=>{ const t=colomboToday(); const [y,m]=t.split('-').map(Number); const qm=Math.floor((m-1)/3)*3+1; setTaxReportFrom(`${y}-${String(qm).padStart(2,'0')}-01`); setTaxReportTo(t) }},
           ].map(p => (
             <button key={p.l} onClick={() => { p.fn(); setTaxReportData(null) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>
           ))}

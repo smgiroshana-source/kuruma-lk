@@ -669,8 +669,13 @@ export async function GET(req: NextRequest) {
     const inputVat = Math.round(inputVatExact)
     // Credits deliberately held back for a future month — shown so the figure
     // can be topped up when output VAT is high enough to absorb them
+    // Only credits that COULD be claimed in the window (same rule as the Filing
+    // Centre's "parked") — the read looks 2 months past the window for late
+    // invoices, and a later month's own purchases are not "held back" (Oct
+    // 2026 read Rs.32,414 when Rs.23,493 of it was November's bills).
     const availableCarryForward = Math.round(
-      grnClaimable.filter((g: any) => grnClaimMonth(g) > sumToMonth).reduce((t: number, g: any) => t + exactOr(g.doc_vat, g.input_vat), 0)
+      grnClaimable.filter((g: any) => grnClaimMonth(g) > sumToMonth && grnEarliestClaimMonth(g, colomboMonth(g.received_at)) <= sumToMonth)
+        .reduce((t: number, g: any) => t + exactOr(g.doc_vat, g.input_vat), 0)
       + (sumImports || []).filter((im: any) => importClaimMonth(im) > sumToMonth).reduce((t: number, im: any) => t + importClaimable(im), 0))
     // Legacy GRNs (created before the VAT-registered snapshot existed) are included
     // in inputVat but flagged so the accountant can verify them manually.

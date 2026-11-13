@@ -4365,7 +4365,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                         <button onClick={() => openPeriodReport()} disabled={periodReportLoading} className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg">{periodReportLoading ? '⏳ Loading…' : '📊 View Report'}</button>
                       </div>
                       <div className="flex gap-2 mt-3">
-                        {[{l:"Last 7 Days",f:7},{l:"Last 30 Days",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { setReportFrom(new Date(Date.now() - p.f * 86400000).toISOString().slice(0, 10)); setReportTo(colomboToday()) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
+                        {[{l:"Last 7 Days",f:7},{l:"Last 30 Days",f:30},{l:"Last 3 Months",f:90}].map(p => (<button key={p.l} onClick={() => { const [y, m, d] = colomboToday().split('-').map(Number); setReportFrom(new Date(Date.UTC(y, m - 1, d - p.f)).toISOString().slice(0, 10)); setReportTo(colomboToday()) }} className="text-[10px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">{p.l}</button>))}
                       </div>
                     </div>
                   </div>
