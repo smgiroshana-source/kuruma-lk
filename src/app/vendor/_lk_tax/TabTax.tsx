@@ -333,7 +333,11 @@ export default function TabTax({ showToast, vendorSettings }: {
         <div className="bg-white rounded-xl border border-slate-200 mb-4">
           <div className="px-4 py-3 border-b border-slate-100">
             <h3 className="font-bold text-sm text-slate-800">Waiting for later months · {rs(t.parkedTotal)}</h3>
-            <p className="text-[11px] text-slate-400">Claim any of these back into {period} if you have output VAT to absorb them.</p>
+            <p className="text-[11px] text-slate-400">
+              {parkedLater.some(i => !i.originMonth || i.originMonth <= period)
+                ? <>Claim any of these back into {period} if you have output VAT to absorb them.</>
+                : <>Purchases from after {period}. Input VAT is never claimed before the month the goods and invoice came in.</>}
+            </p>
           </div>
           {parkedLater.map(i => (
             <div key={key(i)} className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 text-xs">
@@ -344,7 +348,13 @@ export default function TabTax({ showToast, vendorSettings }: {
               <span className="flex-1 truncate text-slate-500">{i.partyName} · claim in {i.claimPeriod}</span>
               <span className={`text-[10px] font-bold ${i.monthsLeft <= 3 ? 'text-red-600' : 'text-slate-400'}`}>{i.monthsLeft}m left</span>
               <span className="font-mono font-black w-24 text-right">{rs(i.vat)}</span>
-              <button disabled={busy} onClick={() => moveCredits([i], period)} className="text-[11px] font-bold text-emerald-700">claim now</button>
+              {/* A purchase received after this period can't be claimed in it
+                  (the server refuses: "cannot claim before …"). Don't offer it
+                  (owner asked 2026-11-13 whether November GRNs could go into
+                  October — they can't). */}
+              {i.originMonth && i.originMonth > period
+                ? <span className="text-[10px] text-slate-400 w-[92px] text-right">from {i.originMonth}</span>
+                : <button disabled={busy} onClick={() => moveCredits([i], period)} className="text-[11px] font-bold text-emerald-700">claim now</button>}
             </div>
           ))}
         </div>
