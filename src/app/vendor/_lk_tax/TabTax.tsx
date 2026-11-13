@@ -45,13 +45,36 @@ export default function TabTax({ showToast, vendorSettings }: {
   // Two halves of the same job: close the period (Filing) and evidence it
   // (Registers — VAT output/input registers, VAT summary, SSCL liability).
   const [section, setSection] = useState<'filing' | 'registers'>('filing')
-  const [period, setPeriod] = useState(colomboToday().slice(0, 7))
+  // Opens on the month being worked on, and the Registers & Reports follow it
+  // (owner, 2026-11-13): the latest FINALISED (locked) month — or the month
+  // after it once that one has ended and is waiting to be finalised. No lock
+  // yet, or a staff login (locks are owner-only): the current month. Decided
+  // before the first load, so the screen doesn't load twice.
+  const [period, setPeriod] = useState('')
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const thisMonth = colomboToday().slice(0, 7)
+      let p = thisMonth
+      try {
+        const r = await fetch('/api/vendor/period-locks')
+        if (r.ok) {
+          const locked: string[] = ((await r.json()).locks || []).map((l: any) => l.period).filter((m: string) => m <= thisMonth).sort()
+          const latest = locked[locked.length - 1]
+          if (latest) p = addMonths(latest, 1) < thisMonth ? addMonths(latest, 1) : latest
+        }
+      } catch { /* the current month */ }
+      if (alive) setPeriod(prev => prev || p)
+    })()
+    return () => { alive = false }
+  }, [])
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async (p: string) => {
+    if (!p) return
     setLoading(true)
     try {
       const r = await fetch(`/api/vendor/vat-filing?period=${p}`)
@@ -156,7 +179,7 @@ export default function TabTax({ showToast, vendorSettings }: {
           </p>
         </div>
         {sectionTabs}
-        <TaxRegisters showToast={showToast} vendorSettings={vendorSettings} onGoToFiling={() => setSection('filing')} />
+        <TaxRegisters showToast={showToast} vendorSettings={vendorSettings} onGoToFiling={() => setSection('filing')} period={period} />
       </div>
     )
   }

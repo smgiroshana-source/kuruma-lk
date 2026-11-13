@@ -8,21 +8,38 @@
 // One TIN = one return: these figures always cover the WHOLE Pvt Ltd — parts
 // shop (PART) and workshop (REPR) together — never a single branch.
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { escapeHtml } from '@/lib/escapeHtml'
 import { colomboToday } from '@/lib/dates'
 import { addCloseBar } from '@/lib/printWindow'
 
-export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling }: {
+// A whole calendar month as From / To (up to today for the current month)
+function monthRange(ym: string): [string, string] {
+  const [y, m] = ym.split('-').map(Number)
+  const last = `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`
+  const today = colomboToday()
+  return [`${ym}-01`, last > today ? today : last]
+}
+
+export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling, period }: {
   showToast: (m: string) => void
   vendorSettings?: any
   // Moving input credits between months happens in ONE place — the Filing
   // Centre. These registers are the evidence trail, read-only by design.
   onGoToFiling?: () => void
+  // The month the Filing tab is on — the reports open on the same month
+  // (owner, 2026-11-13)
+  period?: string
 }) {
   const [taxReportType, setTaxReportType] = useState<'vat_register' | 'sscl_report' | 'input_vat' | 'vat_summary' | 'shortfall_aging'>('vat_register')
-  const [taxReportFrom, setTaxReportFrom] = useState(() => colomboToday().slice(0, 7) + '-01')
-  const [taxReportTo, setTaxReportTo] = useState(() => colomboToday())
+  const [taxReportFrom, setTaxReportFrom] = useState(() => monthRange(period || colomboToday().slice(0, 7))[0])
+  const [taxReportTo, setTaxReportTo] = useState(() => monthRange(period || colomboToday().slice(0, 7))[1])
+  // Follow the Filing tab when its month changes
+  useEffect(() => {
+    if (!period) return
+    const [f, t] = monthRange(period)
+    setTaxReportFrom(f); setTaxReportTo(t)
+  }, [period])
   const [taxReportData, setTaxReportData] = useState<any>(null)
   const [taxReportLoading, setTaxReportLoading] = useState(false)
 
