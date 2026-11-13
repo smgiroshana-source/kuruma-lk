@@ -29,7 +29,7 @@ function fmtColomboDateTime(isoTimestamp: string | null | undefined): string {
   })
 }
 
-import { useState, useEffect, useRef, startTransition, useMemo, Fragment } from 'react'
+import { useState, useEffect, useRef, startTransition, useMemo, useCallback, Fragment } from 'react'
 import TabStockLkTax from './_lk_tax/TabStock'
 import AdjustStockDialog from './_lk_tax/AdjustStockDialog'
 import CostLayersPopup from './_lk_tax/CostLayersPopup'
@@ -1089,7 +1089,16 @@ export default function VendorDashboard() {
     } catch {}
     setSalesLoading(false)
   }
-  function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(''), 4000) }
+  // ONE function for the page's whole life. It used to be re-created on every
+  // redraw, and 11 screens load their data in a hook that depends on it — so
+  // a toast reloaded the screen when it appeared and again when it cleared
+  // (VAT Filing loaded twice per Schedule download, owner 2026-11-13).
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showToast = useCallback((msg: string) => {
+    setToast(msg)
+    if (toastTimer.current) clearTimeout(toastTimer.current)   // a new message gets its full 4 s
+    toastTimer.current = setTimeout(() => setToast(''), 4000)
+  }, [])
   async function handleSignOut() { await fetch("/api/auth/logout", { method: "POST" }); window.location.href = '/' }
 
   // saveAllStockChanges and saveStocktakeWithCost moved into _lk_tax/TabStock and _standard/TabStock components
