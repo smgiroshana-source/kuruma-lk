@@ -36,6 +36,7 @@ import CostLayersPopup from './_lk_tax/CostLayersPopup'
 import TabStockStandard from './_standard/TabStock'
 import TabPOSLkTax from './_lk_tax/TabPOS'
 import TabPOSStandard from './_standard/TabPOS'
+import DemandReport from './_standard/DemandReport'
 import type { PendingDraft } from './_lk_tax/TabPOS'
 import IncomingTransfers from './_shared/IncomingTransfers'
 import CountReminder from './_shared/CountReminder'
@@ -4320,6 +4321,8 @@ ${(adjustmentsList || []).length > 0 ? (() => {
                 {/* ─── REPORTS ─── */}
                 {salesSubTab === "reports" && (
                   <div className="space-y-4">
+                    {/* What sells / order / clear — Sakura (owner, 2026-11-13) */}
+                    <DemandReport showToast={showToast} />
                     <div className="bg-white rounded-xl border border-slate-200 p-5">
                       <h3 className="font-bold text-sm text-slate-800 mb-3">📅 Daily Report</h3>
                       <p className="text-xs text-slate-400 mb-3">Covers the full selected day (Asia/Colombo)</p>

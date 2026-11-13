@@ -6,6 +6,7 @@ import { netStockCost } from '@/lib/netCost'
 import { netOfVat } from '@/lib/margin'
 import { sparePartsSales } from '@/lib/sparePartsSales'
 import { itemSales } from '@/lib/itemSales'
+import { demandReport } from '@/lib/demand'
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -405,6 +406,12 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Spare parts sales (owner, 2026-09-27) — src/lib/sparePartsSales.ts ──────
+  // ── What sells / what to order / what to clear (src/lib/demand.ts) ─────────
+  // Sakura, owner 2026-11-13. Run on demand from the Reports tab, not on load.
+  if (type === 'demand') {
+    return NextResponse.json(await demandReport(admin, vendor.id))
+  }
+
   if (type === 'spare_parts') {
     const fromStr = url.searchParams.get('from') || lkFirstOfMonthStr()
     const toStr   = url.searchParams.get('to')   || lkTodayStr()
