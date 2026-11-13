@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { colomboDayOf } from '@/lib/dates'
+import { frozenPeriodMessage, colomboMonthOf } from '@/lib/taxRates'
 import { checkPromotable, checkReversible, mayReversePromotion, PROMOTE_WINDOW_DAYS } from '@/lib/promoteReceipt'
 import { adjustProductQuantity } from '@/lib/stock'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
@@ -819,6 +820,10 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: 'Tax invoice date must be within the current month' }, { status: 400 })
         }
       }
+      if (resolvedDocType === 'tax_invoice') {
+        const frozen = await frozenPeriodMessage(admin, vendor.id, [colomboMonthOf(supplyDate.toISOString())], 'A new tax invoice')
+        if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+      }
 
       const serial = await reserveSerial(invoiceEntityId, entity, resolvedDocType, supplyDate)
       invoiceNo = serial.invoiceNo
@@ -1161,6 +1166,12 @@ export async function POST(req: NextRequest) {
     const { data: sale } = await admin.from('sales')
       .select('id, receipt_no, total, date_supply, created_at, invoice_entity_id').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!sale) return NextResponse.json({ success: false, error: 'Sale not found' }, { status: 404 })
+    {
+      // The new tax invoice counts in the sale's month (and is stamped with the
+      // carried date) — neither may be finalised (owner, 2026-11-13)
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [colomboMonthOf(sale.created_at), colomboMonthOf(check.supplyDate)], 'Promoting this receipt to a tax invoice')
+      if (frozen) return NextResponse.json({ success: false, error: frozen }, { status: 409 })
+    }
     const fromEntityId = sale.invoice_entity_id
 
     const target = check.targetEntity!
@@ -1259,6 +1270,10 @@ export async function POST(req: NextRequest) {
     const { data: sale } = await admin.from('sales')
       .select('*').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!sale) return NextResponse.json({ success: false, error: 'Sale not found' }, { status: 404 })
+    {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [colomboMonthOf(sale.created_at), colomboMonthOf(sale.date_supply)], 'Taking this tax invoice back to a receipt')
+      if (frozen) return NextResponse.json({ success: false, error: frozen }, { status: 409 })
+    }
 
     // Where it goes back to: the proprietor entity of the same branch.
     const { data: toEntity } = await admin.from('invoice_entities')
@@ -1326,6 +1341,12 @@ export async function POST(req: NextRequest) {
     const { data: sale } = await admin.from('sales').select('*, items:sale_items(*), payments:payments(*)').eq('id', saleId).eq('vendor_id', vendor.id).single()
     if (!sale) return NextResponse.json({ error: 'Not found' }, { status: 404 })
     if (sale.payment_status === 'voided') return NextResponse.json({ error: 'Already voided' }, { status: 400 })
+    // Voiding a tax invoice takes its VAT out of its month — not out of a
+    // finalised one; correct it with a credit note in the current month instead
+    if (sale.document_type === 'tax_invoice' && sale.tax_serial) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [colomboMonthOf(sale.created_at)], `Voiding ${sale.tax_serial}`)
+      if (frozen) return NextResponse.json({ error: frozen + ' To reverse it, issue a credit note — it counts in the current month.' }, { status: 409 })
+    }
 
     // Atomically claim the void BEFORE side effects — a double-tap would
     // otherwise pass the check above twice and restore stock/advance twice.
@@ -1972,6 +1993,10 @@ export async function POST(req: NextRequest) {
         if (sd.getFullYear() !== now.getFullYear() || sd.getMonth() !== now.getMonth()) {
           return NextResponse.json({ error: 'Tax invoice date must be within the current month' }, { status: 400 })
         }
+      }
+      if (finalizeDocType === 'tax_invoice') {
+        const frozen = await frozenPeriodMessage(admin, vendor.id, [colomboMonthOf((saleDate ? new Date(saleDate) : new Date()).toISOString())], 'A new tax invoice')
+        if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
       }
     }
     const finalizeVatRate = finalizeIsLkTax ? await getVatRate(vendor.id) : 0

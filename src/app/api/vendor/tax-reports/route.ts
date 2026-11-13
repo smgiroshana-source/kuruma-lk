@@ -4,7 +4,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { fetchAllRows, fetchAllByIds } from '@/lib/fetchAll'
 import { resolveBranch } from '@/lib/branchScope'
-import { loadRateHistory, rateAsOf } from '@/lib/taxRates'
+import { loadRateHistory, rateAsOf, frozenPeriodMessage } from '@/lib/taxRates'
 import { round2, exactOr } from '@/lib/money2'
 import { missingVatPaperwork } from '@/lib/vatPaperwork'
 import { grnEarliestClaimMonth, grnClaimDeadline } from '@/lib/vatClaim'
@@ -831,7 +831,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
   const { data: grns, error: grnReadErr } = await admin
     .from('grns')
-    .select('id, received_at, grn_series, grn_number, supplier_invoice_date')
+    .select('id, received_at, grn_series, grn_number, supplier_invoice_date, vat_claim_period')
     .eq('vendor_id', vendor.id)
     .in('id', grnIds)
   if (grnReadErr) return NextResponse.json({ error: 'Could not read the GRNs: ' + grnReadErr.message }, { status: 500 })
@@ -857,6 +857,11 @@ export async function POST(req: NextRequest) {
       }
     }
   }
+  // A finalised (locked) month can't gain or lose a credit (owner, 2026-11-13)
+  const frozen = await frozenPeriodMessage(admin, vendor.id,
+    (grns || []).flatMap((g: any) => [g.vat_claim_period || colomboMonth(g.received_at), period || colomboMonth(g.received_at)]),
+    'Moving these credits')
+  if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
 
   const { error } = await admin
     .from('grns')

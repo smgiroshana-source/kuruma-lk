@@ -3,6 +3,7 @@ import { roleAllows, forbidden, pgSafe, isUUID, MAX_UPLOAD_BYTES } from '@/lib/s
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { round2 } from '@/lib/money2'
+import { frozenPeriodMessage } from '@/lib/taxRates'
 // One rule for settling an invoice, shared with the supplier-returns route,
 // which raises a credit note when goods go back.
 import { recomputeSupplierInvoice as recomputeInvoice } from '@/lib/supplierInvoice'
@@ -94,6 +95,12 @@ export async function POST(req: NextRequest) {
     // No note, no VAT adjustment: the tax invoice stands as issued, which is
     // what the supplier declares and what IRD matches the claim against
     if (noCreditNote && vat !== 0) return NextResponse.json({ error: 'A discount with no credit note carries no VAT — the input VAT stays as invoiced' }, { status: 400 })
+    // A note with VAT reduces input VAT in the month it is dated — never a
+    // finalised one (owner, 2026-11-13)
+    if (vat > 0) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [String(creditNoteDate).slice(0, 7)], `A supplier credit note dated ${creditNoteDate}`)
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
 
     const { data: sup } = await admin.from('suppliers')
       .select('id, name, vat_registered').eq('id', supplierId).eq('vendor_id', vendor.id).single()
@@ -187,8 +194,12 @@ export async function POST(req: NextRequest) {
     const { creditNoteId } = body
     if (!creditNoteId) return NextResponse.json({ error: 'creditNoteId required' }, { status: 400 })
     const { data: note } = await admin.from('supplier_credit_notes')
-      .select('id, supplier_invoice_id, credit_note_no').eq('id', creditNoteId).eq('vendor_id', vendor.id).single()
+      .select('id, supplier_invoice_id, credit_note_no, credit_note_date, vat_amount').eq('id', creditNoteId).eq('vendor_id', vendor.id).single()
     if (!note) return NextResponse.json({ error: 'Credit note not found' }, { status: 404 })
+    if (Number(note.vat_amount) > 0) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [String(note.credit_note_date).slice(0, 7)], `Removing ${note.credit_note_no}`)
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
 
     const { error } = await admin.from('supplier_credit_notes').delete().eq('id', creditNoteId).eq('vendor_id', vendor.id)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

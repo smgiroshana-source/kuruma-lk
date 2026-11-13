@@ -4,6 +4,11 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { recomputeSessionForDate } from '@/lib/cash'
 import { round2 } from '@/lib/money2'
+import { frozenPeriodMessage, colomboMonthOf } from '@/lib/taxRates'
+
+// The month an expense's input VAT is claimed in (same rule as the Filing
+// Centre) — a locked, finalised month can't change (owner, 2026-11-13)
+const expenseClaimMonth = (e: any) => e?.vat_claim_period || colomboMonthOf(e?.supplier_invoice_date || e?.expense_date)
 
 async function getVendor() {
   const supabase = await createServerSupabase()
@@ -105,6 +110,10 @@ export async function POST(req: NextRequest) {
     // Validate required fields
     if (!expense_date || !/^\d{4}-\d{2}-\d{2}$/.test(expense_date)) {
       return NextResponse.json({ error: 'Invalid expense_date — expected YYYY-MM-DD' }, { status: 400 })
+    }
+    if (Number(input_vat) > 0) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [expenseClaimMonth({ supplier_invoice_date, expense_date })], 'An expense with VAT')
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
     }
     if (!category || !isValidCategory(category)) {
       return NextResponse.json({
@@ -209,8 +218,17 @@ export async function POST(req: NextRequest) {
     if (!expenseId) return NextResponse.json({ error: 'expenseId required' }, { status: 400 })
 
     const { data: expense } = await admin
-      .from('expenses').select('id, amount').eq('id', expenseId).eq('vendor_id', vendor.id).single()
+      .from('expenses').select('id, amount, input_vat, expense_date, supplier_invoice_date, vat_claim_period').eq('id', expenseId).eq('vendor_id', vendor.id).single()
     if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
+    {
+      // Neither the month the VAT leaves nor the one it lands in may be finalised
+      const months = [
+        Number(expense.input_vat) > 0 ? expenseClaimMonth(expense) : null,
+        Number(input_vat) > 0 ? expenseClaimMonth({ ...expense, supplier_invoice_date: supplier_invoice_date || null }) : null,
+      ]
+      const frozen = await frozenPeriodMessage(admin, vendor.id, months, "Changing this expense's VAT")
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
 
     // As printed on the bill, to the cent (Schedule 02); the books hold the rupee
     const docVat = round2(input_vat)
@@ -251,12 +269,16 @@ export async function POST(req: NextRequest) {
     // Fetch expense and verify ownership
     const { data: expense } = await admin
       .from('expenses')
-      .select('id, cash_session_id, expense_date, payment_method')
+      .select('id, cash_session_id, expense_date, payment_method, input_vat, supplier_invoice_date, vat_claim_period')
       .eq('id', expenseId)
       .eq('vendor_id', vendor.id)
       .single()
 
     if (!expense) return NextResponse.json({ error: 'Expense not found' }, { status: 404 })
+    if (Number((expense as any).input_vat) > 0) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [expenseClaimMonth(expense)], 'Deleting an expense with VAT')
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
 
     // If linked to a session, verify that session is still open
     if (expense.cash_session_id) {

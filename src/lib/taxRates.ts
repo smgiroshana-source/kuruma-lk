@@ -50,6 +50,39 @@ export async function isPeriodLocked(admin: any, vendorId: string, period: strin
   return !!data
 }
 
+// ── A locked month is FINALISED for filing (owner, 2026-11-13) ───────────────
+// The owner locks a month when its figures are decided, before filing — the
+// dashboard's "Filed ✓" tick confirms the filing itself. From the lock on,
+// nothing may change that month's VAT: no backdated or promoted tax invoice,
+// no void, no credit moved in or out, no GRN / expense / import / supplier
+// note dated or claimed in it. Every such path calls this and refuses on a
+// message. Unlock (owner) to correct, then lock again.
+
+/** Which of these YYYY-MM months are locked. Empty / null entries ignored. */
+export async function lockedAmong(admin: any, vendorId: string, months: (string | null | undefined)[]): Promise<string[]> {
+  const want = [...new Set(months.filter((m): m is string => !!m && /^\d{4}-\d{2}$/.test(m)))]
+  if (want.length === 0) return []
+  const { data, error } = await admin.from('vat_period_locks').select('period').eq('vendor_id', vendorId).in('period', want)
+  if (error) throw new Error('Could not check the VAT period locks: ' + error.message)
+  return (data || []).map((r: any) => r.period).sort()
+}
+
+/** Null when every month is open; else the message to refuse with. */
+export async function frozenPeriodMessage(admin: any, vendorId: string, months: (string | null | undefined)[], what: string): Promise<string | null> {
+  const locked = await lockedAmong(admin, vendorId, months)
+  if (locked.length === 0) return null
+  return `${what} would change ${locked.join(', ')}, which is finalised for VAT filing (locked). The owner can unlock it on the VAT Filing screen to correct it, then lock it again.`
+}
+
+/** YYYY-MM of a timestamp or date, in Colombo time. */
+export function colomboMonthOf(ts: string | null | undefined): string | null {
+  if (!ts) return null
+  const s = String(ts)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7)
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? null : d.toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }).slice(0, 7)
+}
+
 export function colomboMonthNow(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' }).slice(0, 7)
 }

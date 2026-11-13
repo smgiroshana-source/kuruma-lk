@@ -7,6 +7,11 @@ import { adjustProductQuantity } from '@/lib/stock'
 import { applySupplierAdvance } from '@/lib/supplierAdvance'
 import { round2 } from '@/lib/money2'
 import { refreshProductCost } from '@/lib/fifoCost'
+import { frozenPeriodMessage, colomboMonthOf } from '@/lib/taxRates'
+
+// The month a GRN's input VAT is claimed in — a locked (finalised) one can't
+// change (owner, 2026-11-13)
+const grnClaimMonthOf = (g: any) => g?.vat_claim_period || colomboMonthOf(g?.received_at)
 
 /**
  * Hand a GRN number back to its series counter — only while it is still the
@@ -229,6 +234,12 @@ export async function POST(req: NextRequest) {
     const items = grn.items || []
     if (items.length === 0) return NextResponse.json({ error: 'GRN has no items' }, { status: 400 })
 
+    // Posting with VAT adds input VAT to its month — not into a finalised one
+    if (items.some((i: any) => Number(i.vat_amount) > 0)) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [grnClaimMonthOf(grn)], `Posting ${grn.grn_number}`)
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
+
     // Claiming input VAT? Then the supplier's tax-invoice details must be on
     // record BEFORE the purchase enters the VAT ledger. Chasing them at filing
     // time, weeks later, is how a credit gets lost. Nothing is blocked when
@@ -409,6 +420,10 @@ export async function POST(req: NextRequest) {
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
     if (grn.status === 'reversed') return NextResponse.json({ error: 'GRN already reversed' }, { status: 400 })
     if (grn.status !== 'posted') return NextResponse.json({ error: 'Only posted GRNs can be reversed' }, { status: 400 })
+    if (Number(grn.input_vat) > 0) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [grnClaimMonthOf(grn)], `Reversing ${grn.grn_number}`)
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
 
     const items = grn.items || []
 
@@ -465,8 +480,13 @@ export async function POST(req: NextRequest) {
     if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
 
     const { data: grn } = await admin.from('grns')
-      .select('id, grn_number, supplier_id, input_vat, tax_invoice_confirmed').eq('id', grnId).eq('vendor_id', vendor.id).single()
+      .select('id, grn_number, supplier_id, input_vat, tax_invoice_confirmed, received_at, vat_claim_period').eq('id', grnId).eq('vendor_id', vendor.id).single()
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
+    // The paperwork decides whether (and how much) VAT is claimable in its month
+    if (Number(grn.input_vat) > 0) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [grnClaimMonthOf(grn)], `Changing ${grn.grn_number}'s VAT invoice details`)
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
 
     const confirmed = taxInvoiceConfirmed === true
     const patch: any = {

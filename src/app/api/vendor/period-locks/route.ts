@@ -5,12 +5,13 @@ import { createAdminClient } from '@/lib/supabase/admin'
 // ─────────────────────────────────────────────────────────────────────────────
 // VAT period locks — owner only.
 //
-// After the month's return is filed the owner locks it. A locked month takes
-// no new tax documents: credit notes, bad-debt write-offs and recoveries are
-// all refused while their (current) period is locked, and past periods can
-// never be written into because every document this system creates is dated
-// now. Locking is what keeps the filed return permanently equal to the
-// register it was filed from.
+// The owner locks a month when its figures are FINALISED for filing (owner,
+// 2026-11-13) — the dashboard's "Filed ✓" tick confirms the filing itself.
+// From the lock on, nothing may change that month's VAT: every path that
+// could (tax invoices, voids, promotions, credit moves, GRNs, expenses,
+// Cusdecs, supplier notes, a full-return credit note's void) checks
+// frozenPeriodMessage() in src/lib/taxRates.ts and refuses. Documents dated
+// now are still refused while the CURRENT month is locked (lockedNowMessage).
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getOwner() {
@@ -49,14 +50,14 @@ export async function POST(req: NextRequest) {
       vendor_id: caller.vendor.id, period, locked_by: caller.email,
     })
     if (error && !/duplicate/.test(error.message)) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ ok: true, message: `${period} locked — no further tax documents can be dated into it` })
+    return NextResponse.json({ ok: true, message: `${period} finalised — its VAT figures are frozen; file exactly these` })
   }
 
   if (action === 'unlock') {
     const { error } = await admin.from('vat_period_locks').delete()
       .eq('vendor_id', caller.vendor.id).eq('period', period)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-    return NextResponse.json({ ok: true, message: `${period} unlocked — remember to re-lock after corrections` })
+    return NextResponse.json({ ok: true, message: `${period} open again — finalise it once corrected` })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

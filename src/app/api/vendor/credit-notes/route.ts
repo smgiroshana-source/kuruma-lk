@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
-import { lockedNowMessage } from '@/lib/taxRates'
+import { lockedNowMessage, lockedAmong, colomboMonthOf } from '@/lib/taxRates'
 import { returnSellThrough } from '@/lib/sellThrough'
 import { restoreFifoCost } from '@/lib/fifoCost'
 
@@ -192,14 +192,21 @@ export async function POST(req: NextRequest) {
   const newBalance = Math.max(0, currentBalance - balanceReduction)
   const newPaid    = Math.max(0, currentPaid - paidReduction)
 
+  // A fully returned invoice is marked VOID, which takes it out of its own
+  // month's output — unless that month is finalised (locked) for VAT filing:
+  // then it stays as filed and this credit note carries the whole reversal in
+  // the current month (owner, 2026-11-13).
+  const invoiceMonthLocked = allReturned
+    && (await lockedAmong(admin, vendor.id, [colomboMonthOf(sale.created_at)])).length > 0
+  const voidIt = allReturned && !invoiceMonthLocked
   const salesUpdate: Record<string, any> = {
     returned_amount:  (parseFloat(sale.returned_amount || 0) + totalAmount),
     balance_due:      newBalance,
     paid_amount:      newPaid,
-    payment_status:   allReturned ? 'voided' : newBalance > 0 ? 'partial' : 'paid',
-    notes: (sale.notes || '') + '\nCRN: ' + creditNoteNo + ' | ' + returnedAt,
+    payment_status:   voidIt ? 'voided' : newBalance > 0 ? 'partial' : 'paid',
+    notes: (sale.notes || '') + '\nCRN: ' + creditNoteNo + ' | ' + returnedAt + (invoiceMonthLocked ? ' | fully returned — not voided, its month is filed' : ''),
   }
-  if (allReturned) salesUpdate.voided_at = returnedAt
+  if (voidIt) salesUpdate.voided_at = returnedAt
   await admin.from('sales').update(salesUpdate).eq('id', sale.id)
 
   // Why — one row per return event, same table as till returns

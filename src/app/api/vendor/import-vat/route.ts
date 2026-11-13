@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { round2 } from '@/lib/money2'
+import { frozenPeriodMessage } from '@/lib/taxRates'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Import shipments — one record per Customs declaration (IRD VAT Schedule 03).
@@ -109,6 +110,19 @@ export async function POST(req: NextRequest) {
     if (rows.length === 0) return NextResponse.json({ error: 'Nothing to save' }, { status: 400 })
     const bad = rows.find((r: any) => !r.cusdec_no || !/^\d{4}-\d{2}-\d{2}$/.test(String(r.cusdec_date || '')))
     if (bad) return NextResponse.json({ error: 'Every row needs a Cusdec number and a valid date' }, { status: 400 })
+    {
+      // A Cusdec lands in its own month (or the month it was moved to, when
+      // re-uploaded) — never in a finalised one (owner, 2026-11-13)
+      const { data: existing } = await admin.from('import_vat_entries').select('cusdec_no, cusdec_date, vat_claim_period')
+        .eq('vendor_id', vendor.id).in('cusdec_no', rows.map((r: any) => r.cusdec_no))
+      const months = [
+        ...rows.map((r: any) => monthOf(r.cusdec_date)),
+        ...(existing || []).filter((x: any) => rows.some((r: any) => r.cusdec_no === x.cusdec_no && r.cusdec_date === x.cusdec_date))
+          .map((x: any) => x.vat_claim_period || monthOf(x.cusdec_date)),
+      ]
+      const frozen = await frozenPeriodMessage(admin, vendor.id, months, 'Saving these Cusdec entries')
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
     // Re-uploading a corrected schedule updates rather than duplicating
     const { error } = await admin.from('import_vat_entries').upsert(rows, { onConflict: 'vendor_id,cusdec_no,cusdec_date' })
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
@@ -117,6 +131,11 @@ export async function POST(req: NextRequest) {
 
   if (body.action === 'delete') {
     if (!body.id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+    const { data: im } = await admin.from('import_vat_entries').select('cusdec_date, vat_claim_period').eq('id', body.id).eq('vendor_id', vendor.id).maybeSingle()
+    if (im) {
+      const frozen = await frozenPeriodMessage(admin, vendor.id, [im.vat_claim_period || monthOf(im.cusdec_date)], 'Deleting this Cusdec')
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
     const { error } = await admin.from('import_vat_entries').delete().eq('id', body.id).eq('vendor_id', vendor.id)
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
     return NextResponse.json({ ok: true })
@@ -129,8 +148,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'period must be YYYY-MM or null' }, { status: 400 })
     }
     const { data: im } = await admin.from('import_vat_entries')
-      .select('cusdec_date, cusdec_no').eq('id', id).eq('vendor_id', vendor.id).single()
+      .select('cusdec_date, cusdec_no, vat_claim_period').eq('id', id).eq('vendor_id', vendor.id).single()
     if (!im) return NextResponse.json({ error: 'Entry not found' }, { status: 404 })
+    {
+      const frozen = await frozenPeriodMessage(admin, vendor.id,
+        [im.vat_claim_period || monthOf(im.cusdec_date), period || monthOf(im.cusdec_date)], `Moving ${im.cusdec_no}`)
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
     if (period) {
       const originMonth = monthOf(im.cusdec_date)
       const limit = addMonths(originMonth, 24)

@@ -8,6 +8,7 @@ import { recomputeSupplierInvoice } from '@/lib/supplierInvoice'
 import { round2 } from '@/lib/money2'
 import { consumeFifoCost } from '@/lib/fifoCost'
 import { creditNoteWindows, syncReturnShortfall } from '@/lib/supplierReturnVat'
+import { frozenPeriodMessage } from '@/lib/taxRates'
 import { colomboToday } from '@/lib/dates'
 
 async function getVendor() {
@@ -293,9 +294,19 @@ export async function POST(req: NextRequest) {
 
     const { data: ret } = await admin
       .from('supplier_returns')
-      .select('id, status, total_amount')
+      .select('id, status, total_amount, supplier_credit_note_no, supplier_credit_note_date, credit_vat')
       .eq('id', returnId).eq('vendor_id', vendor.id).single()
     if (!ret) return NextResponse.json({ error: 'Supplier return not found' }, { status: 404 })
+    {
+      // The note's VAT sits in the month it is dated — neither the old date
+      // nor the new one may be a finalised month (owner, 2026-11-13)
+      const months = [
+        ret.supplier_credit_note_no && Number(ret.credit_vat) > 0 ? String(ret.supplier_credit_note_date || '').slice(0, 7) : null,
+        credit_note_no && Number(credit_vat) > 0 ? String(credit_note_date || '').slice(0, 7) : null,
+      ]
+      const frozen = await frozenPeriodMessage(admin, vendor.id, months, 'This supplier credit note')
+      if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+    }
 
     // Clearing the note (supplier never sent one / entered by mistake)
     if (!credit_note_no) {
@@ -384,6 +395,10 @@ export async function POST(req: NextRequest) {
       if (!String(vat_note!.no || '').trim()) return NextResponse.json({ error: 'Credit note number required — copy it off their note' }, { status: 400 })
       if (!vat_note!.date) return NextResponse.json({ error: 'Credit note date required' }, { status: 400 })
       if (noteVat < 0 || noteVat >= credited) return NextResponse.json({ error: 'The VAT on the note must be less than its total — check the figures' }, { status: 400 })
+      if (noteVat > 0) {
+        const frozen = await frozenPeriodMessage(admin, vendor.id, [String(vat_note!.date).slice(0, 7)], 'This supplier credit note')
+        if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
+      }
     }
     if (credited - noteVat > cost) {
       return NextResponse.json({

@@ -423,8 +423,8 @@ function PeriodLockPanel({ period, showToast }: { period: string; showToast: (m:
   useEffect(() => { loadLocks() }, [loadLocks])
 
   async function toggleLock(locked: boolean) {
-    if (!locked && !confirm(`Lock ${period}?\n\nDo this AFTER filing its VAT return. No credit note, write-off or recovery can then be dated into it.`)) return
-    if (locked && !confirm(`Unlock ${period}? Only for corrections — re-lock afterwards.`)) return
+    if (!locked && !confirm(`Finalise ${period} for filing?\n\nIts VAT figures are then frozen: no tax invoice, void, credit move, GRN, expense, Cusdec or supplier credit note can change them. File exactly these figures.`)) return
+    if (locked && !confirm(`Unfreeze ${period}? Only to correct it before filing — finalise it again afterwards. If the return is already filed, the books will stop matching it.`)) return
     setBusy(true)
     try {
       const r = await fetch('/api/vendor/period-locks', {
@@ -475,12 +475,12 @@ function PeriodLockPanel({ period, showToast }: { period: string; showToast: (m:
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <p className="text-xs font-black text-slate-700">
-            {isLocked ? `🔒 ${period} is LOCKED` : `🔓 ${period} is open`}
+            {isLocked ? `🔒 ${period} is FINALISED for filing` : `🔓 ${period} is open`}
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">
             {isLocked
-              ? 'Return filed — no credit notes, write-offs or recoveries can be dated into it.'
-              : 'After filing this month\'s return, lock it so the filed figures can never drift.'}
+              ? 'These figures are frozen — no tax invoice, void, credit, GRN, expense, Cusdec or supplier note can change them. File exactly what is shown, then tick Filed on the dashboard.'
+              : 'When the figures are decided, finalise the month: nothing can change them after that, so what you file stays equal to the books.'}
             {locks.length > 0 && ` Locked: ${locks.sort().join(', ')}`}
           </p>
         </div>

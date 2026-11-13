@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { round2, exactOr } from '@/lib/money2'
 import { grnEarliestClaimMonth, grnClaimDeadline } from '@/lib/vatClaim'
+import { frozenPeriodMessage } from '@/lib/taxRates'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VAT Filing Centre — everything one taxable period needs, in one call.
@@ -237,11 +238,19 @@ export async function GET(req: NextRequest) {
   // The original invoice's date is needed for the schedule's "Invoice Date"
   const origIds = [...new Set((crns || []).map((c: any) => c.original_sale_id).filter(Boolean))]
   const origDates: Record<string, string> = {}
+  const voidedOrigs = new Set<string>()
   if (origIds.length > 0) {
-    const { data: origs } = await admin.from('sales').select('id, date_supply, created_at').in('id', origIds)
-    for (const o of (origs || [])) origDates[o.id] = o.date_supply || String(o.created_at).slice(0, 10)
+    const { data: origs } = await admin.from('sales').select('id, date_supply, created_at, voided_at, payment_status').in('id', origIds)
+    for (const o of (origs || [])) {
+      origDates[o.id] = o.date_supply || String(o.created_at).slice(0, 10)
+      if (o.voided_at || o.payment_status === 'voided') voidedOrigs.add(o.id)
+    }
   }
-  const schedule04 = (crns || []).map((c: any) => ({
+  // A credit note that returned a whole invoice voids it, and the void already
+  // took that VAT out of Schedule 01 — counting the note too reversed it twice.
+  // Same rule as the VAT Summary (voidedOriginalIds). When the invoice's month
+  // is locked the invoice is NOT voided, so its note counts here (2026-11-13).
+  const schedule04 = (crns || []).filter((c: any) => !voidedOrigs.has(c.original_sale_id)).map((c: any) => ({
     tin: c.customer_tin || '',
     invoiceDate: origDates[c.original_sale_id] || '',
     invoiceNo: c.original_serial || '',
@@ -368,11 +377,15 @@ export async function POST(req: NextRequest) {
     const expenseIds = items.filter(i => i.kind === 'expense').map(i => i.id)
     const importIds = items.filter(i => i.kind === 'import').map(i => i.id)
     const problems: string[] = []
+    // Every month a credit leaves or lands in — a finalised (locked) month
+    // can't gain or lose one (owner, 2026-11-13)
+    const touched: string[] = []
 
     if (localIds.length > 0) {
-      const { data: rows } = await admin.from('grns').select('id, grn_number, received_at, supplier_invoice_date, grn_series')
+      const { data: rows } = await admin.from('grns').select('id, grn_number, received_at, supplier_invoice_date, grn_series, vat_claim_period')
         .eq('vendor_id', caller.vendor.id).in('id', localIds)
       for (const r of (rows || [])) {
+        touched.push(r.vat_claim_period || monthOf(r.received_at), period || monthOf(r.received_at))
         // From the supplier's invoice month (s.4(1)) to 12 months after its date (s.22(6))
         const earliest = grnEarliestClaimMonth(r, monthOf(r.received_at))
         const deadline = grnClaimDeadline(r, monthOf(r.received_at))
@@ -382,25 +395,29 @@ export async function POST(req: NextRequest) {
     }
     if (expenseIds.length > 0) {
       const { data: rows } = await admin.from('expenses')
-        .select('id, description, expense_date, supplier_invoice_date, supplier_invoice_no')
+        .select('id, description, expense_date, supplier_invoice_date, supplier_invoice_no, vat_claim_period')
         .eq('vendor_id', caller.vendor.id).in('id', expenseIds)
       for (const r of (rows || [])) {
         const label = r.supplier_invoice_no || r.description
         const origin = monthOf(r.supplier_invoice_date || r.expense_date)
+        touched.push(r.vat_claim_period || origin, period || origin)
         if (period && period < origin) problems.push(`${label}: cannot claim before ${origin}`)
         else if (period && period > addMonths(origin, 12)) problems.push(`${label}: past the 12-month deadline (${addMonths(origin, 12)})`)
       }
     }
     if (importIds.length > 0) {
-      const { data: rows } = await admin.from('import_vat_entries').select('id, cusdec_no, cusdec_date')
+      const { data: rows } = await admin.from('import_vat_entries').select('id, cusdec_no, cusdec_date, vat_claim_period')
         .eq('vendor_id', caller.vendor.id).in('id', importIds)
       for (const r of (rows || [])) {
         const origin = monthOf(r.cusdec_date)
+        touched.push(r.vat_claim_period || origin, period || origin)
         if (period && period < origin) problems.push(`Cusdec ${r.cusdec_no}: cannot claim before ${origin}`)
         else if (period && period > addMonths(origin, 24)) problems.push(`Cusdec ${r.cusdec_no}: past the 24-month deadline (${addMonths(origin, 24)})`)
       }
     }
     if (problems.length > 0) return NextResponse.json({ error: problems.join(' · ') }, { status: 400 })
+    const frozen = await frozenPeriodMessage(admin, caller.vendor.id, touched, 'Moving these credits')
+    if (frozen) return NextResponse.json({ error: frozen }, { status: 409 })
 
     if (localIds.length > 0) {
       const { error } = await admin.from('grns').update({ vat_claim_period: period })
