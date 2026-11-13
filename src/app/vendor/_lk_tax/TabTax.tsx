@@ -334,7 +334,7 @@ export default function TabTax({ showToast, vendorSettings }: {
           <div className="px-4 py-3 border-b border-slate-100">
             <h3 className="font-bold text-sm text-slate-800">Waiting for later months · {rs(t.parkedTotal)}</h3>
             <p className="text-[11px] text-slate-400">
-              {parkedLater.some(i => !i.originMonth || i.originMonth <= period)
+              {parkedLater.some(i => (i.earliestMonth ?? i.originMonth ?? period) <= period)
                 ? <>Claim any of these back into {period} if you have output VAT to absorb them.</>
                 : <>Purchases from after {period}. Input VAT is never claimed before the month the goods and invoice came in.</>}
             </p>
@@ -352,8 +352,8 @@ export default function TabTax({ showToast, vendorSettings }: {
                   (the server refuses: "cannot claim before …"). Don't offer it
                   (owner asked 2026-11-13 whether November GRNs could go into
                   October — they can't). */}
-              {i.originMonth && i.originMonth > period
-                ? <span className="text-[10px] text-slate-400 w-[92px] text-right">from {i.originMonth}</span>
+              {(i.earliestMonth ?? i.originMonth) && (i.earliestMonth ?? i.originMonth) > period
+                ? <span className="text-[10px] text-slate-400 w-[92px] text-right">from {i.earliestMonth ?? i.originMonth}</span>
                 : <button disabled={busy} onClick={() => moveCredits([i], period)} className="text-[11px] font-bold text-emerald-700">claim now</button>}
             </div>
           ))}

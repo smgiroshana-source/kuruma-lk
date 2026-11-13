@@ -7,6 +7,14 @@ import { resolveBranch } from '@/lib/branchScope'
 import { loadRateHistory, rateAsOf } from '@/lib/taxRates'
 import { round2, exactOr } from '@/lib/money2'
 import { missingVatPaperwork } from '@/lib/vatPaperwork'
+import { grnEarliestClaimMonth, grnClaimDeadline } from '@/lib/vatClaim'
+
+// A GRN received up to two months after a period may be claimed IN it when its
+// supplier invoice is dated in that period (VAT Act s.4(1), s.22(6); owner
+// 2026-11-13). Reads that bucket by claim month look this far past the period
+// end, so a credit moved back to its invoice month is never dropped from the
+// VAT Summary or the Input VAT Register while the Filing Centre counts it.
+const lateReceiptCutoff = (toTs: string) => new Date(new Date(toTs).getTime() + 62 * 86400000).toISOString()
 
 // Month bucket in the Colombo calendar — slicing the raw UTC timestamp bins
 // late-night (pre-05:30) transactions into the previous month.
@@ -408,7 +416,7 @@ export async function GET(req: NextRequest) {
       .eq('status', 'posted')
       .gt('input_vat', 0)
       .gte('received_at', windowStart)
-      .lte('received_at', toTs)
+      .lte('received_at', lateReceiptCutoff(toTs))
       .order('received_at', { ascending: true })
       .order('created_at', { ascending: true })
 
@@ -425,8 +433,8 @@ export async function GET(req: NextRequest) {
     const shape = (g: any) => {
       const originMonth = colomboMonth(g.received_at)
       const claimPeriod = g.vat_claim_period || originMonth
-      // Deadline: 12 months for local purchases, 24 for imports
-      const expiryMonth = addMonths(originMonth, g.grn_series === 'I' ? 24 : 12)
+      // Deadline: 12 months from the supplier's invoice date; imports 24 from receipt
+      const expiryMonth = grnClaimDeadline(g, originMonth)
       const monthsLeft = (() => {
         const [ey, em] = expiryMonth.split('-').map(Number)
         const [ny, nm] = nowMonth.split('-').map(Number)
@@ -506,8 +514,10 @@ export async function GET(req: NextRequest) {
     // Claimed in this period = assigned claim period falls inside it
     const rows = all.filter(r => r.claimPeriod >= fromMonth && r.claimPeriod <= toMonth)
     // Still unclaimed = pushed past this period (carried forward pool)
+    // (only purchases received by the period end — the read now looks past it
+    // for late invoices, and a later month's own purchases aren't "carried")
     const carriedForward = all
-      .filter(r => r.claimable && r.claimPeriod > toMonth)
+      .filter(r => r.claimable && r.claimPeriod > toMonth && r.originMonth <= toMonth)
       .sort((a, b) => a.monthsLeft - b.monthsLeft)
     const carriedTotal = round2(carriedForward.reduce((s, r) => s + r.inputVat, 0))
     const expiringSoon = carriedForward.filter(r => r.monthsLeft <= 3)
@@ -611,7 +621,7 @@ export async function GET(req: NextRequest) {
       admin.from('grns')
         .select('input_vat, doc_vat, supplier_vat_registered, supplier_invoice_no, supplier_invoice_date, supplier_tin, tax_invoice_confirmed, received_at, vat_claim_period, grn_series')
         .eq('vendor_id', vendor.id).eq('status', 'posted').gt('input_vat', 0)
-        .gte('received_at', sumWindowStart).lte('received_at', toTs),
+        .gte('received_at', sumWindowStart).lte('received_at', lateReceiptCutoff(toTs)),
       admin.from('expenses')
         .select('input_vat, doc_vat, expense_date, supplier_invoice_date, vat_claim_period')
         .eq('vendor_id', vendor.id).gt('input_vat', 0)
@@ -816,7 +826,7 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient()
   const { data: grns, error: grnReadErr } = await admin
     .from('grns')
-    .select('id, received_at, grn_series, grn_number')
+    .select('id, received_at, grn_series, grn_number, supplier_invoice_date')
     .eq('vendor_id', vendor.id)
     .in('id', grnIds)
   if (grnReadErr) return NextResponse.json({ error: 'Could not read the GRNs: ' + grnReadErr.message }, { status: 500 })
@@ -830,10 +840,11 @@ export async function POST(req: NextRequest) {
     }
     for (const g of grns) {
       const originMonth = colomboMonth(g.received_at)
-      if (period < originMonth) {
-        return NextResponse.json({ error: `${g.grn_number}: a credit cannot be claimed before the purchase month (${originMonth})` }, { status: 400 })
+      const earliest = grnEarliestClaimMonth(g, originMonth)
+      if (period < earliest) {
+        return NextResponse.json({ error: `${g.grn_number}: a credit cannot be claimed before the supplier's invoice month (${earliest})` }, { status: 400 })
       }
-      const limit = addMonths(originMonth, g.grn_series === 'I' ? 24 : 12)
+      const limit = grnClaimDeadline(g, originMonth)
       if (period > limit) {
         return NextResponse.json({
           error: `${g.grn_number}: ${period} is past the claim deadline (${limit}) — ${g.grn_series === 'I' ? 'imports: 24 months' : 'local purchases: 12 months'}`,

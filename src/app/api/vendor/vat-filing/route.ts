@@ -3,6 +3,7 @@ import { missingVatPaperwork } from '@/lib/vatPaperwork'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { round2, exactOr } from '@/lib/money2'
+import { grnEarliestClaimMonth, grnClaimDeadline } from '@/lib/vatClaim'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VAT Filing Centre — everything one taxable period needs, in one call.
@@ -122,11 +123,15 @@ export async function GET(req: NextRequest) {
   const localItems = (grns || [])
     .filter((g: any) => g.supplier_vat_registered !== false)
     .map((g: any) => {
+      // Claimed by default in the month received; may move back to the
+      // invoice's month, and must be claimed within 12 months of the invoice
+      // date (VAT Act s.4(1), s.22(6) — src/lib/vatClaim.ts)
       const originMonth = monthOf(g.received_at)
       const claimPeriod = g.vat_claim_period || originMonth
-      const deadline = addMonths(originMonth, 12)
+      const earliestMonth = grnEarliestClaimMonth(g, originMonth)
+      const deadline = grnClaimDeadline(g, originMonth)
       return {
-        kind: 'local' as const, id: g.id, ref: g.grn_number,
+        kind: 'local' as const, id: g.id, ref: g.grn_number, earliestMonth,
         // Schedule 02 wants the SUPPLIER's invoice date; fall back to the date
         // we received the goods when the invoice date wasn't captured.
         invoiceDate: g.supplier_invoice_date || String(g.received_at).slice(0, 10),
@@ -213,7 +218,13 @@ export async function GET(req: NextRequest) {
       }
     })
     .sort((a: any, b: any) => b.daysOld - a.daysOld)
-  const parkedLater = allInput.filter(i => i.claimPeriod > period).sort((a, b) => a.monthsLeft - b.monthsLeft)
+  // Waiting = credits that COULD be claimed in this period but sit in a later
+  // one: parked by choice, or received after the period on an invoice dated in
+  // it (GRN-V-00015). A later month's own purchases are not "parked" — October
+  // read "Rs.63,731 parked" when Rs.23,492 of it was November's bills.
+  const parkedLater = allInput
+    .filter(i => i.claimPeriod > period && ((i as any).earliestMonth ?? i.originMonth) <= period)
+    .sort((a, b) => a.monthsLeft - b.monthsLeft)
   const inputVat = round2(claimedNow.reduce((s, i) => s + i.vat, 0))
 
   // ── Schedule 04: credit notes issued to customers in the period ──
@@ -359,12 +370,14 @@ export async function POST(req: NextRequest) {
     const problems: string[] = []
 
     if (localIds.length > 0) {
-      const { data: rows } = await admin.from('grns').select('id, grn_number, received_at')
+      const { data: rows } = await admin.from('grns').select('id, grn_number, received_at, supplier_invoice_date, grn_series')
         .eq('vendor_id', caller.vendor.id).in('id', localIds)
       for (const r of (rows || [])) {
-        const origin = monthOf(r.received_at)
-        if (period && period < origin) problems.push(`${r.grn_number}: cannot claim before ${origin}`)
-        else if (period && period > addMonths(origin, 12)) problems.push(`${r.grn_number}: past the 12-month deadline (${addMonths(origin, 12)})`)
+        // From the supplier's invoice month (s.4(1)) to 12 months after its date (s.22(6))
+        const earliest = grnEarliestClaimMonth(r, monthOf(r.received_at))
+        const deadline = grnClaimDeadline(r, monthOf(r.received_at))
+        if (period && period < earliest) problems.push(`${r.grn_number}: cannot claim before ${earliest} (the supplier's invoice month)`)
+        else if (period && period > deadline) problems.push(`${r.grn_number}: past the 12-month deadline (${deadline})`)
       }
     }
     if (expenseIds.length > 0) {
