@@ -201,6 +201,7 @@ export default function TabTax({ showToast, vendorSettings }: {
       </span>
       <span className="font-mono font-bold shrink-0">{i.ref}</span>
       <span className="flex-1 truncate text-slate-500">{i.partyName || i.invoiceNo || ''}</span>
+      {i.figureWarning && <span className="shrink-0 text-[10px] font-black text-red-600" title={i.figureWarning}>⚠ check value</span>}
       <span className={`shrink-0 text-[10px] font-bold ${i.monthsLeft <= 3 ? 'text-red-600' : 'text-slate-400'}`}>
         {i.monthsLeft <= 0 ? 'EXPIRED' : `${i.monthsLeft}m left`}
       </span>
@@ -386,6 +387,18 @@ export default function TabTax({ showToast, vendorSettings }: {
       {/* ── Schedule files ── */}
       <div className="bg-white rounded-xl border border-slate-200 p-4">
         <h3 className="font-bold text-sm text-slate-800 mb-1">📤 Schedules for the return</h3>
+        {(() => {
+          // Value and VAT that disagree — e.g. the invoice total typed as the net (GRN-V-00015)
+          const bad = localAndExpense.filter(i => i.figureWarning)
+          if (bad.length === 0) return null
+          return (
+            <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 mb-2">
+              <p className="font-bold">⚠️ {bad.length} Schedule 02 line{bad.length !== 1 ? 's' : ''} where the value and the VAT don&apos;t agree — check the paper before filing:</p>
+              {bad.map(i => <p key={key(i)}><span className="font-mono font-bold">{i.ref}</span> {i.partyName ? `(${i.partyName})` : ''} — {i.figureWarning}</p>)}
+              <p className="text-red-600 mt-0.5">Fix a GRN from Stock → GRN History → &ldquo;Add details&rdquo;.</p>
+            </div>
+          )
+        })()}
         {(() => {
           const gaps = localAndExpense.filter(i => i.missingInvoiceInfo)
           if (gaps.length === 0) return null

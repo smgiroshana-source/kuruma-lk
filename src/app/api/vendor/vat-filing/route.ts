@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { missingVatPaperwork } from '@/lib/vatPaperwork'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { round2, exactOr } from '@/lib/money2'
+import { round2, exactOr, printedFigureWarnings, printedNetIsTotal, bookVatRate } from '@/lib/money2'
 import { grnEarliestClaimMonth, grnClaimDeadline } from '@/lib/vatClaim'
 import { frozenPeriodMessage } from '@/lib/taxRates'
 
@@ -142,6 +142,11 @@ export async function GET(req: NextRequest) {
         partyTin: g.supplier_tin || '', partyName: g.supplier_name || '',
         // As printed on the supplier's invoice when recorded; else the book figures
         value: exactOr(g.doc_net, g.net_cost), vat: exactOr(g.doc_vat, g.input_vat),
+        // Value and VAT that don't agree (GRN-V-00015 carried the total as the value)
+        figureWarning: (() => {
+          const w = printedFigureWarnings({ docNet: exactOr(g.doc_net, g.net_cost), docVat: exactOr(g.doc_vat, g.input_vat), ratePct: bookVatRate(g.net_cost, g.input_vat), bookNet: Number(g.net_cost) || null, bookVat: Number(g.input_vat) || 0 })
+          return w.net || w.pair
+        })(),
         disallowedVat: parseInt(g.disallowed_vat || 0),
         originMonth, claimPeriod, deadline,
         monthsLeft: monthsBetween(nowMonth, deadline),
@@ -181,6 +186,10 @@ export async function GET(req: NextRequest) {
       partyTin: e.supplier_tin || '', partyName: e.supplier_name || e.description || '',
       // The amount paid is VAT-inclusive; Schedule 02 wants the value excluding it
       value: e.doc_net != null ? round2(e.doc_net) : Math.round(parseInt(e.amount || 0) - vat), vat,
+      // Only the value-is-really-the-total case: an overhead bill can carry
+      // non-VAT charges, so its VAT need not be 18% of the value.
+      figureWarning: e.doc_net != null && printedNetIsTotal(e.doc_net, vat, bookVatRate(parseInt(e.amount || 0) - parseInt(e.input_vat || 0), e.input_vat))
+        ? 'The value is the bill total including VAT — enter the amount before VAT.' : null,
       disallowedVat: 0,
       category: e.category,
       originMonth, claimPeriod, deadline,

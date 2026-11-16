@@ -1,6 +1,7 @@
 'use client'
 import React from 'react'
 import { colomboToday } from '@/lib/dates'
+import { printedFigureWarnings, bookVatRate } from '@/lib/money2'
 import SupplierForm from './SupplierForm'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
@@ -1084,6 +1085,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     // gap (a discount line not entered, a mistyped cost), not rounding.
                     const grnUnits = grnItems.reduce((t, i) => t + i.quantity, 0)
                     const tolerance = 1 + grnUnits * 0.5 * (vatRate / 100)
+                    // The net box is checked too (GRN-V-00015: the total incl. VAT was typed as the net)
+                    const fig = printedFigureWarnings({ docNet: grnForm.docNet, docVat: grnForm.docVat, ratePct: bookVatRate(grnNetCost, grnInputVat), bookNet: grnNetCost, bookVat: grnInputVat, units: grnUnits })
                     return (
                       <div className="sm:col-span-3 grid grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <div className="col-span-2 text-[10px] font-bold text-slate-500 uppercase tracking-wide">As printed on their tax invoice — copy the figures, cents included</div>
@@ -1091,7 +1094,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                           <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Net (excl. VAT)</label>
                           <input type="number" step="0.01" min={0} inputMode="decimal" value={grnForm.docNet} placeholder={grnNetCost.toFixed(2)}
                             onChange={e => setGrnForm(f => ({ ...f, docNet: e.target.value }))}
-                            className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400 bg-white" />
+                            className={`w-full px-3 py-2 rounded-lg border-2 text-sm font-mono outline-none focus:border-orange-400 bg-white ${fig.net ? 'border-red-400' : fig.pair ? 'border-amber-400' : 'border-slate-200'}`} />
+                          <p className="text-[10px] text-slate-400 mt-1">Before VAT. No net printed? Add up the line totals.</p>
                         </div>
                         <div>
                           <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">VAT</label>
@@ -1106,6 +1110,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                               ? <span className="text-emerald-700">Rs.{off.toFixed(2)} from the lines — within what whole-rupee unit costs explain for {grnUnits} unit{grnUnits !== 1 ? 's' : ''}. The return files the printed figure; the books keep the rupees.</span>
                               : <>Left blank, the return uses the figures worked out from the lines ({grnNetCost.toLocaleString()} + {grnInputVat.toLocaleString()}). The books stay in whole rupees either way.</>}
                         </p>
+                        {fig.net && <p className="col-span-2 text-[11px] font-bold text-red-700">⚠ Net: {fig.net}</p>}
+                        {fig.pair && <p className="col-span-2 text-[11px] font-bold text-amber-700">⚠ {fig.pair}</p>}
                       </div>
                     )
                   })()}
@@ -1698,7 +1704,13 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     <p className="font-black text-sm">Rs.{parseInt(grn.total_cost || 0).toLocaleString()}</p>
                     {grn.input_vat > 0 && <p className="text-[10px] text-orange-500">VAT: Rs.{parseInt(grn.input_vat || 0).toLocaleString()}</p>}
                     {grn.input_vat > 0 && (grn.doc_vat != null
-                      ? <p className="text-[10px] text-emerald-700 font-bold">as printed: {Number(grn.doc_net ?? grn.net_cost).toFixed(2)} + VAT {Number(grn.doc_vat).toFixed(2)}</p>
+                      ? (() => {
+                          const fig = printedFigureWarnings({ docNet: grn.doc_net ?? grn.net_cost, docVat: grn.doc_vat, ratePct: bookVatRate(grn.net_cost, grn.input_vat), bookNet: Number(grn.net_cost) || null, bookVat: Number(grn.input_vat) || 0 })
+                          const bad = fig.net || fig.pair
+                          return <p className={`text-[10px] font-bold ${bad ? 'text-red-600' : 'text-emerald-700'}`} title={bad || undefined}>
+                            {bad ? '⚠ ' : ''}as printed: {Number(grn.doc_net ?? grn.net_cost).toFixed(2)} + VAT {Number(grn.doc_vat).toFixed(2)}{bad ? ' — check the net' : ''}
+                          </p>
+                        })()
                       : isPosted && grn.status !== 'reversed' && <p className="text-[10px] text-amber-600">printed figures not entered</p>)}
                   </div>
                 </div>
@@ -2412,7 +2424,14 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                     onChange={e => setFixInvoiceForm(f => ({ ...f, docVat: e.target.value }))}
                     className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm font-mono outline-none focus:border-orange-400" />
                 </div>
-                <p className="col-span-2 text-[10px] text-slate-400 -mt-1">Cents included — Schedule 02 carries these exactly as the supplier declared them.</p>
+                <p className="col-span-2 text-[10px] text-slate-400 -mt-1">Cents included — Schedule 02 carries these exactly as the supplier declared them. The net is BEFORE VAT; if the paper prints none, add up the line totals.</p>
+                {(() => {
+                  const fig = printedFigureWarnings({ docNet: fixInvoiceForm.docNet, docVat: fixInvoiceForm.docVat, ratePct: bookVatRate(fixInvoiceGrn.net_cost, fixInvoiceGrn.input_vat), bookNet: Number(fixInvoiceGrn.net_cost) || null, bookVat: Number(fixInvoiceGrn.input_vat) || 0 })
+                  return <>
+                    {fig.net && <p className="col-span-2 text-[11px] font-bold text-red-700">⚠ Net: {fig.net}</p>}
+                    {fig.pair && <p className="col-span-2 text-[11px] font-bold text-amber-700">⚠ {fig.pair}</p>}
+                  </>
+                })()}
               </div>
               <label className={`flex items-start gap-2.5 rounded-lg border-2 px-3 py-2.5 cursor-pointer ${fixInvoiceForm.taxInvoiceConfirmed ? 'border-emerald-300 bg-emerald-50' : 'border-red-300 bg-red-50'}`}>
                 <input type="checkbox" checked={fixInvoiceForm.taxInvoiceConfirmed} onChange={e => setFixInvoiceForm(f => ({ ...f, taxInvoiceConfirmed: e.target.checked }))} className="w-4 h-4 mt-0.5 accent-emerald-600 shrink-0" />

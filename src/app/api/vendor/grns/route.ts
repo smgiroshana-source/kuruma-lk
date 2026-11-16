@@ -5,7 +5,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { applySupplierAdvance } from '@/lib/supplierAdvance'
-import { round2 } from '@/lib/money2'
+import { round2, printedNetIsTotal, bookVatRate } from '@/lib/money2'
 import { refreshProductCost } from '@/lib/fifoCost'
 import { frozenPeriodMessage, colomboMonthOf } from '@/lib/taxRates'
 
@@ -145,6 +145,12 @@ export async function POST(req: NextRequest) {
       })
     }
     const totalCost = netCost + inputVat
+
+    // The total incl. VAT typed as the printed net (GRN-V-00015, 2026-11-16).
+    // Checked before a number is reserved, so a refusal burns no GRN number.
+    if (printedNetIsTotal(docNet, docVat, bookVatRate(netCost, inputVat))) {
+      return NextResponse.json({ error: `The printed net (${docNet}) is the invoice total including VAT. Enter the amount before VAT — about ${round2(Number(docNet) - Number(docVat))}. If the paper prints no net, add up its line totals.` }, { status: 400 })
+    }
 
     // Reserve the next number in THIS series (atomic; supabase-grn-series.sql)
     const { data: seqNum, error: seqErr } = await admin.rpc('next_grn_series_serial', { p_vendor_id: vendor.id, p_series: grnSeries })
@@ -480,8 +486,15 @@ export async function POST(req: NextRequest) {
     if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
 
     const { data: grn } = await admin.from('grns')
-      .select('id, grn_number, supplier_id, input_vat, tax_invoice_confirmed, received_at, vat_claim_period').eq('id', grnId).eq('vendor_id', vendor.id).single()
+      .select('id, grn_number, supplier_id, net_cost, input_vat, doc_net, doc_vat, tax_invoice_confirmed, received_at, vat_claim_period').eq('id', grnId).eq('vendor_id', vendor.id).single()
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
+    {
+      const n = docNet !== undefined ? docNet : grn.doc_net
+      const v = docVat !== undefined ? docVat : grn.doc_vat
+      if (printedNetIsTotal(n, v, bookVatRate(grn.net_cost, grn.input_vat))) {
+        return NextResponse.json({ error: `The printed net (${n}) is the invoice total including VAT. Enter the amount before VAT — about ${round2(Number(n) - Number(v))}. If the paper prints no net, add up its line totals.` }, { status: 400 })
+      }
+    }
     // The paperwork decides whether (and how much) VAT is claimable in its month
     if (Number(grn.input_vat) > 0) {
       const frozen = await frozenPeriodMessage(admin, vendor.id, [grnClaimMonthOf(grn)], `Changing ${grn.grn_number}'s VAT invoice details`)
