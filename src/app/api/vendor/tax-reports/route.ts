@@ -444,6 +444,10 @@ export async function GET(req: NextRequest) {
         id: g.id,
         grnNumber: g.grn_number,
         receivedAt: g.received_at,
+        // The register shows the SUPPLIER's invoice date (accountant, 2026-11-17)
+        // — the date on the tax invoice, which is what IRD and Schedule 02 use.
+        // Our GRN date stays on the row for reference only.
+        invoiceDate: g.supplier_invoice_date ? String(g.supplier_invoice_date).slice(0, 10) : null,
         originMonth, claimPeriod, expiryMonth, monthsLeft,
         isImport: g.grn_series === 'I',
         deferred: claimPeriod !== originMonth,
@@ -513,6 +517,8 @@ export async function GET(req: NextRequest) {
     const all = (grns || []).map(shape)
     // Claimed in this period = assigned claim period falls inside it
     const rows = all.filter(r => r.claimPeriod >= fromMonth && r.claimPeriod <= toMonth)
+      // In invoice-date order, the order the accountant reads the papers in
+      .sort((a, b) => String(a.invoiceDate || a.receivedAt).localeCompare(String(b.invoiceDate || b.receivedAt)) || a.grnNumber.localeCompare(b.grnNumber))
     // Still unclaimed = pushed past this period (carried forward pool)
     // (only purchases received by the period end — the read now looks past it
     // for late invoices, and a later month's own purchases aren't "carried")

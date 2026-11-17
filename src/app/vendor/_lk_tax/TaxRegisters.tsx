@@ -131,16 +131,16 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling, 
       const rows = (taxReportData.rows || []).map((r: any) =>
         `<tr>
           <td style="font-family:monospace">${r.grnNumber}</td>
-          <td>${r.receivedAt}</td>
-          <td>${r.supplierName}</td>
-          <td>${r.supplierInvoiceNo || ''}</td>
+          <td style="white-space:nowrap">${r.invoiceDate ? r.invoiceDate : '<span style="color:#b91c1c">not recorded</span>'}</td>
+          <td>${escapeHtml(r.supplierName)}</td>
+          <td>${escapeHtml(r.supplierInvoiceNo || '')}</td>
           <td style="text-align:right">Rs.${r.netCost.toLocaleString()}</td>
           <td style="text-align:right;color:#c05621">Rs.${r.inputVat.toLocaleString()}</td>
           <td style="text-align:right;font-weight:bold">Rs.${r.totalCost.toLocaleString()}</td>
         </tr>`).join('')
       const t = taxReportData.totals
       body = `<table border="1" cellpadding="4" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:11px">
-        <thead><tr style="background:#f0f0f0"><th>GRN No.</th><th>Date</th><th>Supplier</th><th>Supplier Inv. No.</th><th>Net Cost</th><th>Input VAT</th><th>Total Cost</th></tr></thead>
+        <thead><tr style="background:#f0f0f0"><th>GRN No.</th><th>Invoice Date</th><th>Supplier</th><th>Supplier Inv. No.</th><th>Net Cost</th><th>Input VAT</th><th>Total Cost</th></tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr style="font-weight:bold;background:#f8f8f8">
           <td colspan="4">TOTALS (${t.count} GRN${t.count !== 1 ? 's' : ''})</td>
@@ -520,7 +520,7 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling, 
                 <table className="w-full text-xs">
                   <thead><tr className="bg-slate-50 text-slate-500 text-[10px] font-bold uppercase">
                     <th className="px-3 py-2 text-left">GRN No.</th>
-                    <th className="px-3 py-2 text-left">Date</th>
+                    <th className="px-3 py-2 text-left">Invoice Date</th>
                     <th className="px-3 py-2 text-left">Supplier</th>
                     <th className="px-3 py-2 text-left">Supplier Inv.</th>
                     <th className="px-3 py-2 text-right">Net Cost</th>
@@ -532,7 +532,9 @@ export default function TaxRegisters({ showToast, vendorSettings, onGoToFiling, 
                     {rows.map((r: any, i: number) => (
                       <tr key={i} className="border-t border-slate-100">
                         <td className="px-3 py-2 font-mono text-[10px] text-slate-600">{r.grnNumber}</td>
-                        <td className="px-3 py-2 text-slate-500">{r.receivedAt}</td>
+                        <td className="px-3 py-2 text-slate-500 whitespace-nowrap" title={`GRN received ${r.receivedAt}`}>
+                          {r.invoiceDate || <span className="text-red-600 font-bold">not recorded</span>}
+                        </td>
                         <td className="px-3 py-2 font-semibold">{r.supplierName}{r.isImport && <span className="ml-1 text-[9px] font-black text-sky-600">IMPORT</span>}</td>
                         <td className="px-3 py-2 font-mono text-[10px] text-slate-400">{r.supplierInvoiceNo || '—'}</td>
                         <td className="px-3 py-2 text-right text-slate-600">Rs.{r.netCost.toLocaleString()}</td>
