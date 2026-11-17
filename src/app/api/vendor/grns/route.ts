@@ -6,6 +6,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { applySupplierAdvance } from '@/lib/supplierAdvance'
 import { round2, printedNetIsTotal, bookVatRate } from '@/lib/money2'
+import { supplierInvoiceNoIssue } from '@/lib/gazetteSerial'
 import { refreshProductCost } from '@/lib/fifoCost'
 import { frozenPeriodMessage, colomboMonthOf } from '@/lib/taxRates'
 
@@ -150,6 +151,14 @@ export async function POST(req: NextRequest) {
     // Checked before a number is reserved, so a refusal burns no GRN number.
     if (printedNetIsTotal(docNet, docVat, bookVatRate(netCost, inputVat))) {
       return NextResponse.json({ error: `The printed net (${docNet}) is the invoice total including VAT. Enter the amount before VAT — about ${round2(Number(docNet) - Number(docVat))}. If the paper prints no net, add up its line totals.` }, { status: 400 })
+    }
+
+    // The supplier's tax invoice number as the gazette prints it (2026-11-17).
+    // Staff typed "PLTV-00170" for 26OCT_PLTV_00170, and IRD matches on it.
+    // Also before a number is reserved.
+    if (inputVat > 0 && grnSeries === 'V' && body.invoiceNoAsPrinted !== true) {
+      const issue = supplierInvoiceNoIssue(supplierInvoiceNo, supplierInvoiceDate)
+      if (issue) return NextResponse.json({ error: `Supplier invoice no. "${String(supplierInvoiceNo).trim()}": ${issue}`, code: 'INVOICE_NO_FORMAT' }, { status: 400 })
     }
 
     // Reserve the next number in THIS series (atomic; supabase-grn-series.sql)
@@ -486,8 +495,12 @@ export async function POST(req: NextRequest) {
     if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
 
     const { data: grn } = await admin.from('grns')
-      .select('id, grn_number, supplier_id, net_cost, input_vat, doc_net, doc_vat, tax_invoice_confirmed, received_at, vat_claim_period').eq('id', grnId).eq('vendor_id', vendor.id).single()
+      .select('id, grn_number, grn_series, supplier_id, supplier_invoice_no, net_cost, input_vat, doc_net, doc_vat, tax_invoice_confirmed, received_at, vat_claim_period').eq('id', grnId).eq('vendor_id', vendor.id).single()
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
+    if (Number(grn.input_vat) > 0 && grn.grn_series === 'V' && body.invoiceNoAsPrinted !== true) {
+      const issue = supplierInvoiceNoIssue(supplierInvoiceNo, supplierInvoiceDate)
+      if (issue) return NextResponse.json({ error: `Supplier invoice no. "${String(supplierInvoiceNo).trim()}": ${issue}`, code: 'INVOICE_NO_FORMAT' }, { status: 400 })
+    }
     {
       const n = docNet !== undefined ? docNet : grn.doc_net
       const v = docVat !== undefined ? docVat : grn.doc_vat
@@ -519,6 +532,22 @@ export async function POST(req: NextRequest) {
 
     const { error: upErr } = await admin.from('grns').update(patch).eq('id', grnId).eq('vendor_id', vendor.id)
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 })
+
+    // A corrected invoice number follows into the payable made from this GRN
+    // and into the supplier credit notes that quote it — Schedule 04 reads the
+    // credit note's own copy of the original invoice number.
+    const oldNo = String(grn.supplier_invoice_no || '').trim()
+    const newNo = patch.supplier_invoice_no
+    if (oldNo && newNo && oldNo !== newNo) {
+      const { data: bills } = await admin.from('supplier_invoices').select('id')
+        .eq('vendor_id', vendor.id).eq('grn_id', grnId)
+      const billIds = (bills || []).map((b: any) => b.id)
+      if (billIds.length > 0) {
+        await admin.from('supplier_invoices').update({ invoice_no: newNo }).in('id', billIds).eq('invoice_no', oldNo)
+        await admin.from('supplier_credit_notes').update({ invoice_no: newNo })
+          .eq('vendor_id', vendor.id).in('supplier_invoice_id', billIds).eq('invoice_no', oldNo)
+      }
+    }
 
     // Carry the TIN back to the supplier record so the next GRN inherits it
     // instead of asking the operator for the same number again.

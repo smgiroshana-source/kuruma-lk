@@ -2,6 +2,7 @@
 import React from 'react'
 import { colomboToday } from '@/lib/dates'
 import { printedFigureWarnings, bookVatRate } from '@/lib/money2'
+import { supplierInvoiceNoIssue, expectedSerialPrefix } from '@/lib/gazetteSerial'
 import SupplierForm from './SupplierForm'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import StockTransfer from '../_shared/StockTransfer'
@@ -182,7 +183,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [vatRate, setVatRate] = useState(18)
   const supplierVatRate = (supplierId: string) =>
     suppliers.find((x: any) => x.id === supplierId)?.vat_registered ? vatRate : 0
-  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false, docNet: '', docVat: '' })
+  const [grnForm, setGrnForm] = useState({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false, docNet: '', docVat: '', invoiceNoAsPrinted: false })
   // The delivery paperwork (invoice no/date, notes) is folded away: the work at
   // a receiving door is the ITEMS, and the form was pushing them below the fold.
   const [grnPaperOpen, setGrnPaperOpen] = useState(false)
@@ -203,7 +204,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   const [grnSupplierEditId, setGrnSupplierEditId] = useState<string | null>(null)
   // Filling in Schedule 02 details on an already-posted GRN
   const [fixInvoiceGrn, setFixInvoiceGrn] = useState<any>(null)
-  const [fixInvoiceForm, setFixInvoiceForm] = useState({ supplierInvoiceNo: '', supplierInvoiceDate: '', supplierTin: '', taxInvoiceConfirmed: false, docNet: '', docVat: '' })
+  const [fixInvoiceForm, setFixInvoiceForm] = useState({ supplierInvoiceNo: '', supplierInvoiceDate: '', supplierTin: '', taxInvoiceConfirmed: false, docNet: '', docVat: '', invoiceNoAsPrinted: false })
   const [fixInvoiceSaving, setFixInvoiceSaving] = useState(false)
   // Supplier management
   const [supplierFormOpen, setSupplierFormOpen] = useState(false)
@@ -249,9 +250,25 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
     setGrnListLoading(false)
   }
 
+  // The supplier's tax invoice number in the gazette format (src/lib/gazetteSerial.ts) —
+  // only for a VAT-registered local supplier with VAT on the lines (the V series),
+  // the same condition the server checks.
+  function grnInvoiceNoIssue(): string | null {
+    const sup: any = suppliers.find((x: any) => x.id === grnForm.supplierId)
+    if (!sup?.vat_registered || (sup.country || 'LK') !== 'LK') return null
+    if (!grnItems.some(i => (i.vatRate || 0) > 0)) return null
+    return supplierInvoiceNoIssue(grnForm.supplierInvoiceNo, grnForm.supplierInvoiceDate)
+  }
+
   async function createGrn(postNow = false) {
     if (grnItems.length === 0) { showToast('Add at least one item'); return }
     if (!grnForm.supplierId && !grnForm.supplierName.trim()) { showToast('⚠️ Pick the supplier first — the GRN records who the goods came from'); return }
+    // Checked before any new product is created, so a refusal leaves nothing behind
+    if (grnInvoiceNoIssue() && !grnForm.invoiceNoAsPrinted) {
+      setGrnPaperOpen(true)
+      showToast('⚠️ Check the supplier invoice number — copy it exactly as printed, or tick that the paper prints it this way')
+      return
+    }
     setGrnLoading(true)
     try {
       // Auto-create any new products from CSV rows before saving GRN
@@ -320,7 +337,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
         } else {
           showToast(`✅ ${j.grnNumber} saved as draft`)
         }
-        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false, docNet: '', docVat: '' })
+        setGrnItems([]); setGrnForm({ supplierId: '', supplierName: '', supplierInvoiceNo: '', supplierInvoiceDate: '', receivedAt: colomboToday(), notes: '', taxInvoiceConfirmed: false, docNet: '', docVat: '', invoiceNoAsPrinted: false })
         setGrnProductSearch(''); setGrnCsvPreview(null); setGrnCsvFileName('')
         fetchGrnList(); onDataChanged(); setStockMainView('history')
       } else showToast('⚠️ ' + j.error)
@@ -331,8 +348,18 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
   // Correcting the record of the SUPPLIER's document — no amount, no stock and
   // no cost layer moves, which is why this is allowed after posting when a
   // normal edit isn't.
+  // Same rule as the GRN form, for a V-series GRN with VAT (the server checks too)
+  function fixInvoiceNoIssue(): string | null {
+    if (!fixInvoiceGrn || !(Number(fixInvoiceGrn.input_vat) > 0) || !String(fixInvoiceGrn.grn_number || '').startsWith('GRN-V-')) return null
+    return supplierInvoiceNoIssue(fixInvoiceForm.supplierInvoiceNo, fixInvoiceForm.supplierInvoiceDate)
+  }
+
   async function saveInvoiceInfo() {
     if (!fixInvoiceGrn) return
+    if (fixInvoiceNoIssue() && !fixInvoiceForm.invoiceNoAsPrinted) {
+      showToast('⚠️ Check the invoice number — copy it exactly as printed, or tick that the paper prints it this way')
+      return
+    }
     setFixInvoiceSaving(true)
     try {
       const r = await fetch('/api/vendor/grns', {
@@ -992,6 +1019,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
           !String(grnSupplier?.tin || '').trim() && 'supplier TIN',
           !grnForm.taxInvoiceConfirmed        && 'confirmation',
         ].filter(Boolean) as string[]) : []
+        const grnNoIssue = grnInvoiceNoIssue()
 
         return (
           <div className="space-y-4">
@@ -1065,8 +1093,19 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                       Supplier Invoice No.{grnInputVat > 0 && <span className="text-red-500"> *</span>}
                     </label>
                     <input type="text" value={grnForm.supplierInvoiceNo} onChange={e => setGrnForm(f => ({ ...f, supplierInvoiceNo: e.target.value }))}
-                      placeholder="e.g. INV-2026-1234"
-                      className={`w-full px-3 py-2 rounded-lg border-2 text-sm outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice number') ? 'border-red-300 bg-red-50' : 'border-slate-200'}`} />
+                      placeholder={grnInputVat > 0 ? `e.g. ${expectedSerialPrefix(grnForm.supplierInvoiceDate || colomboToday()) || '26OCT'}_CODE_00123` : 'e.g. INV-1234'}
+                      className={`w-full px-3 py-2 rounded-lg border-2 text-sm font-mono outline-none focus:border-orange-400 ${grnVatGaps.includes('invoice number') ? 'border-red-300 bg-red-50' : grnNoIssue && !grnForm.invoiceNoAsPrinted ? 'border-red-400' : 'border-slate-200'}`} />
+                    {grnNoIssue ? (
+                      <div className="mt-1 space-y-1">
+                        <p className={`text-[10px] font-bold ${grnForm.invoiceNoAsPrinted ? 'text-slate-400' : 'text-red-700'}`}>⚠ {grnNoIssue}</p>
+                        <label className="flex items-start gap-1.5 text-[10px] text-slate-600 cursor-pointer">
+                          <input type="checkbox" checked={grnForm.invoiceNoAsPrinted} onChange={e => setGrnForm(f => ({ ...f, invoiceNoAsPrinted: e.target.checked }))} className="w-3.5 h-3.5 mt-px accent-amber-500 shrink-0" />
+                          <span>I checked — the paper really prints it this way</span>
+                        </label>
+                      </div>
+                    ) : grnInputVat > 0 && (
+                      <p className="text-[10px] text-slate-400 mt-1">Exactly as printed — year, month, code, number, with the _ marks.</p>
+                    )}
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">
@@ -1738,6 +1777,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                         taxInvoiceConfirmed: !!grn.tax_invoice_confirmed,
                         docNet: grn.doc_net != null ? String(grn.doc_net) : '',
                         docVat: grn.doc_vat != null ? String(grn.doc_vat) : '',
+                        invoiceNoAsPrinted: false,
                       })
                     }} className="text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 px-2.5 py-1.5 rounded-lg">
                       Add details
@@ -1757,6 +1797,7 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                         taxInvoiceConfirmed: !!grn.tax_invoice_confirmed,
                         docNet: grn.doc_net != null ? String(grn.doc_net) : '',
                         docVat: grn.doc_vat != null ? String(grn.doc_vat) : '',
+                        invoiceNoAsPrinted: false,
                       })
                     }} className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border ${grn.doc_vat == null ? 'text-amber-800 border-amber-300 bg-amber-50' : 'text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                       📄 {grn.doc_vat == null ? 'Enter printed figures' : 'Invoice details'}
@@ -2380,7 +2421,9 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
       )}
 
       {/* ── Did you pay for this now? (after posting a GRN) ── */}
-      {fixInvoiceGrn && (
+      {fixInvoiceGrn && (() => {
+        const fixNoIssue = fixInvoiceNoIssue()
+        return (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setFixInvoiceGrn(null)}>
           <div className="bg-white rounded-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-black text-slate-900">Supplier invoice details</h3>
@@ -2394,8 +2437,17 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
                 <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Invoice No.</label>
                 <input type="text" value={fixInvoiceForm.supplierInvoiceNo} autoFocus
                   onChange={e => setFixInvoiceForm(f => ({ ...f, supplierInvoiceNo: e.target.value }))}
-                  placeholder="e.g. INV-2026-1234"
-                  className="w-full px-3 py-2 rounded-lg border-2 border-slate-200 text-sm outline-none focus:border-orange-400" />
+                  placeholder={`e.g. ${expectedSerialPrefix(fixInvoiceForm.supplierInvoiceDate || colomboToday()) || '26OCT'}_CODE_00123`}
+                  className={`w-full px-3 py-2 rounded-lg border-2 text-sm font-mono outline-none focus:border-orange-400 ${fixNoIssue && !fixInvoiceForm.invoiceNoAsPrinted ? 'border-red-400' : 'border-slate-200'}`} />
+                {fixNoIssue ? (
+                  <div className="mt-1 space-y-1">
+                    <p className={`text-[10px] font-bold ${fixInvoiceForm.invoiceNoAsPrinted ? 'text-slate-400' : 'text-red-700'}`}>⚠ {fixNoIssue}</p>
+                    <label className="flex items-start gap-1.5 text-[10px] text-slate-600 cursor-pointer">
+                      <input type="checkbox" checked={fixInvoiceForm.invoiceNoAsPrinted} onChange={e => setFixInvoiceForm(f => ({ ...f, invoiceNoAsPrinted: e.target.checked }))} className="w-3.5 h-3.5 mt-px accent-amber-500 shrink-0" />
+                      <span>I checked — the paper really prints it this way</span>
+                    </label>
+                  </div>
+                ) : <p className="text-[10px] text-slate-400 mt-1">Exactly as printed — year, month, code, number, with the _ marks.</p>}
               </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Invoice Date</label>
@@ -2451,7 +2503,8 @@ export default function TabStockLkTax({ vendor, products, vendorSettings, showTo
             </div>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {newSupplierOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setNewSupplierOpen(false)}>

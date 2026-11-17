@@ -4,6 +4,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { round2, exactOr, printedFigureWarnings, printedNetIsTotal, bookVatRate } from '@/lib/money2'
 import { grnEarliestClaimMonth, grnClaimDeadline } from '@/lib/vatClaim'
+import { supplierInvoiceNoIssue } from '@/lib/gazetteSerial'
 import { frozenPeriodMessage } from '@/lib/taxRates'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,6 +149,8 @@ export async function GET(req: NextRequest) {
           return w.net || w.pair
         })(),
         disallowedVat: parseInt(g.disallowed_vat || 0),
+        // Not in the gazette format IRD matches on (src/lib/gazetteSerial.ts)
+        invoiceNoWarning: supplierInvoiceNoIssue(g.supplier_invoice_no, g.supplier_invoice_date),
         originMonth, claimPeriod, deadline,
         monthsLeft: monthsBetween(nowMonth, deadline),
       }
@@ -191,6 +194,7 @@ export async function GET(req: NextRequest) {
       figureWarning: e.doc_net != null && printedNetIsTotal(e.doc_net, vat, bookVatRate(parseInt(e.amount || 0) - parseInt(e.input_vat || 0), e.input_vat))
         ? 'The value is the bill total including VAT — enter the amount before VAT.' : null,
       disallowedVat: 0,
+      invoiceNoWarning: supplierInvoiceNoIssue(e.supplier_invoice_no, e.supplier_invoice_date),
       category: e.category,
       originMonth, claimPeriod, deadline,
       monthsLeft: monthsBetween(nowMonth, deadline),
@@ -293,6 +297,7 @@ export async function GET(req: NextRequest) {
     value: parseInt(r.total_amount || 0),
     vatAmount: exactOr(r.doc_credit_vat, r.credit_vat),
     issuedByMe: 'No',
+    _invoiceNoWarning: supplierInvoiceNoIssue(r.supplier_invoice_no, r.supplier_invoice_date),
     _ref: r.return_no,
     _party: r.supplier?.name || '',
   }))
@@ -321,6 +326,7 @@ export async function GET(req: NextRequest) {
       value: exactOr(c.doc_net, c.net_amount),
       vatAmount: exactOr(c.doc_vat, c.vat_amount),
       issuedByMe: 'No',
+      _invoiceNoWarning: supplierInvoiceNoIssue(c.invoice_no, c.invoice_date),
       _ref: c.reason,
       _party: c.supplier?.name || '',
     })

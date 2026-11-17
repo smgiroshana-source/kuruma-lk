@@ -202,6 +202,7 @@ export default function TabTax({ showToast, vendorSettings }: {
       <span className="font-mono font-bold shrink-0">{i.ref}</span>
       <span className="flex-1 truncate text-slate-500">{i.partyName || i.invoiceNo || ''}</span>
       {i.figureWarning && <span className="shrink-0 text-[10px] font-black text-red-600" title={i.figureWarning}>⚠ check value</span>}
+      {i.invoiceNoWarning && <span className="shrink-0 text-[10px] font-black text-red-600" title={i.invoiceNoWarning}>⚠ invoice no.</span>}
       <span className={`shrink-0 text-[10px] font-bold ${i.monthsLeft <= 3 ? 'text-red-600' : 'text-slate-400'}`}>
         {i.monthsLeft <= 0 ? 'EXPIRED' : `${i.monthsLeft}m left`}
       </span>
@@ -396,6 +397,21 @@ export default function TabTax({ showToast, vendorSettings }: {
               <p className="font-bold">⚠️ {bad.length} Schedule 02 line{bad.length !== 1 ? 's' : ''} where the value and the VAT don&apos;t agree — check the paper before filing:</p>
               {bad.map(i => <p key={key(i)}><span className="font-mono font-bold">{i.ref}</span> {i.partyName ? `(${i.partyName})` : ''} — {i.figureWarning}</p>)}
               <p className="text-red-600 mt-0.5">Fix a GRN from Stock → GRN History → &ldquo;Add details&rdquo;.</p>
+            </div>
+          )
+        })()}
+        {(() => {
+          // Supplier invoice numbers not in the gazette format — IRD matches on
+          // TIN + this number (staff typed "PLTV-00170" for 26OCT_PLTV_00170)
+          const s02 = localAndExpense.filter(i => i.invoiceNoWarning)
+          const s04 = (data?.schedule04Supplier || []).filter((r: any) => r._invoiceNoWarning)
+          if (s02.length + s04.length === 0) return null
+          return (
+            <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5 mb-2">
+              <p className="font-bold">⚠️ {s02.length + s04.length} supplier invoice number{s02.length + s04.length !== 1 ? 's' : ''} not in the tax-invoice format (like 26OCT_CODE_00123). IRD matches on TIN + invoice number — copy each one exactly off the paper before filing:</p>
+              {s02.map(i => <p key={key(i)}>Schedule 02 · <span className="font-mono font-bold">{i.ref}</span> {i.partyName ? `(${i.partyName})` : ''} — recorded <span className="font-mono">&ldquo;{i.invoiceNo}&rdquo;</span></p>)}
+              {s04.map((r: any, n: number) => <p key={'s04' + n}>Schedule 04 · credit note <span className="font-mono font-bold">{r.noteNo}</span> {r._party ? `(${r._party})` : ''} — against invoice <span className="font-mono">&ldquo;{r.invoiceNo}&rdquo;</span></p>)}
+              <p className="text-red-600 mt-0.5">Fix a GRN from Stock → GRN History → &ldquo;Add details&rdquo;; its payable and credit notes follow. If a supplier really prints an older style, tick &ldquo;the paper prints it this way&rdquo; there.</p>
             </div>
           )
         })()}
