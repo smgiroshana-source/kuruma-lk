@@ -1895,6 +1895,7 @@ ${(() => {
               const what = c.action === 'adjust' ? (d.kind === 'in' ? 'Cash in recorded late' : 'Cash out recorded late')
                 : c.action === 'set_opening' ? 'Opening balance changed'
                 : c.action === 'accept_variance' ? 'Difference accepted as real'
+                : c.action === 'supplier_payment_method' ? `Supplier payment${d.supplier ? ' to ' + d.supplier : ''} changed ${d.from === 'online' ? 'bank transfer' : d.from} \u2192 ${d.to === 'online' ? 'bank transfer' : d.to}`
                 : c.action
               const amt = d.amount != null ? ' Rs.' + parseInt(d.amount).toLocaleString() : ''
               const varTxt = (d.variance_before != null && d.variance_after != null)
@@ -2817,7 +2818,7 @@ ${(adjustmentsList || []).length > 0 ? (() => {
 
         {/* SUPPLIERS — WHEEL MART only */}
         {tab === 'suppliers' && isLkTax && (
-          <TabSuppliers vendor={vendor} showToast={showToast} />
+          <TabSuppliers vendor={vendor} showToast={showToast} staffRole={staffRole} />
         )}
 
         {/* SUPPLIER RETURNS — WHEEL MART only */}

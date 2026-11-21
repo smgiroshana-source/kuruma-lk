@@ -14,9 +14,9 @@ async function getVendor() {
   if (!user) return null
   const admin = createAdminClient()
   const { data: vendor } = await admin.from('vendors').select('*').eq('user_id', user.id).eq('status', 'approved').single()
-  if (vendor) return { vendor, userId: user.id, callerRole: 'owner' as string }
+  if (vendor) return { vendor, userId: user.id, email: user.email || '', callerRole: 'owner' as string }
   const { data: staffLink } = await admin.from('vendor_staff').select('*, vendor:vendors(*)').eq('user_id', user.id).eq('active', true).single()
-  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id, callerRole: (staffLink.role || 'cashier') as string }
+  if (staffLink?.vendor) return { vendor: staffLink.vendor, userId: user.id, email: user.email || '', callerRole: (staffLink.role || 'cashier') as string }
   return null
 }
 
@@ -58,6 +58,20 @@ export async function GET(req: NextRequest) {
       .eq('vendor_id', vendor.id)
       .order('payment_date', { ascending: false })
 
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ payments: payments || [] })
+  }
+
+  // ── RECENT PAYMENTS TO A SUPPLIER (payments list, method correction) ────────
+  if (action === 'supplier_payments') {
+    const sid = params.get('supplier_id')
+    if (!sid || !isUUID(sid)) return NextResponse.json({ error: 'supplier_id is required' }, { status: 400 })
+    const { data: payments, error } = await admin
+      .from('supplier_payments')
+      .select('id, amount, payment_date, method, reference, notes, payment_confirm_no, created_at, supplier_invoice_id, bill:supplier_invoices(invoice_no)')
+      .eq('vendor_id', vendor.id).eq('supplier_id', sid)
+      .order('payment_date', { ascending: false }).order('created_at', { ascending: false })
+      .limit(40)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
     return NextResponse.json({ payments: payments || [] })
   }
@@ -436,6 +450,78 @@ export async function POST(req: NextRequest) {
     if (methodCanon === 'cash') await recomputeSessionForDate(admin, vendor.id, payment_date)
 
     return NextResponse.json({ ok: true, confirm_no: paymentConfirmNo, confirm_kind: isCheque ? 'cheque' : isOnline ? 'online' : null, discount_no: discountNo })
+  }
+
+  // ── CHANGE A PAYMENT'S METHOD (owner) ───────────────────────────────────────
+  // Owner, 2026-11-21: staff picked Cash for a supplier payment that went by
+  // bank. Nothing else about the payment changes — amount, date and the bills
+  // it settled stay — only how the money left. A payment made in one motion
+  // across several bills (pay_bills) is several rows; they move together.
+  // The drawer of that day is recomputed, and if that day was already closed
+  // the change is logged as a cash correction so the daily report shows it.
+  if (action === 'change_payment_method') {
+    if ((auth as any).callerRole !== 'owner') return forbidden(action, ['owner'])
+    const { payment_id, method, reference, reason } = body as { payment_id: string; method: string; reference?: string; reason?: string }
+    if (!payment_id || !isUUID(payment_id)) return NextResponse.json({ error: 'payment_id is required' }, { status: 400 })
+    const to = method === 'cheque' ? 'cheque' : method === 'online' ? 'online' : method === 'cash' ? 'cash' : null
+    if (!to) return NextResponse.json({ error: 'Method must be cash, online (bank transfer) or cheque' }, { status: 400 })
+    const why = String(reason || '').trim()
+    if (!why) return NextResponse.json({ error: 'Say why the method is being changed' }, { status: 400 })
+    if (to === 'cheque' && !String(reference || '').trim()) return NextResponse.json({ error: 'Cheque number is required for a cheque' }, { status: 400 })
+
+    const { data: pay } = await admin.from('supplier_payments')
+      .select('id, supplier_id, amount, payment_date, method, created_by, created_at, payment_confirm_no, notes, supplier:suppliers(name)')
+      .eq('id', payment_id).eq('vendor_id', vendor.id).maybeSingle()
+    if (!pay) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+    const from = String(pay.method)
+    if (from === to) return NextResponse.json({ error: `This payment is already recorded as ${to}` }, { status: 400 })
+
+    // The rest of the same payment: same supplier, day, method and person,
+    // saved within a minute of it (pay_bills writes one row per bill).
+    const t0 = new Date(pay.created_at).getTime()
+    const { data: near } = await admin.from('supplier_payments')
+      .select('id, amount, created_at, notes')
+      .eq('vendor_id', vendor.id).eq('supplier_id', pay.supplier_id).eq('payment_date', pay.payment_date)
+      .eq('method', from).eq('created_by', pay.created_by)
+    const rows = (near || []).filter((r: any) => Math.abs(new Date(r.created_at).getTime() - t0) <= 60_000)
+    const total = rows.reduce((s: number, r: any) => s + Number(r.amount || 0), 0)
+
+    const confirmNo = to === 'cash' ? null : (from !== 'cash' && pay.payment_confirm_no) ? pay.payment_confirm_no : String(Math.floor(10000000 + Math.random() * 90000000))
+    const label = (m: string) => m === 'online' ? 'bank transfer' : m
+    const stamp = `[${new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Colombo' })} owner changed ${label(from)} → ${label(to)}: ${why}]`
+    for (const r of rows as any[]) {
+      const { error } = await admin.from('supplier_payments').update({
+        method: to,
+        payment_confirm_no: confirmNo,
+        reference: to === 'cash' ? null : (String(reference || '').trim() || null),
+        notes: [String(r.notes || '').trim(), stamp].filter(Boolean).join(' '),
+      }).eq('id', r.id).eq('vendor_id', vendor.id)
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    // The drawer of that day: cash in or out of it changed
+    let drawer: any = null
+    if (from === 'cash' || to === 'cash') {
+      const { data: before } = await admin.from('cash_sessions').select('id, variance, closing_balance')
+        .eq('vendor_id', vendor.id).eq('session_date', pay.payment_date).maybeSingle()
+      drawer = await recomputeSessionForDate(admin, vendor.id, pay.payment_date)
+      if (before && before.closing_balance != null) {
+        await admin.from('cash_corrections').insert({
+          vendor_id: vendor.id, session_id: before.id, session_date: pay.payment_date,
+          actor: (auth as any).email || userId, action: 'supplier_payment_method',
+          detail: {
+            amount: total, from, to, supplier: (pay as any).supplier?.name || null, note: why,
+            variance_before: before.variance ?? null, variance_after: drawer?.variance ?? null,
+          },
+        }).then(() => {}, () => {})
+      }
+    }
+
+    return NextResponse.json({
+      ok: true, changed: rows.length, amount: total, from, to,
+      confirm_no: confirmNo, payment_date: pay.payment_date,
+      variance_after: drawer?.variance ?? null,
+    })
   }
 
   // ── DELETE INVOICE ───────────────────────────────────────────────────────────

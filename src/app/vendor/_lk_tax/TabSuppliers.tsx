@@ -2,10 +2,12 @@
 import { colomboToday } from '@/lib/dates'
 import SupplierForm from './SupplierForm'
 import { useState, useEffect } from 'react'
+import SupplierPaymentsList from './SupplierPaymentsList'
 
 type Props = {
   vendor: any
   showToast: (msg: string) => void
+  staffRole?: string
 }
 
 function formatRs(amount: number): string {
@@ -81,7 +83,7 @@ const BLANK_PAYMENT = {
   shortReason: '' as '' | 'later' | 'credit_note',
 }
 
-export default function TabSuppliers({ vendor, showToast }: Props) {
+export default function TabSuppliers({ vendor, showToast, staffRole }: Props) {
   // ── view state ────────────────────────────────────────────────────────────
   const [view, setView] = useState<'list' | 'invoices'>('list')
   const [selectedSupplier, setSelectedSupplier] = useState<any | null>(null)
@@ -447,6 +449,9 @@ export default function TabSuppliers({ vendor, showToast }: Props) {
           hasUnpaid={hasUnpaid}
           aging={aging}
         />
+      )}
+      {view !== 'list' && selectedSupplier && (
+        <SupplierPaymentsList supplierId={selectedSupplier.id} isOwner={(staffRole || 'owner') === 'owner'} showToast={showToast} />
       )}
 
       {/* ── ADD SUPPLIER MODAL ─────────────────────────────────────────────── */}
