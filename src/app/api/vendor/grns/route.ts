@@ -5,7 +5,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { adjustProductQuantity } from '@/lib/stock'
 import { applySupplierAdvance } from '@/lib/supplierAdvance'
-import { round2, printedNetIsTotal, bookVatRate } from '@/lib/money2'
+import { round2, printedNetIsTotal, bookVatRate, supplierBillAmount } from '@/lib/money2'
 import { supplierInvoiceNoIssue } from '@/lib/gazetteSerial'
 import { refreshProductCost } from '@/lib/fifoCost'
 import { frozenPeriodMessage, colomboMonthOf } from '@/lib/taxRates'
@@ -345,7 +345,8 @@ export async function POST(req: NextRequest) {
         invoice_no: grn.supplier_invoice_no || grn.grn_number,
         invoice_date: baseDate,
         due_date: due.toLocaleDateString('en-CA'),
-        amount: parseInt(grn.total_cost),
+        // What their invoice says, not our whole-rupee total (src/lib/money2.ts)
+        amount: supplierBillAmount(grn.total_cost, grn.doc_net, grn.doc_vat, items.reduce((s: number, i: any) => s + (Number(i.quantity) || 0), 0)),
         amount_paid: 0,
         status: 'unpaid',
         notes: `Auto from ${grn.grn_number}`,
@@ -495,7 +496,7 @@ export async function POST(req: NextRequest) {
     if (!grnId) return NextResponse.json({ error: 'grnId required' }, { status: 400 })
 
     const { data: grn } = await admin.from('grns')
-      .select('id, grn_number, grn_series, supplier_id, supplier_invoice_no, net_cost, input_vat, doc_net, doc_vat, tax_invoice_confirmed, received_at, vat_claim_period').eq('id', grnId).eq('vendor_id', vendor.id).single()
+      .select('id, grn_number, grn_series, supplier_id, supplier_invoice_no, net_cost, input_vat, total_cost, doc_net, doc_vat, tax_invoice_confirmed, received_at, vat_claim_period').eq('id', grnId).eq('vendor_id', vendor.id).single()
     if (!grn) return NextResponse.json({ error: 'GRN not found' }, { status: 404 })
     if (Number(grn.input_vat) > 0 && grn.grn_series === 'V' && body.invoiceNoAsPrinted !== true) {
       const issue = supplierInvoiceNoIssue(supplierInvoiceNo, supplierInvoiceDate)
@@ -546,6 +547,25 @@ export async function POST(req: NextRequest) {
         await admin.from('supplier_invoices').update({ invoice_no: newNo }).in('id', billIds).eq('invoice_no', oldNo)
         await admin.from('supplier_credit_notes').update({ invoice_no: newNo })
           .eq('vendor_id', vendor.id).in('supplier_invoice_id', billIds).eq('invoice_no', oldNo)
+      }
+    }
+
+    // The bill follows the printed total while nothing has touched it yet —
+    // once a payment or credit is on it, its amount is left alone (owner, 2026-11-21).
+    {
+      const n = patch.doc_net !== undefined ? patch.doc_net : grn.doc_net
+      const v = patch.doc_vat !== undefined ? patch.doc_vat : grn.doc_vat
+      const { data: lines } = await admin.from('grn_items').select('quantity').eq('grn_id', grnId)
+      const units = (lines || []).reduce((s: number, l: any) => s + (Number(l.quantity) || 0), 0)
+      const want = supplierBillAmount(grn.total_cost, n, v, units)
+      const { data: bills } = await admin.from('supplier_invoices')
+        .select('id, amount, amount_paid, credit_total, cn_expected_amount')
+        .eq('vendor_id', vendor.id).eq('grn_id', grnId)
+      for (const b of (bills || []) as any[]) {
+        const untouched = !(Number(b.amount_paid) > 0) && !(Number(b.credit_total) > 0) && !(Number(b.cn_expected_amount) > 0)
+        if (untouched && Number(b.amount) !== want) {
+          await admin.from('supplier_invoices').update({ amount: want }).eq('id', b.id).eq('vendor_id', vendor.id)
+        }
       }
     }
 

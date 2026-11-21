@@ -31,6 +31,24 @@ const num = (x: unknown): number | null =>
   x === null || x === undefined || x === '' || !Number.isFinite(Number(x)) ? null : Number(x)
 const rs2 = (x: number) => 'Rs.' + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+/**
+ * What the supplier billed, to the rupee: the printed net + VAT when both were
+ * copied off the tax invoice, else our book total (owner, 2026-11-21).
+ * Our unit costs are whole rupees and the supplier's carry cents, so the book
+ * total drifts a few rupees from the paper — GRN-V-00019: 4 × 32,882 booked
+ * against 4 × 32,881.36 printed, a bill of Rs.155,203 for an invoice of
+ * Rs.155,200, leaving Rs.3 open after paying in full. A printed total further
+ * from the book than rounding explains (50 cents a unit + VAT) is a typo, not
+ * rounding — then the book total stands.
+ */
+export function supplierBillAmount(bookTotal: unknown, docNet: unknown, docVat: unknown, units: number): number {
+  const book = Math.round(Number(bookTotal) || 0)
+  const n = num(docNet), v = num(docVat)
+  if (n == null || v == null || n <= 0) return book
+  const printed = Math.round(n + v)
+  return Math.abs(printed - book) <= 1 + units * 0.6 ? printed : book
+}
+
 /** The VAT rate the book lines actually carry (mixed 18% / 0% lines give less than 18). */
 export function bookVatRate(bookNet: unknown, bookVat: unknown): number {
   const n = Number(bookNet) || 0, v = Number(bookVat) || 0
